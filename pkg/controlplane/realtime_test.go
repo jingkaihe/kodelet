@@ -28,14 +28,26 @@ import (
 )
 
 type testRealtimeSession struct {
-	events  chan llmtypes.RealtimeEvent
-	closed  atomic.Bool
-	results chan string
+	events       chan llmtypes.RealtimeEvent
+	closed       atomic.Bool
+	results      chan string
+	updateFunc   func(context.Context, string, llmtypes.RealtimeUpdate) error
+	completeFunc func(context.Context, string, string) error
 }
 
 func (s *testRealtimeSession) Answer() string                        { return "answer" }
 func (s *testRealtimeSession) Events() <-chan llmtypes.RealtimeEvent { return s.events }
-func (s *testRealtimeSession) Complete(_ context.Context, _, text string) error {
+func (s *testRealtimeSession) Update(ctx context.Context, handoffID string, update llmtypes.RealtimeUpdate) error {
+	if s.updateFunc != nil {
+		return s.updateFunc(ctx, handoffID, update)
+	}
+	return nil
+}
+
+func (s *testRealtimeSession) Complete(ctx context.Context, handoffID, text string) error {
+	if s.completeFunc != nil {
+		return s.completeFunc(ctx, handoffID, text)
+	}
 	s.results <- text
 	return nil
 }
@@ -558,6 +570,7 @@ func TestRealtimeInstructions(t *testing.T) {
 		"Immediately relay follow-ups, corrections, constraints, and new context about ongoing work",
 		"If the user asks for work next, later, or after the current task, delegate it now with the requested order intact so it is queued, not merely promised.",
 		"briefly summarize the key takeaway, status, or next step",
+		"Treat them as progress, not new user requests or proof of completion.",
 		"do not read them aloud or repeat code, diffs, tables, or other detailed output unless asked",
 		"Never claim work completed or succeeded until its result confirms it.",
 	} {

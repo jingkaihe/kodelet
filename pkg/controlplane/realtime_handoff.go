@@ -123,6 +123,7 @@ func (c *realtimeCall) dispatch(ctx context.Context, event llmtypes.RealtimeEven
 					run.voiceSteers = make(map[string]*voiceSteerOutcome)
 				}
 				run.voiceSteers[sourceID] = outcome
+				c.progressBridge().bind(run.turnID, event.HandoffID, true)
 			}
 			s.activeChatsMu.Unlock()
 			if err != nil {
@@ -140,6 +141,7 @@ func (c *realtimeCall) dispatch(ctx context.Context, event llmtypes.RealtimeEven
 			if !outcome.pending {
 				return s.turns.get(ctx, req.ConversationID, run.turnID)
 			}
+			c.progressBridge().unbind(run.turnID, event.HandoffID)
 			// It was definitely never consumed. Re-enter admission; another
 			// typed/voice turn may have won while the previous turn was finishing.
 			continue
@@ -165,6 +167,7 @@ func (c *realtimeCall) dispatch(ctx context.Context, event llmtypes.RealtimeEven
 		if !admitted {
 			return receipt, nil
 		}
+		c.progressBridge().bind(req.TurnID, event.HandoffID, false)
 		c.emit(realtimeEvent{Kind: "agent-started", TurnID: req.TurnID})
 		// Approval ownership uses the real browser lifetime/capabilities; coding
 		// execution is detached inside runAdmittedChat, just like normal chat.
@@ -233,7 +236,7 @@ func (c *realtimeCall) waitForOwnerWatch(ctx context.Context) *subscriberEventSi
 
 func (c *realtimeCall) complete(handoffID, result, turnID string) {
 	c.emit(realtimeEvent{Kind: "agent-completed", TurnID: turnID})
-	c.reply(handoffID, result)
+	c.progressBridge().complete(handoffID, result, turnID)
 }
 
 // refuse answers a handoff without starting work. Warnings leave the call open
@@ -250,19 +253,5 @@ func (c *realtimeCall) refuse(handoffID, warning, reply string) {
 // reply delivers a handoff result to the voice model. Only a failed delivery
 // ends the call, since the provider can no longer be kept consistent.
 func (c *realtimeCall) reply(handoffID, result string) {
-	if c.ctx.Err() != nil {
-		return
-	}
-	// Keep the sideband payload bounded, without affecting the durable coding
-	// result or its ordinary transcript rendering.
-	runes := []rune(result)
-	if len(runes) > 16000 {
-		result = string(runes[:16000]) + "\n[See the conversation for the full result.]"
-	}
-	ctx, cancel := context.WithTimeout(c.ctx, 15*time.Second)
-	defer cancel()
-	if err := c.session.Complete(ctx, handoffID, result); err != nil {
-		c.emit(realtimeEvent{Kind: "error", Text: "The coding result is in the conversation, but the spoken reply could not be delivered."})
-		c.close()
-	}
+	c.progressBridge().complete(handoffID, result, "")
 }

@@ -547,8 +547,11 @@ func (s *Server) runAdmittedChat(requestCtx context.Context, req chat.ChatReques
 	}
 
 	broadcastingSink := &broadcastingEventSink{
-		primary:        sink,
-		broadcast:      s.broadcastChatEvent,
+		primary: sink,
+		broadcast: func(id string, event chat.ChatEvent) {
+			s.broadcastRealtimeProgress(id, req.TurnID, event)
+			s.broadcastChatEvent(id, event)
+		},
 		conversationID: conversationID,
 	}
 

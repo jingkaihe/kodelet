@@ -17,11 +17,21 @@ type RealtimeOffer struct {
 	Voice        string // Empty uses the provider's configured default.
 }
 
+// RealtimeUpdate contains incremental assistant text from a delegated task.
+// BlockEnd ends an assistant text block, not the delegated turn.
+type RealtimeUpdate struct {
+	Text     string
+	BlockEnd bool
+}
+
 // RealtimeSession is independent of coding turns. Close ends voice, not work.
 // Open's context owns the session lifetime; Events closes when the session ends.
+// The host serializes Update and Complete calls, batching deltas or block ends.
 type RealtimeSession interface {
 	Answer() string
 	Events() <-chan RealtimeEvent
+	Update(ctx context.Context, handoffID string, update RealtimeUpdate) error
+	// Complete with an empty result resolves a secondary handoff without speech.
 	Complete(ctx context.Context, handoffID, result string) error
 	Close() error
 }

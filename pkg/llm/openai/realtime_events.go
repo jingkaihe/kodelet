@@ -92,15 +92,18 @@ func (s *realtimeSession) handleLocked(event realtimeWireEvent) ([]llmtypes.Real
 		// VAD creates the next response; do not race it with response.create.
 	case "response.created":
 		s.responseActive = true
-		// Only an acknowledged result is known to be in the new response's
-		// context. A result sent while response.created was in flight still
+		// Only acknowledged progress/results are known to be in the new response's
+		// context. Output sent while response.created was in flight still
 		// needs a later response; do not silently lose it in that race.
-		if s.pendingOutput == "" {
+		if s.pendingOutput == "" && s.pendingItem == "" {
 			s.responsePending = false
 		}
 	case "conversation.item.created", "conversation.item.added":
 		if event.Item.Type == "function_call_output" && event.Item.CallID == s.pendingOutput {
 			s.pendingOutput = ""
+		}
+		if event.Item.ID == s.pendingItem {
+			s.pendingItem = ""
 		}
 	case "response.done":
 		s.responseActive = false

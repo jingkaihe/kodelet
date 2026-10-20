@@ -64,6 +64,7 @@ type realtimeCall struct {
 	cancel                context.CancelFunc
 	mu                    sync.Mutex
 	session               llmtypes.RealtimeSession
+	progress              *realtimeProgress
 	attached              bool
 	closed                bool
 	// Buffer the POST-to-GET gap. A second attachment is deliberately refused;
