@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.8.9-beta
+
+Added live spoken progress updates for delegated work in Web UI voice conversations with OpenAI API and experimental Codex profiles. Updates arrive while the agent works, including when voice steers a task started by typing, with completion handling that avoids repeating results already delivered as progress or through another follow-up.
+
+Broadened live voice delegation guidance to cover general-purpose tasks such as research, browsing, documents, and apps, not just coding. Follow-ups, corrections, and requests to do work next are relayed immediately with the user's constraints and requested order rather than merely acknowledged. Spoken responses favor concise summaries over reading detailed output aloud.
+
+Fixed optional progress-update delivery failures ending otherwise usable voice calls. Slow progress delivery does not block agent execution, and queued updates are bounded so completion is not stuck behind a backlog; failure to deliver a final result still ends the call, with the agent's output preserved in the conversation.
+
+Updated Vite to 8.3.4 and refreshed frontend dependencies.
+
 ## 0.8.8-beta
 
 Added opt-in Web UI live voice conversations via the waveform button, `/talk`, or `Alt/⌥+Shift+R`, with voice selection, spoken replies, and saved captions. Spoken requests can start or steer coding work using the conversation's profile; work continues after hangup. `/voice` remains dictation.
