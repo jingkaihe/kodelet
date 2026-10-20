@@ -556,6 +556,7 @@ func TestRealtimeInstructions(t *testing.T) {
 		"let the agent determine feasibility and safety",
 		"ordinary approval policy",
 		"Immediately relay follow-ups, corrections, constraints, and new context about ongoing work",
+		"If the user asks for work next, later, or after the current task, delegate it now with the requested order intact so it is queued, not merely promised.",
 		"briefly summarize the key takeaway, status, or next step",
 		"do not read them aloud or repeat code, diffs, tables, or other detailed output unless asked",
 		"Never claim work completed or succeeded until its result confirms it.",
