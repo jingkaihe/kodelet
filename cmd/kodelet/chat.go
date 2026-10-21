@@ -111,6 +111,10 @@ type configuredChatRunner struct {
 	environmentProfile string
 }
 
+func (r *configuredChatRunner) LoadConversation(ctx context.Context, conversationID string) (chatpkg.ConversationHistory, error) {
+	return r.LoadConversationTranscript(ctx, conversationID)
+}
+
 func (r *configuredChatRunner) discoveryTarget(ctx context.Context, target chatpkg.WorkspaceTarget) (chatpkg.WorkspaceTarget, error) {
 	target.Options = r.options.Restrictions()
 	if target.ConversationID == "" {

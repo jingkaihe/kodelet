@@ -65,20 +65,29 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 	entries := make([]chatEntry, 0)
 	toolIndex := map[string][2]int{}
 
-	ensureAssistant := func() int {
+	ensureAssistant := func(anchor *int) int {
 		if len(entries) == 0 || entries[len(entries)-1].kind != entryAssistant ||
+			entries[len(entries)-1].realtimeID != "" ||
+			(anchor != nil && (entries[len(entries)-1].codingAnchor == nil || *entries[len(entries)-1].codingAnchor != *anchor)) ||
 			(len(entries[len(entries)-1].blocks) > 0 &&
 				(entries[len(entries)-1].blocks[0].kind == blockCompaction || entries[len(entries)-1].blocks[0].kind == blockResourcesReloaded)) {
-			entries = append(entries, chatEntry{kind: entryAssistant})
+			entries = append(entries, chatEntry{kind: entryAssistant, codingAnchor: anchor})
 		}
 		return len(entries) - 1
 	}
 
 	for _, msg := range messages {
+		if msg.ID != "" && msg.Kind == "text" {
+			entry := audioTranscriptEntry(chat.RealtimeEvent{ID: msg.ID, Role: msg.Role, Text: msg.Content, Anchor: msg.Anchor})
+			entries = append(entries, entry)
+			continue
+		}
 		switch msg.Kind {
 		case "resources-reloaded", "resource-reload-refused":
 			if msg.ResourceReloadID != "" && !hasResourceReloadMarker(entries, msg.ResourceReloadID) {
-				entries = append(entries, resourceReloadEntry(msg.ResourceReloadID, msg.Content, msg.Kind == "resource-reload-refused"))
+				entry := resourceReloadEntry(msg.ResourceReloadID, msg.Content, msg.Kind == "resource-reload-refused")
+				entry.codingAnchor = msg.Anchor
+				entries = append(entries, entry)
 			}
 		case "context-compacted":
 			if msg.Compaction != nil && !hasCompactionMarker(entries, msg.Compaction.ID) {
@@ -87,13 +96,13 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 		case "text":
 			switch msg.Role {
 			case "user":
-				entries = append(entries, chatEntry{kind: entryUser, content: strings.TrimSpace(msg.Content)})
+				entries = append(entries, chatEntry{kind: entryUser, content: strings.TrimSpace(msg.Content), codingAnchor: msg.Anchor})
 			case "assistant":
 				text := strings.TrimSpace(msg.Content)
 				if text == "" {
 					continue
 				}
-				idx := ensureAssistant()
+				idx := ensureAssistant(msg.Anchor)
 				// History contains complete text blocks, not streaming deltas.
 				entries[idx].blocks = append(entries[idx].blocks, assistantBlock{kind: blockText, text: text})
 				if entries[idx].content != "" {
@@ -102,16 +111,15 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 				entries[idx].content += text
 			}
 		case "thinking":
-			idx := ensureAssistant()
+			idx := ensureAssistant(msg.Anchor)
 			blockIdx := appendThoughtBlock(&entries[idx])
 			entries[idx].blocks[blockIdx].thoughts = append(entries[idx].blocks[blockIdx].thoughts, thoughtBlock{text: msg.Content, done: true})
 		case "tool-use":
-			idx := ensureAssistant()
+			idx := ensureAssistant(msg.Anchor)
 			blockIdx := appendToolBlock(&entries[idx])
 			toolIndex[msg.ToolCallID] = [2]int{idx, len(entries[idx].blocks[blockIdx].tools)}
 			entries[idx].blocks[blockIdx].tools = append(entries[idx].blocks[blockIdx].tools, toolCall{id: msg.ToolCallID, name: msg.ToolName, input: msg.Input})
 		case "tool-result":
-			idx := ensureAssistant()
 			structuredResult, hasStructuredResult := parseStructuredToolResult(msg.Content)
 			resultText := msg.Content
 			failed := false
@@ -137,6 +145,7 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 					}
 				}
 			} else {
+				idx := ensureAssistant(msg.Anchor)
 				blockIdx := appendToolBlock(&entries[idx])
 				entries[idx].blocks[blockIdx].tools = append(entries[idx].blocks[blockIdx].tools, toolCall{id: msg.ToolCallID, name: msg.ToolName, result: resultText, done: true, failed: failed, structured: structuredResult})
 			}

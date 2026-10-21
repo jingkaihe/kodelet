@@ -123,7 +123,9 @@ type chatEntry struct {
 
 	// Voice updates replace one utterance without sharing the coding reply.
 	realtimeID     string
-	realtimeAnchor int // Number of coding entries preceding its first appearance.
+	realtimeAnchor int  // Server-owned coding-message position for this utterance.
+	realtimeLive   bool // Only live captions override a racing history snapshot.
+	codingAnchor   *int
 }
 
 type historySearchState struct {

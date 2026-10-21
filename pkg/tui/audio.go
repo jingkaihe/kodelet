@@ -256,59 +256,87 @@ func (m *model) updateAudio(msg tuiAudioMsg) tea.Cmd {
 	return nil
 }
 
-func (m *model) updateAudioTranscript(event chat.RealtimeEvent) tea.Cmd {
-	if event.ID == "" || (event.Role != "user" && event.Role != "assistant") {
-		return nil
-	}
+func audioTranscriptEntry(event chat.RealtimeEvent) chatEntry {
 	text := strings.TrimSpace(sanitizeExtensionTranscriptText(event.Text))
-	if text == "" {
-		return nil
-	}
 	entry := chatEntry{kind: entryUser, content: text, realtimeID: event.ID}
+	if event.Anchor != nil {
+		entry.realtimeAnchor = *event.Anchor
+	}
 	if event.Role == "assistant" {
 		entry.kind = entryAssistant
 		entry.blocks = []assistantBlock{{kind: blockText, text: text}}
 	}
-	index := slices.IndexFunc(m.entries, func(existing chatEntry) bool { return existing.realtimeID == event.ID })
-	if index >= 0 {
-		previous := m.entries[index]
-		if previous.kind != entry.kind || previous.content == text {
-			return nil
-		}
-		entry.realtimeAnchor = previous.realtimeAnchor
-		m.entries[index] = entry
-	} else {
+	return entry
+}
+
+func (m *model) updateAudioTranscript(event chat.RealtimeEvent) tea.Cmd {
+	if event.ID == "" || (event.Role != "user" && event.Role != "assistant") {
+		return nil
+	}
+	entry := audioTranscriptEntry(event)
+	entry.realtimeLive = true
+	if event.Anchor == nil {
+		// Older servers without positions can still append live captions.
 		for _, existing := range m.entries {
 			if existing.realtimeID == "" {
 				entry.realtimeAnchor++
 			}
 		}
-		m.entries = append(m.entries, entry)
+	}
+	before := len(m.entries)
+	var index int
+	m.entries, index = upsertAudioTranscript(m.entries, entry)
+	if len(m.entries) > before && m.hasActiveAssistantEntry && m.activeAssistantEntry >= index {
+		m.activeAssistantEntry++
 	}
 	// Do not replace the active coding reply: its text/tools can stream while
 	// either speaker is talking. Respect scrolling and the usual render debounce.
 	return m.queueTranscriptRefresh(m.autoFollow)
 }
 
-// The stream-format history contains coding entries, not the server's separate
-// voice overlay. Keep live utterances across coding-history reconciliation,
-// including after the call ends, at their original conversation-local positions.
+// Reapply only locally received captions over a racing GET, as the Web UI does.
+// Restored entries alone must not overwrite newer persisted text from the server.
 func mergeAudioTranscript(history, current []chatEntry) []chatEntry {
-	var result []chatEntry
-	next := 0
+	result := slices.Clone(history)
 	for _, entry := range current {
-		if entry.realtimeID == "" {
-			continue
+		if entry.realtimeLive {
+			result, _ = upsertAudioTranscript(result, entry)
 		}
-		end := min(len(history), max(next, entry.realtimeAnchor))
-		result = append(result, history[next:end]...)
-		result = append(result, entry)
-		next = end
 	}
-	if result == nil {
-		return history
+	return result
+}
+
+func upsertAudioTranscript(entries []chatEntry, entry chatEntry) ([]chatEntry, int) {
+	index := slices.IndexFunc(entries, func(existing chatEntry) bool { return existing.realtimeID == entry.realtimeID })
+	if index >= 0 {
+		if entries[index].kind == entry.kind {
+			entry.realtimeAnchor = entries[index].realtimeAnchor
+			entries[index] = entry
+		}
+		return entries, index
 	}
-	return append(result, history[next:]...)
+	position := 0
+	for index, existing := range entries {
+		if existing.realtimeID != "" {
+			if existing.realtimeAnchor <= entry.realtimeAnchor {
+				continue
+			}
+		} else {
+			if existing.kind == entryInfo || (existing.codingAnchor == nil && len(existing.blocks) > 0 &&
+				(existing.blocks[0].kind == blockCompaction || existing.blocks[0].kind == blockResourcesReloaded)) {
+				continue
+			}
+			if existing.codingAnchor != nil {
+				position = *existing.codingAnchor
+			}
+			if position < entry.realtimeAnchor {
+				position++
+				continue
+			}
+		}
+		return slices.Insert(entries, index, entry), index
+	}
+	return append(entries, entry), len(entries)
 }
 
 func (m model) audioHeight() int {

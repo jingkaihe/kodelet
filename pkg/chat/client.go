@@ -586,6 +586,16 @@ func (r *Client) conversationAPIRequest(ctx context.Context, method string, path
 
 // LoadConversation returns normalized history from the control plane.
 func (r *Client) LoadConversation(ctx context.Context, conversationID string) (ConversationHistory, error) {
+	return r.loadConversation(ctx, conversationID, "stream")
+}
+
+// LoadConversationTranscript loads the same display history as the Web UI,
+// including persisted voice captions and server-owned delegation filtering.
+func (r *Client) LoadConversationTranscript(ctx context.Context, conversationID string) (ConversationHistory, error) {
+	return r.loadConversation(ctx, conversationID, "")
+}
+
+func (r *Client) loadConversation(ctx context.Context, conversationID, format string) (ConversationHistory, error) {
 	if r == nil || r.client == nil {
 		return ConversationHistory{}, errors.New("the chat connection is not initialized")
 	}
@@ -602,7 +612,9 @@ func (r *Client) LoadConversation(ctx context.Context, conversationID string) (C
 		return ConversationHistory{}, errors.Wrap(err, "failed to parse conversation URL")
 	}
 	query := parsedEndpoint.Query()
-	query.Set("format", "stream")
+	if format != "" {
+		query.Set("format", format)
+	}
 	parsedEndpoint.RawQuery = query.Encode()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsedEndpoint.String(), nil)
 	if err != nil {
@@ -668,11 +680,16 @@ type controlPlaneConversationResponse struct {
 }
 
 type controlPlaneConversationMessage struct {
-	Role          string                 `json:"role"`
-	Content       json.RawMessage        `json:"content"`
-	ToolCalls     []controlPlaneToolCall `json:"toolCalls"`
-	ThinkingText  string                 `json:"thinkingText"`
-	ThinkingTexts []string               `json:"thinkingTexts"`
+	ID               string                     `json:"id"`
+	Anchor           *int                       `json:"anchor"`
+	Kind             string                     `json:"kind"`
+	Compaction       *llmtypes.CompactionMarker `json:"compaction"`
+	ResourceReloadID string                     `json:"resourceReloadId"`
+	Role             string                     `json:"role"`
+	Content          json.RawMessage            `json:"content"`
+	ToolCalls        []controlPlaneToolCall     `json:"toolCalls"`
+	ThinkingText     string                     `json:"thinkingText"`
+	ThinkingTexts    []string                   `json:"thinkingTexts"`
 }
 
 type controlPlaneToolCall struct {
@@ -717,19 +734,33 @@ func normalizeControlPlaneConversationEntries(entries []conversations.Streamable
 
 func normalizeControlPlaneConversationMessages(messages []controlPlaneConversationMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
 	result := make([]conversations.StreamableMessage, 0, len(messages))
+	codingIndex := 0
 	for _, message := range messages {
 		role := strings.TrimSpace(message.Role)
 		content, err := controlPlaneMessageText(message.Content)
 		if err != nil {
 			return nil, err
 		}
+		anchor := message.Anchor
+		if message.ID == "" && message.Kind != "context-compacted" {
+			anchor = new(codingIndex)
+			codingIndex++
+		}
+		if message.Kind == "context-compacted" || message.Kind == "resources-reloaded" || message.Kind == "resource-reload-refused" {
+			result = append(result, conversations.StreamableMessage{
+				Kind: message.Kind, Role: role, Content: content, Anchor: anchor,
+				Compaction: message.Compaction, ResourceReloadID: message.ResourceReloadID,
+			})
+			continue
+		}
 		if role == "user" {
 			if strings.TrimSpace(content) != "" {
-				result = append(result, conversations.StreamableMessage{Kind: "text", Role: role, Content: content})
+				result = append(result, conversations.StreamableMessage{Kind: "text", Role: role, Content: content, ID: message.ID, Anchor: anchor})
 			}
 			continue
 		}
 
+		start := len(result)
 		thinkingTexts := message.ThinkingTexts
 		if len(thinkingTexts) == 0 && strings.TrimSpace(message.ThinkingText) != "" {
 			thinkingTexts = []string{message.ThinkingText}
@@ -766,6 +797,9 @@ func normalizeControlPlaneConversationMessages(messages []controlPlaneConversati
 		}
 		if strings.TrimSpace(content) != "" {
 			result = append(result, conversations.StreamableMessage{Kind: "text", Role: "assistant", Content: content})
+		}
+		for i := start; i < len(result); i++ {
+			result[i].ID, result[i].Anchor = message.ID, anchor
 		}
 	}
 	return result, nil

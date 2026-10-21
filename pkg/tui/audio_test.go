@@ -11,6 +11,7 @@ import (
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/jingkaihe/kodelet/pkg/audiohost"
 	"github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	transcriptiontypes "github.com/jingkaihe/kodelet/pkg/types/transcription"
 	"github.com/pkg/errors"
@@ -158,6 +159,46 @@ func TestAudioTalkStreamsBothSpeakersIntoTranscript(t *testing.T) {
 	}
 }
 
+func TestAudioTalkRestoresSavedTranscriptAndReconcilesLiveUpdates(t *testing.T) {
+	runner := &conversationSourceRunner{history: chat.ConversationHistory{
+		ID: "saved", Messages: []conversations.StreamableMessage{
+			{ID: "voice:user", Anchor: new(0), Kind: "text", Role: "user", Content: "spoken request"},
+			{Anchor: new(0), Kind: "text", Role: "assistant", Content: "coding reply one"},
+			{ID: "voice:assistant", Anchor: new(1), Kind: "text", Role: "assistant", Content: "spoken reply"},
+			{Anchor: new(1), Kind: "text", Role: "assistant", Content: "coding reply two"},
+		},
+	}}
+	m := newThemeTestModel(t, Config{ConversationID: "saved", Remote: true, Runner: runner})
+	load := loadConversationHistoryFromSource(m.ctx, m.key, "saved", runner)
+	history := load().(initialHistoryMsg)
+	updated, _ := m.Update(history)
+	*m = updated.(model)
+	require.Len(t, m.entries, 4)
+	assert.Equal(t, "voice:user", m.entries[0].realtimeID)
+	assert.Equal(t, "voice:assistant", m.entries[2].realtimeID)
+	assert.False(t, m.entries[2].realtimeLive)
+	view := xansi.Strip(m.viewport.View())
+	assert.Contains(t, view, "spoken request")
+	assert.Contains(t, view, "spoken reply")
+
+	// An old restored caption cannot overwrite a newer server checkpoint.
+	runner.history.Messages[2].Content = "saved complete reply"
+	history = load().(initialHistoryMsg)
+	m.entries = mergeAudioTranscript(history.entries, m.entries)
+	assert.Equal(t, "saved complete reply", m.entries[2].content)
+	// But live deltas must survive a snapshot taken before those deltas.
+	m.updateAudioTranscript(chat.RealtimeEvent{ID: "voice:assistant", Role: "assistant", Text: "live complete reply", Anchor: new(99)})
+	m.updateAudioTranscript(chat.RealtimeEvent{ID: "voice:next", Role: "user", Text: "follow up", Anchor: new(1)})
+	for range 2 {
+		m.entries = mergeAudioTranscript(history.entries, m.entries)
+		require.Len(t, m.entries, 5)
+		assert.Equal(t, "live complete reply", m.entries[2].content)
+		assert.Equal(t, 1, m.entries[2].realtimeAnchor, "updates never move an existing utterance")
+		assert.Equal(t, "follow up", m.entries[3].content)
+		assert.Equal(t, "coding reply two", m.entries[4].content)
+	}
+}
+
 func TestAudioTalkDoesNotReplaceTypedUserEntries(t *testing.T) {
 	m := newThemeTestModel(t, Config{})
 	m.applyChatEvent(chat.ChatEvent{Kind: "user-message", Content: "typed"})
@@ -167,6 +208,19 @@ func TestAudioTalkDoesNotReplaceTypedUserEntries(t *testing.T) {
 	require.Len(t, m.entries, 2)
 	assert.Equal(t, "expanded typed", m.entries[0].content)
 	assert.Equal(t, "spoken", m.entries[1].content)
+
+	for _, relay := range []string{"delegate request", "steer relay"} {
+		m.applyChatEvent(chat.ChatEvent{Kind: "user-message", Content: relay, DelegatedUser: true})
+		m.applyChatEvent(chat.ChatEvent{Kind: "user-message-display", Content: relay, DelegatedUser: true})
+		m.updateAudioTranscript(chat.RealtimeEvent{ID: relay, Role: "assistant", Text: "spoken reply", Anchor: new(0)})
+		m.applyChatEvent(chat.ChatEvent{Kind: "text-delta", Delta: "coding output"})
+		assert.Equal(t, "coding output", m.entries[m.activeAssistantEntry].content, "voice insertion must preserve the coding reply target")
+	}
+	transcript, _ := m.renderTranscript()
+	assert.NotContains(t, transcript, "delegate request")
+	assert.NotContains(t, transcript, "steer relay")
+	assert.Contains(t, xansi.Strip(transcript), "expanded typed")
+	assert.Contains(t, xansi.Strip(transcript), "spoken")
 }
 
 func TestAudioTalkCreatesConversationWithDraftSettings(t *testing.T) {

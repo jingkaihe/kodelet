@@ -53,6 +53,9 @@ func (m *model) applyChatEvent(event chat.ChatEvent) {
 		m.entries = append(m.entries, entry)
 		m.clearActiveAssistantEntry()
 	case "user-message-display":
+		if event.DelegatedUser {
+			return
+		}
 		content := userMessageContentText(event.Content)
 		if content == "" {
 			return
@@ -60,6 +63,12 @@ func (m *model) applyChatEvent(event chat.ChatEvent) {
 		m.replaceLastUserEntry(content)
 		return
 	case "user-message":
+		if event.DelegatedUser {
+			// The spoken user entry is projected separately, just as in the Web UI.
+			m.clearActiveAssistantEntry()
+			m.ensureAssistantEntry()
+			return
+		}
 		content := userMessageContentText(event.Content)
 		if content == "" {
 			return

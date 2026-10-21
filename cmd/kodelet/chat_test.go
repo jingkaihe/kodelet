@@ -902,6 +902,30 @@ func TestConfiguredChatRunnerAppliesPickedModelOverCLIOptions(t *testing.T) {
 	}
 }
 
+func TestConfiguredChatRunnerLoadsSavedVoiceTranscript(t *testing.T) {
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/conversations/saved", r.URL.Path)
+		assert.Empty(t, r.URL.Query().Get("format"), "use the Web UI's persisted transcript projection")
+		_, err := w.Write([]byte(`{
+			"id":"saved","messages":[
+				{"id":"voice:user","anchor":0,"role":"user","content":"spoken request"},
+				{"id":"voice:assistant","anchor":0,"role":"assistant","content":"spoken reply"}
+			]
+		}`))
+		require.NoError(t, err)
+	}))
+	defer daemon.Close()
+	client, err := chatpkg.NewClient(daemon.URL, "", "")
+	require.NoError(t, err)
+	runner := &configuredChatRunner{Client: client}
+	history, err := runner.LoadConversation(t.Context(), "saved")
+	require.NoError(t, err)
+	require.Len(t, history.Messages, 2)
+	assert.Equal(t, "voice:user", history.Messages[0].ID)
+	assert.Equal(t, "voice:assistant", history.Messages[1].ID)
+	assert.Equal(t, "spoken reply", history.Messages[1].Content)
+}
+
 func TestConfiguredChatRunnerRealtimePreservesCLIOptionsAndSavedAffinity(t *testing.T) {
 	for _, cliOptions := range []*llmtypes.ExecutionOptions{
 		nil,

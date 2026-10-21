@@ -22,6 +22,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -308,12 +309,14 @@ func TestRealtimeProjectionIdentityAndCompaction(t *testing.T) {
 		('saved','voice:user',0,'user','same words'),('saved','voice:assistant',2,'assistant','spoken answer')`)
 	require.NoError(t, err)
 	record := &conversations.GetConversationResponse{
-		Provider: "openai", Metadata: map[string]any{"delegated_user_sources": map[string]string{"0": "voice:handoff", "2": "voice:steer"}},
+		ID: "saved", Provider: "openai", Metadata: map[string]any{"delegated_user_sources": map[string]string{"0": "voice:handoff", "2": "voice:steer"}},
 		CompactionHistory: &convtypes.CompactionHistory{ActiveDisplayStart: 1, Segments: []convtypes.CompactedSegment{{RawMessages: json.RawMessage(`[
 			{"role":"user","content":"same words"},{"role":"assistant","content":"coding result"}]`)}}},
 		RawMessages: json.RawMessage(`[
 			{"role":"user","content":"bootstrap"},{"role":"user","content":"same words"},
-			{"role":"user","content":"spoken steer"},{"role":"assistant","content":"more coding text"}]`),
+			{"role":"user","content":"spoken steer"},{"role":"assistant","content":"more coding text",
+			"tool_calls":[{"id":"tool","type":"function","function":{"name":"bash","arguments":"{}"}}]}]`),
+		ToolResults: map[string]tooltypes.StructuredToolResult{"tool": {ToolName: "bash", Success: true}},
 	}
 	messages, err := s.convertConversationToWebMessages(record, "openai")
 	require.NoError(t, err)
@@ -341,6 +344,33 @@ func TestRealtimeProjectionIdentityAndCompaction(t *testing.T) {
 	withoutOverlay, err := s.projectRealtimeTranscript(t.Context(), "fork-without-overlay", messages)
 	require.NoError(t, err)
 	assert.Len(t, withoutOverlay, len(messages), "a non-Web fork must not hide input when its voice overlay is absent")
+
+	// The TUI's display loader uses this exact persisted projection, including
+	// compaction, structured tools, and identity-based relay suppression.
+	s.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+		return record, nil
+	}}
+	router := mux.NewRouter()
+	router.HandleFunc("/api/conversations/{id}", s.handleGetConversation)
+	server := httptest.NewServer(router)
+	defer server.Close()
+	client, err := chat.NewClient(server.URL, "", "")
+	require.NoError(t, err)
+	history, err := client.LoadConversationTranscript(t.Context(), "saved")
+	require.NoError(t, err)
+	require.Len(t, history.Messages, 8)
+	assert.Equal(t, "complete words", history.Messages[0].Content)
+	assert.Equal(t, "voice:user", history.Messages[0].ID)
+	assert.Equal(t, new(0), history.Messages[0].Anchor)
+	assert.Equal(t, "context-compacted", history.Messages[2].Kind)
+	assert.Equal(t, "same words", history.Messages[3].Content, "keep identical typed input, not delegated relays")
+	assert.Equal(t, "voice:assistant", history.Messages[4].ID)
+	assert.Equal(t, "spoken answer", history.Messages[4].Content)
+	assert.Equal(t, new(2), history.Messages[4].Anchor)
+	assert.Equal(t, "tool-use", history.Messages[5].Kind)
+	assert.Equal(t, "tool-result", history.Messages[6].Kind)
+	assert.Contains(t, history.Messages[6].Content, `"success":true`)
+	assert.Equal(t, "more coding text", history.Messages[7].Content)
 }
 
 func TestRealtimeUsesExistingApprovalOwner(t *testing.T) {
