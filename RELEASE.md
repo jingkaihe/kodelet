@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.8.10-beta
+
+Fixed frontend dependency audit vulnerabilities by updating Vitest and its UI and coverage packages to 4.1.12 and refreshing transitive dependencies.
+
+Updated the TypeScript SDK's transitive Hono dependency to 4.13.13, resolving a Dependabot alert for a static-file middleware bypass vulnerability (CVE-2026-111757).
+
 ## 0.8.9-beta
 
 Added live spoken progress updates for delegated work in Web UI voice conversations with OpenAI API and experimental Codex profiles. Updates arrive while the agent works, including when voice steers a task started by typing, with completion handling that avoids repeating results already delivered as progress or through another follow-up.
