@@ -120,6 +120,10 @@ type chatEntry struct {
 	title   string
 	content string
 	blocks  []assistantBlock
+
+	// Voice updates replace one utterance without sharing the coding reply.
+	realtimeID     string
+	realtimeAnchor int // Number of coding entries preceding its first appearance.
 }
 
 type historySearchState struct {

@@ -3,10 +3,12 @@ package tui
 import (
 	"context"
 	"encoding/binary"
+	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/jingkaihe/kodelet/pkg/audiohost"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -86,6 +88,85 @@ func TestAudioRecordingKeysAndCallMute(t *testing.T) {
 	assert.True(t, handled)
 	assert.ErrorIs(t, ctx.Err(), context.Canceled)
 	assert.Equal(t, "stopping", m.audio.phase)
+}
+
+func TestAudioTalkStreamsBothSpeakersIntoTranscript(t *testing.T) {
+	m := newThemeTestModel(t, Config{ExperimentalAudio: true})
+	_, cancel := context.WithCancel(m.ctx)
+	defer cancel()
+	session := &tuiAudioSession{cancel: cancel, key: m.key, mode: "talk", phase: "connected", started: time.Now()}
+	m.audio = session
+	m.textarea.SetValue("unsent draft")
+	m.autoFollow = false
+
+	// Both speakers render before Final, replacing cumulative text by utterance ID.
+	for _, event := range []chat.RealtimeEvent{
+		{Kind: "transcript", ID: "call:user", Role: "user", Text: "Check"},
+		{Kind: "transcript", ID: "call:user", Role: "user", Text: "Check the tests"},
+		{Kind: "transcript", ID: "call:assistant", Role: "assistant", Text: "I will"},
+		{Kind: "transcript", ID: "call:assistant", Role: "assistant", Text: "I will check."},
+	} {
+		m.updateAudio(tuiAudioMsg{session: session, caption: &event})
+	}
+	require.Len(t, m.entries, 2)
+	assert.Equal(t, entryUser, m.entries[0].kind)
+	assert.Equal(t, entryAssistant, m.entries[1].kind)
+	assert.True(t, m.pendingRefresh)
+	assert.False(t, m.pendingRefreshBottom, "streaming speech must respect scrollback")
+	updated, _ := m.Update(transcriptRefreshMsg{})
+	*m = updated.(model)
+	view := xansi.Strip(m.viewport.View())
+	assert.Contains(t, view, "Check the tests")
+	assert.Contains(t, view, "I will check.")
+	assert.Equal(t, 1, m.audioHeight())
+	assert.Equal(t, 1, lineCount(m.renderAudio()))
+	assert.NotContains(t, m.renderAudio(), "Check the tests")
+	assert.NotContains(t, m.renderAudio(), "I will check.")
+	assert.Equal(t, "unsent draft", m.textarea.Value())
+
+	// Delegated coding output and a second utterance must not take over each other.
+	m.applyChatEvent(chat.ChatEvent{Kind: "user-message", Content: "Run tests"})
+	m.applyChatEvent(chat.ChatEvent{Kind: "text-delta", Delta: "Tests "})
+	m.updateAudio(tuiAudioMsg{session: session, caption: &chat.RealtimeEvent{
+		Kind: "transcript", ID: "call:next", Role: "user", Text: "And lint?",
+	}})
+	m.applyChatEvent(chat.ChatEvent{Kind: "text-delta", Delta: "passed"})
+	m.updateAudio(tuiAudioMsg{session: session, caption: &chat.RealtimeEvent{
+		Kind: "transcript", ID: "call:assistant", Role: "assistant", Text: "I will check both.", Final: true,
+	}})
+	require.Len(t, m.entries, 5)
+	assert.Equal(t, "I will check both.", m.entries[1].content)
+	assert.Equal(t, "Tests passed", m.entries[3].content)
+	assert.Equal(t, "And lint?", m.entries[4].content)
+
+	m.updateAudio(tuiAudioMsg{session: session, done: true})
+	require.Nil(t, m.audio)
+	// The coding-only history refresh must neither erase nor duplicate speech.
+	history := initialHistoryMsg{
+		conversationKey: m.key, loaded: true,
+		entries: []chatEntry{m.entries[2], m.entries[3]},
+	}
+	for range 2 {
+		updated, _ = m.Update(conversationHistoryRefreshMsg{history: history})
+		*m = updated.(model)
+		require.Len(t, m.entries, 5)
+		assert.Equal(t, "call:user", m.entries[0].realtimeID)
+		assert.Equal(t, "call:assistant", m.entries[1].realtimeID)
+		assert.Equal(t, "call:next", m.entries[4].realtimeID)
+		transcript, _ := m.renderTranscript()
+		assert.Equal(t, 1, strings.Count(xansi.Strip(transcript), "I will check both."))
+	}
+}
+
+func TestAudioTalkDoesNotReplaceTypedUserEntries(t *testing.T) {
+	m := newThemeTestModel(t, Config{})
+	m.applyChatEvent(chat.ChatEvent{Kind: "user-message", Content: "typed"})
+	m.updateAudioTranscript(chat.RealtimeEvent{ID: "voice", Role: "user", Text: "spoken"})
+	m.applyChatEvent(chat.ChatEvent{Kind: "user-message-display", Content: "expanded typed"})
+	m.applyChatEvent(chat.ChatEvent{Kind: "user-message", Content: "expanded typed"})
+	require.Len(t, m.entries, 2)
+	assert.Equal(t, "expanded typed", m.entries[0].content)
+	assert.Equal(t, "spoken", m.entries[1].content)
 }
 
 func TestAudioTalkCreatesConversationWithDraftSettings(t *testing.T) {

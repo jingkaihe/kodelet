@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,18 +16,16 @@ import (
 
 // The worker owns media and network I/O. Only Update mutates presentation fields.
 type tuiAudioSession struct {
-	cancel    context.CancelFunc
-	controls  chan audiohost.Command
-	done      chan struct{}
-	key       string
-	mode      string
-	draft     string
-	started   time.Time
-	phase     string
-	level     float64
-	muted     bool
-	user      string
-	assistant string
+	cancel   context.CancelFunc
+	controls chan audiohost.Command
+	done     chan struct{}
+	key      string
+	mode     string
+	draft    string
+	started  time.Time
+	phase    string
+	level    float64
+	muted    bool
 }
 
 type tuiAudioMsg struct {
@@ -241,11 +240,8 @@ func (m *model) updateAudio(msg tuiAudioMsg) tea.Cmd {
 	if msg.caption != nil {
 		switch msg.caption.Kind {
 		case "transcript":
-			text := sanitizeExtensionTranscriptText(msg.caption.Text)
-			if msg.caption.Role == "user" {
-				session.user = text
-			} else {
-				session.assistant = text
+			if session.key == m.key {
+				return m.updateAudioTranscript(*msg.caption)
 			}
 		case "warning":
 			return m.audioNotice(msg.caption.Text)
@@ -260,9 +256,67 @@ func (m *model) updateAudio(msg tuiAudioMsg) tea.Cmd {
 	return nil
 }
 
+func (m *model) updateAudioTranscript(event chat.RealtimeEvent) tea.Cmd {
+	if event.ID == "" || (event.Role != "user" && event.Role != "assistant") {
+		return nil
+	}
+	text := strings.TrimSpace(sanitizeExtensionTranscriptText(event.Text))
+	if text == "" {
+		return nil
+	}
+	entry := chatEntry{kind: entryUser, content: text, realtimeID: event.ID}
+	if event.Role == "assistant" {
+		entry.kind = entryAssistant
+		entry.blocks = []assistantBlock{{kind: blockText, text: text}}
+	}
+	index := slices.IndexFunc(m.entries, func(existing chatEntry) bool { return existing.realtimeID == event.ID })
+	if index >= 0 {
+		previous := m.entries[index]
+		if previous.kind != entry.kind || previous.content == text {
+			return nil
+		}
+		entry.realtimeAnchor = previous.realtimeAnchor
+		m.entries[index] = entry
+	} else {
+		for _, existing := range m.entries {
+			if existing.realtimeID == "" {
+				entry.realtimeAnchor++
+			}
+		}
+		m.entries = append(m.entries, entry)
+	}
+	// Do not replace the active coding reply: its text/tools can stream while
+	// either speaker is talking. Respect scrolling and the usual render debounce.
+	return m.queueTranscriptRefresh(m.autoFollow)
+}
+
+// The stream-format history contains coding entries, not the server's separate
+// voice overlay. Keep live utterances across coding-history reconciliation,
+// including after the call ends, at their original conversation-local positions.
+func mergeAudioTranscript(history, current []chatEntry) []chatEntry {
+	var result []chatEntry
+	next := 0
+	for _, entry := range current {
+		if entry.realtimeID == "" {
+			continue
+		}
+		end := min(len(history), max(next, entry.realtimeAnchor))
+		result = append(result, history[next:end]...)
+		result = append(result, entry)
+		next = end
+	}
+	if result == nil {
+		return history
+	}
+	return append(result, history[next:]...)
+}
+
 func (m model) audioHeight() int {
 	if m.audio == nil {
 		return 0
+	}
+	if m.audio.mode == "talk" {
+		return 1
 	}
 	return 3
 }
@@ -282,13 +336,13 @@ func (m model) renderAudio() string {
 	}
 	seconds := int(time.Since(s.started).Seconds())
 	header := fmt.Sprintf("%s (experimental) · %s · %02d:%02d · %s", label, state, seconds/60, seconds%60, controls)
-	lines := []string{header, "", ""}
-	if s.mode == "talk" {
-		lines[1], lines[2] = "You: "+s.user, "Kodelet: "+s.assistant
-	} else {
+	lines := []string{header}
+	if s.mode != "talk" {
 		level := int(min(1, max(0, s.level)) * 20)
-		lines[1] = "Microphone: " + strings.Repeat("▰", level) + strings.Repeat("▱", 20-level)
-		lines[2] = "Text will be inserted into your draft, never sent automatically."
+		lines = append(lines,
+			"Microphone: "+strings.Repeat("▰", level)+strings.Repeat("▱", 20-level),
+			"Text will be inserted into your draft, never sent automatically.",
+		)
 	}
 	for i := range lines {
 		lines[i] = fitVisible(normalizeSingleLinePaste(lines[i]), m.contentWidth())

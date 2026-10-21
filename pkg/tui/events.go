@@ -40,7 +40,7 @@ func (m *model) applyChatEvent(event chat.ChatEvent) {
 		entry := compactionEntry(*event.Compaction)
 		if event.BeforeCurrentUser {
 			for index := len(m.entries) - 1; index >= 0; index-- {
-				if m.entries[index].kind != entryUser {
+				if m.entries[index].kind != entryUser || m.entries[index].realtimeID != "" {
 					continue
 				}
 				m.entries = slices.Insert(m.entries, index, entry)
@@ -184,7 +184,7 @@ func (m *model) replaceLastUserEntry(content string) {
 		return
 	}
 	for index := len(m.entries) - 1; index >= 0; index-- {
-		if m.entries[index].kind == entryInfo {
+		if m.entries[index].kind == entryInfo || m.entries[index].realtimeID != "" {
 			continue
 		}
 		if m.entries[index].kind == entryUser {
@@ -283,7 +283,7 @@ func (m model) hasLastUserEntry(content string) bool {
 		return false
 	}
 	for i := len(m.entries) - 1; i >= 0; i-- {
-		if m.entries[i].kind == entryInfo {
+		if m.entries[i].kind == entryInfo || m.entries[i].realtimeID != "" {
 			continue
 		}
 		return m.entries[i].kind == entryUser && strings.TrimSpace(m.entries[i].content) == content

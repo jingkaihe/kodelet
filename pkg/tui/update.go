@@ -485,7 +485,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "ready"
 		}
 		m.clearActiveAssistantEntry()
-		m.entries = history.entries
+		m.entries = mergeAudioTranscript(history.entries, m.entries)
 		m.usage = history.usage
 		if parentID := strings.TrimSpace(history.parentConversationID); parentID != "" {
 			m.parentConversationID = parentID
