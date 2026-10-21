@@ -2,6 +2,8 @@
 
 Kodelet is an agentic coding CLI: Go backend in `cmd/kodelet/` and `pkg/`, React/TypeScript UI in `pkg/webui/frontend/`.
 
+Experimental TUI audio uses `audio/` (Rust) and `pkg/audiohost/` (Go IPC); see [audio/README.md](audio/README.md) for local build/test tasks.
+
 Opt-in code mode uses a runner-local QuickJS/WASM runtime and tool catalog in `pkg/codemode/`, with shared execution and child ownership in `pkg/runner/`. The embedded runtime's pins and licenses are in `pkg/codemode/runtime_wasm_provenance.md`. `mise run code-generation` installs its locked npm dependency and generates the gitignored WASM alongside the frontend; `mise run codemode-generation` generates only the runtime. No external JavaScript runtime is required by the compiled binary. See [the code-mode design](docs/codemode-design.md) for lifecycle and authorization boundaries.
 
 ## Conventions

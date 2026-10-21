@@ -23,20 +23,21 @@ import (
 )
 
 type ChatConfig struct {
-	ResumeConvID     string
-	CWD              string
-	Theme            string
-	Follow           bool
-	NoExtensions     bool
-	NoTools          bool
-	Runner           string
-	RunnerProfile    string
-	Server           string
-	ServerConfigured bool
-	AuthToken        string
-	HTTPClient       *http.Client
-	ConfigError      error
-	Options          *llmtypes.ExecutionOptions
+	ResumeConvID      string
+	CWD               string
+	Theme             string
+	Follow            bool
+	NoExtensions      bool
+	NoTools           bool
+	ExperimentalAudio bool
+	Runner            string
+	RunnerProfile     string
+	Server            string
+	ServerConfigured  bool
+	AuthToken         string
+	HTTPClient        *http.Client
+	ConfigError       error
+	Options           *llmtypes.ExecutionOptions
 }
 
 func NewChatConfig() *ChatConfig {
@@ -194,46 +195,72 @@ func (r *configuredChatRunner) AppendMessageHistory(ctx context.Context, target 
 	return r.Client.AppendMessageHistory(ctx, target, entry)
 }
 
-func (r *configuredChatRunner) Run(ctx context.Context, request chatpkg.ChatRequest, sink chatpkg.ChatEventSink) (string, error) {
+func (r *configuredChatRunner) executionOptions(selected *llmtypes.ExecutionOptions) *llmtypes.ExecutionOptions {
 	// The TUI only sends the model it selected; every other option comes from the CLI.
 	options := r.options.Clone()
-	if request.Options != nil && request.Options.Model != nil {
+	if selected != nil && selected.Model != nil {
 		if options == nil {
 			options = &llmtypes.ExecutionOptions{}
 		}
-		options.Model = new(*request.Options.Model)
+		options.Model = new(*selected.Model)
 	}
-	request.Options = options
-	var history chatpkg.ConversationHistory
-	var err error
-	if request.ConversationID != "" {
-		history, err = r.LoadConversation(ctx, request.ConversationID)
-		var responseErr *chatpkg.ControlPlaneHTTPError
-		if err != nil && (!errors.As(err, &responseErr) || responseErr.StatusCode != http.StatusNotFound) {
-			return request.ConversationID, err
-		}
+	return options
+}
+
+// StartRealtime keeps voice delegates subject to the same CLI options and saved
+// affinity as typed turns, including when voice creates the conversation.
+func (r *configuredChatRunner) StartRealtime(ctx context.Context, offer string, request chatpkg.ChatRequest, voice string) (chatpkg.RealtimeSession, error) {
+	request.ConversationID = strings.TrimSpace(request.ConversationID)
+	if request.ConversationID == "" {
+		return chatpkg.RealtimeSession{}, errors.New("conversation ID is required")
 	}
-	if history.ID != "" {
-		if err := validateDaemonChatAffinity(history, request, r.explicitRunnerID); err != nil {
-			return request.ConversationID, err
-		}
-		request.RunnerID, request.CWD, request.EnvironmentProfile = history.RunnerID, history.CWD, history.EnvironmentProfile
-	} else {
-		target, err := r.discoveryTarget(ctx, chatpkg.WorkspaceTarget{CWD: request.CWD, Profile: request.Profile, EnvironmentProfile: request.EnvironmentProfile})
-		if err != nil {
-			return request.ConversationID, err
-		}
-		discovery, err := r.Client.DiscoverWorkspace(ctx, target)
-		if err != nil {
-			return request.ConversationID, err
-		}
-		request.RunnerID, request.CWD, request.EnvironmentProfile = target.RunnerID, discovery.CWD, discovery.EnvironmentProfile
+	request, err := r.prepareRequest(ctx, request)
+	if err != nil {
+		return chatpkg.RealtimeSession{}, err
+	}
+	return r.Client.StartRealtime(ctx, offer, request, voice)
+}
+
+func (r *configuredChatRunner) Run(ctx context.Context, request chatpkg.ChatRequest, sink chatpkg.ChatEventSink) (string, error) {
+	request, err := r.prepareRequest(ctx, request)
+	if err != nil {
+		return request.ConversationID, err
 	}
 	id, err := r.Client.Run(ctx, request, sink)
 	if err != nil {
 		return id, errors.Wrapf(err, "chat failed or the connection was interrupted; before sending the message again, check 'kodelet conversation turn %s %s'", request.ConversationID, request.TurnID)
 	}
 	return id, nil
+}
+
+func (r *configuredChatRunner) prepareRequest(ctx context.Context, request chatpkg.ChatRequest) (chatpkg.ChatRequest, error) {
+	request.Options = r.executionOptions(request.Options)
+	var history chatpkg.ConversationHistory
+	var err error
+	if request.ConversationID != "" {
+		history, err = r.LoadConversation(ctx, request.ConversationID)
+		var responseErr *chatpkg.ControlPlaneHTTPError
+		if err != nil && (!errors.As(err, &responseErr) || responseErr.StatusCode != http.StatusNotFound) {
+			return request, err
+		}
+	}
+	if history.ID != "" {
+		if err := validateDaemonChatAffinity(history, request, r.explicitRunnerID); err != nil {
+			return request, err
+		}
+		request.RunnerID, request.CWD, request.EnvironmentProfile = history.RunnerID, history.CWD, history.EnvironmentProfile
+	} else {
+		target, err := r.discoveryTarget(ctx, chatpkg.WorkspaceTarget{CWD: request.CWD, Profile: request.Profile, EnvironmentProfile: request.EnvironmentProfile})
+		if err != nil {
+			return request, err
+		}
+		discovery, err := r.Client.DiscoverWorkspace(ctx, target)
+		if err != nil {
+			return request, err
+		}
+		request.RunnerID, request.CWD, request.EnvironmentProfile = target.RunnerID, discovery.CWD, discovery.EnvironmentProfile
+	}
+	return request, nil
 }
 
 func validateDaemonChatAffinity(history chatpkg.ConversationHistory, request chatpkg.ChatRequest, explicitRunnerID string) error {
@@ -325,6 +352,7 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 		Remote:                  true,
 		Runner:                  runner,
 		ServerURL:               config.Server,
+		ExperimentalAudio:       config.ExperimentalAudio,
 		Theme:                   config.Theme,
 		ConversationID:          config.ResumeConvID,
 		CWD:                     config.CWD,
@@ -430,6 +458,7 @@ func init() {
 	chatCmd.Flags().BoolP("follow", "f", defaults.Follow, "Follow the most recent conversation")
 	chatCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extensions for this conversation")
 	chatCmd.Flags().Bool("no-tools", defaults.NoTools, "Disable all tools (for simple query-response usage)")
+	chatCmd.Flags().Bool("experimental-audio", false, "Enable experimental local dictation and realtime voice (requires kodelet-audio)")
 	chatCmd.Flags().Bool("use-weak-model", false, "Use the configured weak model")
 	chatCmd.Flags().Int("max-turns", 0, "Maximum AI turns per prompt (0 for no limit)")
 	chatCmd.Flags().String("runner", defaults.Runner, "Workspace runner ID, ID prefix, or display name")
@@ -465,6 +494,7 @@ func getChatConfigFromFlags(cmd *cobra.Command) *ChatConfig {
 	if noTools, err := cmd.Flags().GetBool("no-tools"); err == nil {
 		config.NoTools = noTools
 	}
+	config.ExperimentalAudio, _ = cmd.Flags().GetBool("experimental-audio")
 	if runner, err := cmd.Flags().GetString("runner"); err == nil {
 		config.Runner = strings.TrimSpace(runner)
 	}

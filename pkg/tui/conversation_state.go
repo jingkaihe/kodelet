@@ -14,6 +14,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
 
@@ -118,6 +119,7 @@ func (m *model) activateConversation(key string) (bool, tea.Cmd) {
 	}
 
 	m.saveActiveConversationPresentation()
+	m.cancelAudio()
 	m.welcome.done = true
 	m.welcomeSpin = welcomeSpinAnimation{}
 	m.activeConversationKey = state.key
@@ -301,6 +303,26 @@ func (m *model) ensureConversationID(state *conversationState) string {
 		return conversationID
 	}
 	return m.setConversationID(state, convtypes.GenerateID())
+}
+
+// Typed turns and voice-first conversations freeze the same draft settings.
+func (m model) conversationRequest(state *conversationState) chat.ChatRequest {
+	request := chat.ChatRequest{
+		ConversationID: state.conversationID,
+		Profile:        profileForRequest(state.profile),
+		CWD:            state.requestedCWD,
+	}
+	if !state.conversationWasResumed {
+		// Keep resending the selected model on retries, rather than a CLI default.
+		if selected := strings.TrimSpace(state.selectedModel); selected != "" {
+			request.Options = &llmtypes.ExecutionOptions{Model: &selected}
+		}
+		request.ReasoningEffort = state.reasoningEffort
+		if m.remote {
+			request.EnvironmentProfile = m.environmentProfile
+		}
+	}
+	return request
 }
 
 func (m *model) setConversationID(state *conversationState, conversationID string) string {

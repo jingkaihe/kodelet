@@ -1,0 +1,311 @@
+package tui
+
+import (
+	"context"
+	"encoding/binary"
+	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/jingkaihe/kodelet/pkg/audiohost"
+	"github.com/jingkaihe/kodelet/pkg/chat"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	transcriptiontypes "github.com/jingkaihe/kodelet/pkg/types/transcription"
+	"github.com/pkg/errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestAudioOptInAndDraftCommit(t *testing.T) {
+	m := newThemeTestModel(t, Config{})
+	m.textarea.SetValue("/voice")
+	assert.Empty(t, m.audioSlashCommands())
+	_, handled := m.handleLocalSlashCommand("/voice")
+	assert.False(t, handled, "disabled audio must not take over extension commands")
+	assert.Nil(t, m.audio)
+	m.experimentalAudio = true
+	assert.Contains(t, m.filteredSlashCommands(), m.audioSlashCommands()[0])
+
+	m.textarea.SetValue("hello ")
+	m.textarea.CursorEnd()
+	_, cancel := context.WithCancel(m.ctx)
+	session := &tuiAudioSession{cancel: cancel, key: m.key, mode: "voice", draft: "hello ", phase: "transcribing"}
+	m.audio = session
+	cancel() // Worker cleanup may run before Bubble Tea receives completion.
+	updated, _ := m.Update(tuiAudioMsg{session: session, done: true, text: "world"})
+	result := updated.(model)
+	assert.Nil(t, result.audio)
+	assert.Equal(t, "hello world", result.textarea.Value())
+	assert.False(t, result.running, "dictation must not submit a turn")
+}
+
+func TestAudioDiscardsCanceledStaleAndChangedDraftResults(t *testing.T) {
+	for _, test := range []string{"canceled", "different conversation", "changed draft", "old session"} {
+		t.Run(test, func(t *testing.T) {
+			m := newThemeTestModel(t, Config{ExperimentalAudio: true})
+			m.textarea.SetValue("draft")
+			_, cancel := context.WithCancel(m.ctx)
+			defer cancel()
+			session := &tuiAudioSession{cancel: cancel, mode: "voice", key: m.key, draft: "draft"}
+			m.audio = session
+			switch test {
+			case "canceled":
+				m.cancelAudio()
+			case "different conversation":
+				session.key = "another conversation"
+			case "changed draft":
+				session.draft = "previous draft"
+			case "old session":
+				m.audio = &tuiAudioSession{}
+			}
+			m.updateAudio(tuiAudioMsg{session: session, done: true, text: "should not appear"})
+			assert.Equal(t, "draft", m.textarea.Value())
+		})
+	}
+}
+
+func TestAudioRecordingKeysAndCallMute(t *testing.T) {
+	m := newThemeTestModel(t, Config{ExperimentalAudio: true})
+	ctx, cancel := context.WithCancel(m.ctx)
+	defer cancel()
+	m.audio = &tuiAudioSession{cancel: cancel, mode: "voice", phase: "recording", controls: make(chan audiohost.Command, 1)}
+	_, handled := m.handleAudioInput(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	assert.True(t, handled, "recording freezes the draft")
+	_, handled = m.handleAudioInput(tea.PasteMsg{Content: "paste"})
+	assert.True(t, handled)
+	_, handled = m.handleAudioInput(tea.KeyPressMsg{Code: tea.KeyEnter})
+	assert.True(t, handled)
+	assert.Equal(t, "transcribing", m.audio.phase)
+	assert.Equal(t, "finish", (<-m.audio.controls).Type)
+
+	m.audio.mode, m.audio.phase = "talk", "connected"
+	m.muteAudio()
+	assert.True(t, m.audio.muted)
+	assert.Equal(t, audiohost.Command{Type: "mute", Muted: true}, <-m.audio.controls)
+	_, handled = m.handleAudioInput(tea.KeyPressMsg{Code: tea.KeyEscape})
+	assert.True(t, handled)
+	assert.ErrorIs(t, ctx.Err(), context.Canceled)
+	assert.Equal(t, "stopping", m.audio.phase)
+}
+
+func TestAudioTalkCreatesConversationWithDraftSettings(t *testing.T) {
+	runner := newStreamingConversationSourceRunner()
+	m := newThemeTestModel(t, Config{
+		ExperimentalAudio: true, Remote: true, Runner: runner,
+		Profile: "coding", Model: "picked-model", ReasoningEffort: "high",
+		CWD: "/workspace", EnvironmentProfile: "sandbox",
+	})
+	m.textarea.SetValue("/talk")
+	_, handled := m.handleLocalSlashCommand("/talk")
+	assert.True(t, handled)
+	require.NotNil(t, m.audio)
+	t.Cleanup(m.audio.cancel)
+	assert.Equal(t, "starting", m.audio.phase)
+	require.NotEmpty(t, m.conversationID)
+	assert.Equal(t, chat.ChatRequest{
+		ConversationID: m.conversationID, Profile: "coding", CWD: "/workspace",
+		ReasoningEffort: "high", EnvironmentProfile: "sandbox",
+		Options: &llmtypes.ExecutionOptions{Model: new("picked-model")},
+	}, m.conversationRequest(m.conversationState))
+	assert.Empty(t, m.textarea.Value())
+	assert.Empty(t, m.uiNotifications)
+	assert.Empty(t, m.entries, "starting voice must not submit a placeholder message")
+	assert.Zero(t, m.streamRunID, "do not watch a conversation before the server saves it")
+	require.NotNil(t, m.updateAudio(tuiAudioMsg{session: m.audio, conversationReady: true}))
+	assert.NotZero(t, m.streamRunID, "attach coding results after voice creates the conversation")
+	m.stopConversationStream(m.conversationState)
+}
+
+type testAudioPeer struct {
+	events chan audiohost.Event
+	sent   []audiohost.Command
+	closed bool
+}
+
+func (p *testAudioPeer) Send(command audiohost.Command) error {
+	p.sent = append(p.sent, command)
+	return nil
+}
+func (p *testAudioPeer) Events() <-chan audiohost.Event           { return p.events }
+func (p *testAudioPeer) Close() error                             { p.closed = true; return nil }
+func (p *testAudioPeer) start(context.Context) (audioPeer, error) { return p, nil }
+
+type testDictationClient struct {
+	caps   transcriptiontypes.Capabilities
+	audio  []byte
+	upload func()
+}
+
+func (c *testDictationClient) TranscriptionCapabilities(context.Context) (transcriptiontypes.Capabilities, error) {
+	return c.caps, nil
+}
+
+func (c *testDictationClient) TranscribeAudio(_ context.Context, data []byte, _, _, _ string) (transcriptiontypes.Result, error) {
+	c.audio = data
+	if c.upload != nil {
+		c.upload()
+	}
+	return transcriptiontypes.Result{Text: "spoken words"}, nil
+}
+
+func TestDictationWorkerWAVAndRecordingLimits(t *testing.T) {
+	for _, test := range []string{"success", "limit", "empty", "malformed PCM", "disabled", "helper error", "EOF"} {
+		t.Run(test, func(t *testing.T) {
+			peer := &testAudioPeer{events: make(chan audiohost.Event, 4)}
+			client := &testDictationClient{caps: transcriptiontypes.Capabilities{
+				Enabled: true, Available: true, MaxAudioBytes: 48, MaxDurationSeconds: 5, MimeTypes: []string{"audio/wav"},
+			}}
+			client.upload = func() { assert.True(t, peer.closed, "release microphone before uploading") }
+			pcm := []byte{1, 2, 3, 4}
+			switch test {
+			case "limit":
+				pcm = append(pcm, 5, 6)
+			case "empty":
+				pcm = nil
+			case "malformed PCM":
+				pcm = []byte{1}
+			case "disabled":
+				client.caps.Enabled = false
+			case "helper error":
+				peer.events <- audiohost.Event{Type: "error", Message: "device unavailable"}
+			case "EOF":
+				close(peer.events)
+			}
+			if test != "EOF" {
+				peer.events <- audiohost.Event{Type: "recording"}
+				peer.events <- audiohost.Event{Type: "audio", Audio: pcm}
+				peer.events <- audiohost.Event{Type: "recorded"}
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			text, err := runDictation(ctx, client, nil, func(tuiAudioMsg) {}, peer.start)
+			if test != "success" {
+				require.Error(t, err)
+				assert.Empty(t, client.audio)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, "spoken words", text)
+			require.Len(t, peer.sent, 1)
+			assert.Equal(t, int64(4), peer.sent[0].MaxAudioBytes)
+			assert.Equal(t, 5, peer.sent[0].MaxDurationSeconds)
+			wav := client.audio
+			require.Len(t, wav, 48)
+			assert.Equal(t, "RIFF", string(wav[:4]))
+			assert.Equal(t, uint32(40), binary.LittleEndian.Uint32(wav[4:]))
+			assert.Equal(t, "WAVEfmt ", string(wav[8:16]))
+			assert.Equal(t, uint32(16000), binary.LittleEndian.Uint32(wav[24:]))
+			assert.Equal(t, uint16(1), binary.LittleEndian.Uint16(wav[22:]))
+			assert.Equal(t, uint16(16), binary.LittleEndian.Uint16(wav[34:]))
+			assert.Equal(t, pcm, wav[44:])
+		})
+	}
+}
+
+type testRealtimeAudioClient struct {
+	start  func(context.Context) (chat.RealtimeSession, error)
+	stream func(context.Context, func(chat.RealtimeEvent)) error
+	end    func(context.Context, string) error
+}
+
+func (c testRealtimeAudioClient) RealtimeCapabilities(context.Context) (chat.RealtimeCapabilities, error) {
+	return chat.RealtimeCapabilities{Enabled: true, Available: true}, nil
+}
+
+func (c testRealtimeAudioClient) StartRealtime(ctx context.Context, _ string, _ chat.ChatRequest, _ string) (chat.RealtimeSession, error) {
+	return c.start(ctx)
+}
+
+func (c testRealtimeAudioClient) StreamRealtime(ctx context.Context, _ string, emit func(chat.RealtimeEvent)) error {
+	return c.stream(ctx, emit)
+}
+
+func (c testRealtimeAudioClient) EndRealtime(ctx context.Context, id string) error {
+	return c.end(ctx, id)
+}
+
+func TestRealtimeAudioContinuesAcrossAgentRunsAndCleansUp(t *testing.T) {
+	peer := &testAudioPeer{events: make(chan audiohost.Event, 2)}
+	peer.events <- audiohost.Event{Type: "offer", SDP: "offer"}
+	peer.events <- audiohost.Event{Type: "connected"}
+	closed := false
+	client := testRealtimeAudioClient{
+		start: func(context.Context) (chat.RealtimeSession, error) {
+			return chat.RealtimeSession{ID: "call", ConversationID: "conv", Answer: "answer"}, nil
+		},
+		stream: func(_ context.Context, emit func(chat.RealtimeEvent)) error {
+			emit(chat.RealtimeEvent{Kind: "transcript", Text: "hello", Role: "user"})
+			emit(chat.RealtimeEvent{Kind: "agent-started"})
+			emit(chat.RealtimeEvent{Kind: "agent-completed"})
+			emit(chat.RealtimeEvent{Kind: "transcript", Text: "next request", Role: "user"})
+			emit(chat.RealtimeEvent{Kind: "closed"})
+			return nil
+		},
+		end: func(ctx context.Context, id string) error {
+			assert.True(t, peer.closed)
+			assert.NoError(t, ctx.Err(), "cleanup uses a fresh context")
+			assert.Equal(t, "call", id)
+			closed = true
+			return nil
+		},
+	}
+	var captions []string
+	conversationReady := false
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	err := runRealtimeAudio(ctx, client, chat.ChatRequest{ConversationID: "conv"}, nil, func(msg tuiAudioMsg) {
+		if msg.conversationReady {
+			conversationReady = true
+			assert.Equal(t, []audiohost.Command{{Type: "createOffer"}}, peer.sent, "attach the conversation before opening devices")
+		}
+		if msg.caption != nil && msg.caption.Kind == "transcript" {
+			captions = append(captions, msg.caption.Text)
+		}
+	}, peer.start)
+	require.NoError(t, err)
+	assert.True(t, conversationReady)
+	assert.True(t, closed)
+	assert.Equal(t, []string{"hello", "next request"}, captions, "agent completion must not end the call")
+	assert.Equal(t, []audiohost.Command{{Type: "createOffer"}, {Type: "answer", SDP: "answer"}}, peer.sent)
+}
+
+func TestRealtimeAudioClosesLateAllocationAfterCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	peer := &testAudioPeer{events: make(chan audiohost.Event, 1)}
+	peer.events <- audiohost.Event{Type: "offer", SDP: "offer"}
+	allocated, release, ended := make(chan struct{}), make(chan struct{}), make(chan string, 1)
+	client := testRealtimeAudioClient{
+		start: func(ctx context.Context) (chat.RealtimeSession, error) {
+			close(allocated)
+			<-release
+			assert.NoError(t, ctx.Err())
+			return chat.RealtimeSession{ID: "late-call"}, errors.New("invalid response")
+		},
+		end: func(ctx context.Context, id string) error { ended <- id; return ctx.Err() },
+	}
+	result := make(chan error, 1)
+	go func() {
+		result <- runRealtimeAudio(ctx, client, chat.ChatRequest{}, nil, func(tuiAudioMsg) {}, peer.start)
+	}()
+	select {
+	case <-allocated:
+	case <-time.After(time.Second):
+		t.Fatal("allocation did not start")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("audio did not stop promptly")
+	}
+	assert.True(t, peer.closed)
+	close(release)
+	select {
+	case id := <-ended:
+		assert.Equal(t, "late-call", id)
+	case <-time.After(time.Second):
+		t.Fatal("late call leaked")
+	}
+}

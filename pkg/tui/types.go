@@ -38,8 +38,9 @@ type Config struct {
 	Runner                  chat.ChatRunner // Required unless Initialize is set; the daemon owns execution.
 	// Initialize optionally prepares the daemon connection after the TUI renders.
 	// Until it succeeds, typing and quitting remain available but submission is disabled.
-	Initialize func(context.Context) (Config, error)
-	Remote     bool // Deprecated: exported Run always uses daemon-backed discovery and history.
+	Initialize        func(context.Context) (Config, error)
+	Remote            bool // Deprecated: exported Run always uses daemon-backed discovery and history.
+	ExperimentalAudio bool // Opt-in local audio helper; never enabled by server settings.
 }
 
 // ProfileSettings contains control-plane-owned model and reasoning settings for one profile.
@@ -260,6 +261,8 @@ type transcriptElapsedClock struct {
 
 type model struct {
 	*conversationState
+	experimentalAudio bool
+	audio             *tuiAudioSession
 
 	initialize             func(context.Context) (Config, error)
 	startupPending         bool

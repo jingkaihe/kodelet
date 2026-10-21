@@ -58,6 +58,13 @@ func Run(ctx context.Context, config Config) error {
 	finalModel, err := program.Run()
 	initialModel.cancel()
 	final, isModel := finalModel.(model)
+	if isModel && final.audio != nil {
+		final.audio.cancel()
+		select {
+		case <-final.audio.done:
+		case <-time.After(6 * time.Second):
+		}
+	}
 	if isModel && final.closeInitializedRunner != nil {
 		final.closeInitializedRunner()
 	}
@@ -139,6 +146,7 @@ func newModel(ctx context.Context, config Config) model {
 // configure installs connection and conversation settings without replacing the
 // live program's context, channels, composer, or presentation state.
 func (m *model) configure(config Config) {
+	m.experimentalAudio = config.ExperimentalAudio
 	m.runner = config.Runner
 	m.conversationSource, _ = config.Runner.(chat.ConversationSource)
 	m.conversationStream, _ = config.Runner.(chat.ConversationStreamer)

@@ -37,6 +37,7 @@ func TestGetChatConfigFromFlags(t *testing.T) {
 	cmd.Flags().BoolP("follow", "f", defaults.Follow, "")
 	cmd.Flags().Bool("no-extensions", defaults.NoExtensions, "")
 	cmd.Flags().Bool("no-tools", defaults.NoTools, "")
+	cmd.Flags().Bool("experimental-audio", defaults.ExperimentalAudio, "")
 	cmd.Flags().String("runner", defaults.Runner, "")
 	cmd.Flags().String("runner-profile", defaults.RunnerProfile, "")
 	cmd.Flags().String("server", defaults.Server, "")
@@ -47,6 +48,7 @@ func TestGetChatConfigFromFlags(t *testing.T) {
 	require.NoError(t, cmd.Flags().Set("theme", " tokyo-night "))
 	require.NoError(t, cmd.Flags().Set("no-extensions", "true"))
 	require.NoError(t, cmd.Flags().Set("no-tools", "true"))
+	require.NoError(t, cmd.Flags().Set("experimental-audio", "true"))
 	require.NoError(t, cmd.Flags().Set("runner", " runner-1 "))
 	require.NoError(t, cmd.Flags().Set("runner-profile", " workspace "))
 
@@ -57,6 +59,7 @@ func TestGetChatConfigFromFlags(t *testing.T) {
 	assert.Equal(t, "tokyo-night", config.Theme)
 	assert.True(t, config.NoExtensions)
 	assert.True(t, config.NoTools)
+	assert.True(t, config.ExperimentalAudio)
 	assert.Equal(t, "runner-1", config.Runner)
 	assert.Equal(t, "workspace", config.RunnerProfile)
 }
@@ -895,6 +898,142 @@ func TestConfiguredChatRunnerAppliesPickedModelOverCLIOptions(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, test.want, submitted.Options)
 			assert.Equal(t, test.cliOptions, runner.options, "selection must not mutate shared CLI defaults")
+		})
+	}
+}
+
+func TestConfiguredChatRunnerRealtimePreservesCLIOptionsAndSavedAffinity(t *testing.T) {
+	for _, cliOptions := range []*llmtypes.ExecutionOptions{
+		nil,
+		{Model: new("central"), NoTools: new(true), NoExtensions: new(true), NoSkills: new(true)},
+	} {
+		var submitted struct {
+			Offer string              `json:"offer"`
+			Chat  chatpkg.ChatRequest `json:"chat"`
+			Voice string              `json:"voice"`
+		}
+		daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/conversations/saved":
+				require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+					"id": "saved", "cwd": "/workspace", "runnerId": "runner",
+					"profile": "coding", "environmentProfile": "sandbox",
+				}))
+			case "/api/realtime":
+				require.Equal(t, http.MethodPost, r.Method)
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&submitted))
+				require.NoError(t, json.NewEncoder(w).Encode(chatpkg.RealtimeSession{
+					ID: "call", ConversationID: "saved", Answer: "answer",
+				}))
+			default:
+				t.Errorf("unexpected endpoint: %s", r.URL.Path)
+				http.NotFound(w, r)
+			}
+		}))
+		t.Cleanup(daemon.Close)
+		client, err := chatpkg.NewClient(daemon.URL, "", "")
+		require.NoError(t, err)
+		runner := &configuredChatRunner{Client: client, options: cliOptions.Clone(), runnerID: "default", defaultCWD: "/default"}
+		session, err := runner.StartRealtime(t.Context(), "offer", chatpkg.ChatRequest{
+			ConversationID: " saved ",
+			Options: &llmtypes.ExecutionOptions{
+				Model: new("picked-model"), NoTools: new(false), NoExtensions: new(false), NoSkills: new(false),
+			},
+		}, "cedar")
+		require.NoError(t, err)
+		assert.Equal(t, "call", session.ID)
+		want := cliOptions.Clone()
+		if want == nil {
+			want = &llmtypes.ExecutionOptions{}
+		}
+		want.Model = new("picked-model")
+		assert.Equal(t, want, submitted.Chat.Options)
+		assert.Equal(t, cliOptions, runner.options, "voice must not mutate shared CLI defaults")
+		assert.Equal(t, "offer", submitted.Offer)
+		assert.Equal(t, "cedar", submitted.Voice)
+		assert.Equal(t, "saved", submitted.Chat.ConversationID)
+		assert.Equal(t, "runner", submitted.Chat.RunnerID)
+		assert.Equal(t, "/workspace", submitted.Chat.CWD)
+		assert.Equal(t, "sandbox", submitted.Chat.EnvironmentProfile)
+	}
+}
+
+func TestConfiguredChatRunnerRealtimeCreatesConversation(t *testing.T) {
+	var submitted struct {
+		Chat chatpkg.ChatRequest `json:"chat"`
+	}
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/conversations/new":
+			http.NotFound(w, r)
+		case "/api/chat/slash-commands":
+			assert.Equal(t, "runner", r.URL.Query().Get("runnerId"))
+			assert.Equal(t, "coding", r.URL.Query().Get("profile"))
+			assert.Equal(t, "sandbox", r.URL.Query().Get("environmentProfile"))
+			assert.Equal(t, "~/project", r.URL.Query().Get("cwd"))
+			require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceDiscoverResult{CWD: "/resolved/project", EnvironmentProfile: "sandbox"}))
+		case "/api/realtime":
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&submitted))
+			require.NoError(t, json.NewEncoder(w).Encode(chatpkg.RealtimeSession{ID: "call", ConversationID: "new", Answer: "answer"}))
+		default:
+			t.Errorf("unexpected endpoint: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(daemon.Close)
+	client, err := chatpkg.NewClient(daemon.URL, "", "")
+	require.NoError(t, err)
+	runner := &configuredChatRunner{
+		Client: client, runnerID: "runner",
+		options: &llmtypes.ExecutionOptions{Model: new("cli-model"), NoTools: new(true)},
+	}
+	session, err := runner.StartRealtime(t.Context(), "offer", chatpkg.ChatRequest{
+		ConversationID: "new", Profile: "coding", CWD: "~/project",
+		EnvironmentProfile: "sandbox", ReasoningEffort: "high",
+		Options: &llmtypes.ExecutionOptions{Model: new("picked-model")},
+	}, "")
+	require.NoError(t, err)
+	assert.Equal(t, "new", session.ConversationID)
+	assert.Equal(t, chatpkg.ChatRequest{
+		ConversationID: "new", Profile: "coding", RunnerID: "runner", CWD: "/resolved/project",
+		EnvironmentProfile: "sandbox", ReasoningEffort: "high",
+		Options:            &llmtypes.ExecutionOptions{Model: new("picked-model"), NoTools: new(true)},
+		ClientCapabilities: &chatpkg.ChatClientCapabilities{},
+	}, submitted.Chat)
+}
+
+func TestConfiguredChatRunnerRealtimePreservesSavedConversationAffinity(t *testing.T) {
+	for _, test := range []struct {
+		name, explicitRunner, wantError string
+		request                         chatpkg.ChatRequest
+	}{
+		{name: "empty", wantError: "conversation ID is required"},
+		{name: "runner", explicitRunner: "other", request: chatpkg.ChatRequest{ConversationID: "saved"}, wantError: "different runner"},
+		{name: "directory", request: chatpkg.ChatRequest{ConversationID: "saved", CWD: "/other"}, wantError: "working directory cannot be changed"},
+		{name: "profile", request: chatpkg.ChatRequest{ConversationID: "saved", Profile: "other"}, wantError: "model profile cannot be changed"},
+		{name: "environment", request: chatpkg.ChatRequest{ConversationID: "saved", EnvironmentProfile: "other"}, wantError: "runner profile cannot be changed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var posts atomic.Int32
+			daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost {
+					posts.Add(1)
+				}
+				if r.URL.Path != "/api/conversations/saved" {
+					http.NotFound(w, r)
+					return
+				}
+				require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+					"id": "saved", "cwd": "/workspace", "runnerId": "runner",
+				}))
+			}))
+			t.Cleanup(daemon.Close)
+			client, err := chatpkg.NewClient(daemon.URL, "", "")
+			require.NoError(t, err)
+			runner := &configuredChatRunner{Client: client, explicitRunnerID: test.explicitRunner}
+			_, err = runner.StartRealtime(t.Context(), "offer", test.request, "")
+			require.ErrorContains(t, err, test.wantError)
+			assert.Zero(t, posts.Load(), "must not negotiate a call or allocate a fresh conversation")
 		})
 	}
 }

@@ -155,6 +155,11 @@ func (m *model) handleLocalSlashCommand(message string) (tea.Cmd, bool) {
 	}
 
 	switch command {
+	case "voice", "talk":
+		if m.experimentalAudio {
+			return m.handleAudioCommand(command, args), true
+		}
+		return nil, false
 	case "model":
 		m.textarea.Reset()
 		m.dismissSlashCommandSuggestions()

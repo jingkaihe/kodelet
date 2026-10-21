@@ -9,6 +9,7 @@ Use this reference when changing Kodelet itself. Repository-wide conventions liv
 - `pkg/llm/`, `pkg/tools/`, `pkg/browser/`, `pkg/artifacts/`: provider threads, tool execution, runner-owned browsers, and persisted images.
 - `pkg/fragments/`, `pkg/skills/`, `pkg/plugins/`: recipes, skills, and plugins.
 - `pkg/webui/`: HTTP handler and embedded React/TypeScript SPA; frontend source is in `frontend/`.
+- `audio/`: experimental Rust microphone/WebRTC helper; `pkg/audiohost/` is its pure-Go IPC client, used by `pkg/tui/`.
 - `skills/kodelet/`, `recipes/`, `docs/`: built-in guidance, examples, prompt templates, and documentation.
 
 Toolchain versions live in `mise.toml`; dependencies live in `go.mod` and `pkg/webui/frontend/package.json` rather than being repeated here.
@@ -21,6 +22,9 @@ Run commands from the repository root:
 | --- | --- |
 | `mise run build` | Build the CLI with regenerated, embedded frontend assets. |
 | `mise run build-dev` | Build the CLI without regenerating the frontend. |
+| `mise run audio-build` | Build the experimental native helper into `bin/kodelet-audio`; requires platform libraries listed in `audio/README.md`. |
+| `mise run audio-install` | Install only that helper into `$KODELET_BASE_PATH/bin` (default `~/.kodelet/bin`), ad-hoc signed on macOS. |
+| `mise run audio-test` / `audio-lint` | Run native tests without hardware/providers, and Rust formatting/Clippy checks. |
 | `mise run code-generation` | Generate the embedded code-mode runtime and the frontend (`go generate ./pkg/codemode ./pkg/webui`). Run it on a fresh checkout before plain `go build` or `go test`. |
 | `mise run codemode-generation` | Generate only the code-mode QuickJS runtime from its locked npm dependency. |
 | `mise run format` | Format Go with gofumpt. |
@@ -28,6 +32,8 @@ Run commands from the repository root:
 | `mise run frontend-icons` | Regenerate PNG icons from `logo.svg`; requires uv and Cairo. |
 
 Standard lint/test tasks are listed in `AGENTS.md`. For a focused Go check, use `mise exec -- go test ./pkg/<package>`.
+
+Audio tasks select their own Rust toolchain; normal Go build/test/release tasks do not require Rust or native audio libraries. Local helper builds use system libraries rather than a redistributable bundle. Cross-compiling the Go CLI does not cross-compile the helper. To exercise the TUI, use a candidate CLI and isolated server/base path as described in the repository self-test skill, and pass `--experimental-audio`. Real microphone/speaker and provider testing is manual and opt-in; automated tests cover IPC, media processing, and mocked server/session lifecycles.
 
 Live Anthropic tests are opt-in and incur API charges. Set `ANTHROPIC_API_KEY`, then explicitly enable them:
 
