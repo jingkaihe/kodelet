@@ -110,6 +110,7 @@ type configuredChatRunner struct {
 	environmentProfile string
 }
 
+// LoadConversation supplies the TUI with the Web UI's display transcript.
 func (r *configuredChatRunner) LoadConversation(ctx context.Context, conversationID string) (chatpkg.ConversationHistory, error) {
 	return r.LoadConversationTranscript(ctx, conversationID)
 }
@@ -241,7 +242,9 @@ func (r *configuredChatRunner) prepareRequest(ctx context.Context, request chatp
 	var history chatpkg.ConversationHistory
 	var err error
 	if request.ConversationID != "" {
-		history, err = r.LoadConversation(ctx, request.ConversationID)
+		// Affinity uses the strict history endpoint. The display transcript omits
+		// runners whose lookup fails, which must not look like a missing runner.
+		history, err = r.Client.LoadConversation(ctx, request.ConversationID)
 		var responseErr *chatpkg.ControlPlaneHTTPError
 		if err != nil && (!errors.As(err, &responseErr) || responseErr.StatusCode != http.StatusNotFound) {
 			return request, err

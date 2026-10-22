@@ -936,6 +936,7 @@ func TestConfiguredChatRunnerRealtimePreservesCLIOptionsAndSavedAffinity(t *test
 		daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/api/conversations/saved":
+				assert.Equal(t, "stream", r.URL.Query().Get("format"), "affinity must fail closed on runner lookup errors")
 				require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
 					"id": "saved", "cwd": "/workspace", "runnerId": "runner",
 					"profile": "coding", "environmentProfile": "sandbox",
