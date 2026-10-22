@@ -104,11 +104,10 @@ impl Peer {
         connection.on_peer_connection_state_change(Box::new(move |state| {
             let failed = failure.clone();
             Box::pin(async move {
+                // Disconnected is transient: ICE reports Failed if it does not recover.
                 if matches!(
                     state,
-                    RTCPeerConnectionState::Failed
-                        | RTCPeerConnectionState::Closed
-                        | RTCPeerConnectionState::Disconnected
+                    RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed
                 ) {
                     failed.store(true, Ordering::Release);
                 }
