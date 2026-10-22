@@ -1941,7 +1941,7 @@ func (m model) filteredSlashCommands() []slashcommands.Command {
 		return nil
 	}
 	commands := make([]slashcommands.Command, 0, len(m.slashCommands))
-	for _, command := range mergeSlashCommands(m.audioSlashCommands(), m.slashCommands) {
+	for _, command := range m.slashCommands {
 		name := strings.ToLower(command.Name)
 		description := strings.ToLower(command.Description)
 		if query == "" || strings.Contains(name, query) || strings.Contains(description, query) {

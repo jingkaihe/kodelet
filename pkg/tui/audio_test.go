@@ -12,6 +12,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/audiohost"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	transcriptiontypes "github.com/jingkaihe/kodelet/pkg/types/transcription"
 	"github.com/pkg/errors"
@@ -19,15 +20,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAudioOptInAndDraftCommit(t *testing.T) {
+func TestAudioCommandsAndDraftCommit(t *testing.T) {
 	m := newThemeTestModel(t, Config{})
-	m.textarea.SetValue("/voice")
-	assert.Empty(t, m.audioSlashCommands())
-	_, handled := m.handleLocalSlashCommand("/voice")
-	assert.False(t, handled, "disabled audio must not take over extension commands")
-	assert.Nil(t, m.audio)
-	m.experimentalAudio = true
-	assert.Contains(t, m.filteredSlashCommands(), m.audioSlashCommands()[0])
+	names := []string{}
+	for _, command := range withTUIBuiltInSlashCommands(nil) {
+		names = append(names, command.Name)
+	}
+	assert.Subset(t, names, []string{"voice", "talk"})
+	_, handled := m.handleLocalSlashCommand("/voice extra")
+	assert.True(t, handled, "audio commands are built in")
+	assert.Nil(t, m.audio, "invalid arguments only show usage")
 
 	m.textarea.SetValue("hello ")
 	m.textarea.CursorEnd()
@@ -42,10 +44,24 @@ func TestAudioOptInAndDraftCommit(t *testing.T) {
 	assert.False(t, result.running, "dictation must not submit a turn")
 }
 
+func TestAudioShortcutsYieldToExtensionShortcuts(t *testing.T) {
+	m := newThemeTestModel(t, Config{})
+	key := tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl | tea.ModAlt}
+	require.Equal(t, "ctrl+alt+v", key.String())
+	m.extensionShortcuts = []extensions.Shortcut{{Key: "ctrl+alt+v", ExtensionID: "dictation"}}
+	_, handled := m.handleAudioInput(key)
+	assert.False(t, handled)
+	assert.Nil(t, m.audio)
+
+	m.extensionShortcuts = nil
+	_, handled = m.handleAudioInput(key)
+	assert.True(t, handled, "the built-in shortcut applies without an extension override")
+}
+
 func TestAudioDiscardsCanceledStaleAndChangedDraftResults(t *testing.T) {
 	for _, test := range []string{"canceled", "different conversation", "changed draft", "old session"} {
 		t.Run(test, func(t *testing.T) {
-			m := newThemeTestModel(t, Config{ExperimentalAudio: true})
+			m := newThemeTestModel(t, Config{})
 			m.textarea.SetValue("draft")
 			_, cancel := context.WithCancel(m.ctx)
 			defer cancel()
@@ -68,7 +84,7 @@ func TestAudioDiscardsCanceledStaleAndChangedDraftResults(t *testing.T) {
 }
 
 func TestAudioRecordingKeysAndCallMute(t *testing.T) {
-	m := newThemeTestModel(t, Config{ExperimentalAudio: true})
+	m := newThemeTestModel(t, Config{})
 	ctx, cancel := context.WithCancel(m.ctx)
 	defer cancel()
 	m.audio = &tuiAudioSession{cancel: cancel, mode: "voice", phase: "recording", controls: make(chan audiohost.Command, 1)}
@@ -92,7 +108,7 @@ func TestAudioRecordingKeysAndCallMute(t *testing.T) {
 }
 
 func TestAudioTalkStreamsBothSpeakersIntoTranscript(t *testing.T) {
-	m := newThemeTestModel(t, Config{ExperimentalAudio: true})
+	m := newThemeTestModel(t, Config{})
 	_, cancel := context.WithCancel(m.ctx)
 	defer cancel()
 	session := &tuiAudioSession{cancel: cancel, key: m.key, mode: "talk", phase: "connected", started: time.Now()}
@@ -226,7 +242,7 @@ func TestAudioTalkDoesNotReplaceTypedUserEntries(t *testing.T) {
 func TestAudioTalkCreatesConversationWithDraftSettings(t *testing.T) {
 	runner := newStreamingConversationSourceRunner()
 	m := newThemeTestModel(t, Config{
-		ExperimentalAudio: true, Remote: true, Runner: runner,
+		Remote: true, Runner: runner,
 		Profile: "coding", Model: "picked-model", ReasoningEffort: "high",
 		CWD: "/workspace", EnvironmentProfile: "sandbox",
 	})

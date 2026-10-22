@@ -23,21 +23,20 @@ import (
 )
 
 type ChatConfig struct {
-	ResumeConvID      string
-	CWD               string
-	Theme             string
-	Follow            bool
-	NoExtensions      bool
-	NoTools           bool
-	ExperimentalAudio bool
-	Runner            string
-	RunnerProfile     string
-	Server            string
-	ServerConfigured  bool
-	AuthToken         string
-	HTTPClient        *http.Client
-	ConfigError       error
-	Options           *llmtypes.ExecutionOptions
+	ResumeConvID     string
+	CWD              string
+	Theme            string
+	Follow           bool
+	NoExtensions     bool
+	NoTools          bool
+	Runner           string
+	RunnerProfile    string
+	Server           string
+	ServerConfigured bool
+	AuthToken        string
+	HTTPClient       *http.Client
+	ConfigError      error
+	Options          *llmtypes.ExecutionOptions
 }
 
 func NewChatConfig() *ChatConfig {
@@ -356,7 +355,6 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 		Remote:                  true,
 		Runner:                  runner,
 		ServerURL:               config.Server,
-		ExperimentalAudio:       config.ExperimentalAudio,
 		Theme:                   config.Theme,
 		ConversationID:          config.ResumeConvID,
 		CWD:                     config.CWD,
@@ -462,7 +460,6 @@ func init() {
 	chatCmd.Flags().BoolP("follow", "f", defaults.Follow, "Follow the most recent conversation")
 	chatCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extensions for this conversation")
 	chatCmd.Flags().Bool("no-tools", defaults.NoTools, "Disable all tools (for simple query-response usage)")
-	chatCmd.Flags().Bool("experimental-audio", false, "Enable experimental local dictation and realtime voice (requires kodelet-audio)")
 	chatCmd.Flags().Bool("use-weak-model", false, "Use the configured weak model")
 	chatCmd.Flags().Int("max-turns", 0, "Maximum AI turns per prompt (0 for no limit)")
 	chatCmd.Flags().String("runner", defaults.Runner, "Workspace runner ID, ID prefix, or display name")
@@ -498,7 +495,6 @@ func getChatConfigFromFlags(cmd *cobra.Command) *ChatConfig {
 	if noTools, err := cmd.Flags().GetBool("no-tools"); err == nil {
 		config.NoTools = noTools
 	}
-	config.ExperimentalAudio, _ = cmd.Flags().GetBool("experimental-audio")
 	if runner, err := cmd.Flags().GetString("runner"); err == nil {
 		config.Runner = strings.TrimSpace(runner)
 	}

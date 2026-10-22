@@ -33,7 +33,7 @@ Run commands from the repository root:
 
 Standard lint/test tasks are listed in `AGENTS.md`. For a focused Go check, use `mise exec -- go test ./pkg/<package>`.
 
-Audio tasks select their own Rust toolchain; normal Go build/test/release tasks do not require Rust or native audio libraries. Local helper builds use system libraries rather than a redistributable bundle. Cross-compiling the Go CLI does not cross-compile the helper. To exercise the TUI, use a candidate CLI and isolated server/base path as described in the repository self-test skill, and pass `--experimental-audio`. Real microphone/speaker and provider testing is manual and opt-in; automated tests cover IPC, media processing, and mocked server/session lifecycles.
+Audio tasks select their own Rust toolchain; normal Go build/test/release tasks do not require Rust or native audio libraries. Local helper builds use system libraries rather than a redistributable bundle. Cross-compiling the Go CLI does not cross-compile the helper. To exercise the TUI, use a candidate CLI and isolated server/base path as described in the repository self-test skill, then use `/voice` or `/talk`. Real microphone/speaker and provider testing is manual and opt-in; automated tests cover IPC, media processing, and mocked server/session lifecycles.
 
 Live Anthropic tests are opt-in and incur API charges. Set `ANTHROPIC_API_KEY`, then explicitly enable them:
 

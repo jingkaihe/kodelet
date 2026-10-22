@@ -146,7 +146,6 @@ func newModel(ctx context.Context, config Config) model {
 // configure installs connection and conversation settings without replacing the
 // live program's context, channels, composer, or presentation state.
 func (m *model) configure(config Config) {
-	m.experimentalAudio = config.ExperimentalAudio
 	m.runner = config.Runner
 	m.conversationSource, _ = config.Runner.(chat.ConversationSource)
 	m.conversationStream, _ = config.Runner.(chat.ConversationStreamer)

@@ -37,7 +37,6 @@ func TestGetChatConfigFromFlags(t *testing.T) {
 	cmd.Flags().BoolP("follow", "f", defaults.Follow, "")
 	cmd.Flags().Bool("no-extensions", defaults.NoExtensions, "")
 	cmd.Flags().Bool("no-tools", defaults.NoTools, "")
-	cmd.Flags().Bool("experimental-audio", defaults.ExperimentalAudio, "")
 	cmd.Flags().String("runner", defaults.Runner, "")
 	cmd.Flags().String("runner-profile", defaults.RunnerProfile, "")
 	cmd.Flags().String("server", defaults.Server, "")
@@ -48,7 +47,6 @@ func TestGetChatConfigFromFlags(t *testing.T) {
 	require.NoError(t, cmd.Flags().Set("theme", " tokyo-night "))
 	require.NoError(t, cmd.Flags().Set("no-extensions", "true"))
 	require.NoError(t, cmd.Flags().Set("no-tools", "true"))
-	require.NoError(t, cmd.Flags().Set("experimental-audio", "true"))
 	require.NoError(t, cmd.Flags().Set("runner", " runner-1 "))
 	require.NoError(t, cmd.Flags().Set("runner-profile", " workspace "))
 
@@ -59,7 +57,6 @@ func TestGetChatConfigFromFlags(t *testing.T) {
 	assert.Equal(t, "tokyo-night", config.Theme)
 	assert.True(t, config.NoExtensions)
 	assert.True(t, config.NoTools)
-	assert.True(t, config.ExperimentalAudio)
 	assert.Equal(t, "runner-1", config.Runner)
 	assert.Equal(t, "workspace", config.RunnerProfile)
 }

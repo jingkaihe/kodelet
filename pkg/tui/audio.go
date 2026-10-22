@@ -10,7 +10,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/jingkaihe/kodelet/pkg/audiohost"
 	"github.com/jingkaihe/kodelet/pkg/chat"
-	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/pkg/errors"
 )
 
@@ -40,16 +39,6 @@ type tuiAudioMsg struct {
 
 type tuiAudioTick struct{ session *tuiAudioSession }
 
-func (m model) audioSlashCommands() []slashcommands.Command {
-	if !m.experimentalAudio {
-		return nil
-	}
-	return []slashcommands.Command{
-		{Name: "voice", Description: "Dictate into the draft (experimental)", Placeholder: "/voice"},
-		{Name: "talk", Description: "Start a realtime voice call (experimental)", Hint: "stop|mute (optional)", Placeholder: "/talk [stop|mute]"},
-	}
-}
-
 func audioTick(session *tuiAudioSession) tea.Cmd {
 	return tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg { return tuiAudioTick{session} })
 }
@@ -61,9 +50,6 @@ func (m *model) audioNotice(message string) tea.Cmd {
 }
 
 func (m *model) handleAudioCommand(command, args string) tea.Cmd {
-	if !m.experimentalAudio {
-		return m.audioNotice("Start chat with --experimental-audio and install the helper with mise run audio-install.")
-	}
 	args = strings.TrimSpace(args)
 	if command == "voice" && args != "" || command == "talk" && args != "" && args != "stop" && args != "mute" {
 		return m.audioNotice("Usage: /voice or /talk [stop|mute]")
@@ -82,9 +68,6 @@ func (m *model) handleAudioCommand(command, args string) tea.Cmd {
 }
 
 func (m *model) handleAudioInput(msg tea.Msg) (tea.Cmd, bool) {
-	if !m.experimentalAudio {
-		return nil, false
-	}
 	if _, ok := msg.(tea.PasteMsg); ok && m.audio != nil && m.audio.mode == "voice" {
 		return nil, true
 	}
@@ -118,6 +101,10 @@ func (m *model) handleAudioInput(msg tea.Msg) (tea.Cmd, bool) {
 			}
 			return nil, true // Freeze the draft/cursor until commit or cancellation.
 		}
+	}
+	// Like other built-in shortcuts, audio keys yield to extension shortcuts.
+	if _, overridden := m.extensionShortcutForKey(key.Keystroke()); overridden {
+		return nil, false
 	}
 	switch key.String() {
 	case "ctrl+alt+v":
