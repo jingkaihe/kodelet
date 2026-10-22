@@ -29,7 +29,7 @@ From the repository root:
 mise run audio-build
 mise run audio-test
 mise run audio-lint
-# Only when you want to install the experimental helper:
+# Also install the helper into ~/.local/bin, which must be on PATH:
 mise run audio-install
 ```
 

@@ -23,7 +23,7 @@ Run commands from the repository root:
 | `mise run build` | Build the CLI with regenerated, embedded frontend assets. |
 | `mise run build-dev` | Build the CLI without regenerating the frontend. |
 | `mise run audio-build` | Build the experimental native helper into `bin/kodelet-audio`; requires platform libraries listed in `audio/README.md`. |
-| `mise run audio-install` | Install only that helper into `$KODELET_BASE_PATH/bin` (default `~/.kodelet/bin`), ad-hoc signed on macOS. |
+| `mise run audio-install` | Also install that helper into `~/.local/bin`, ad-hoc signed on macOS; Kodelet runs the first `kodelet-audio` on `PATH`. |
 | `mise run audio-test` / `audio-lint` | Run native tests without hardware/providers, and Rust formatting/Clippy checks. |
 | `mise run code-generation` | Generate the embedded code-mode runtime and the frontend (`go generate ./pkg/codemode ./pkg/webui`). Run it on a fresh checkout before plain `go build` or `go test`. |
 | `mise run codemode-generation` | Generate only the code-mode QuickJS runtime from its locked npm dependency. |

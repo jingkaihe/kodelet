@@ -76,11 +76,11 @@ install -m 755 audio/target/release/kodelet-audio bin/kodelet-audio
 '''
 
 [tasks.audio-install]
-description = "Build and install only the experimental helper into the local Kodelet bin directory"
+description = "Build the experimental helper into ./bin and install it into ~/.local/bin"
 depends = ["audio-build"]
 run = '''
 set -eu
-destination="${KODELET_BASE_PATH:-$HOME/.kodelet}/bin"
+destination="$HOME/.local/bin"
 mkdir -p "$destination"
 staged=$(mktemp "$destination/.kodelet-audio.XXXXXX")
 trap 'rm -f "$staged"' EXIT
@@ -91,6 +91,10 @@ if [ "$(uname -s)" = Darwin ]; then
 fi
 mv -f "$staged" "$destination/kodelet-audio"
 echo "Installed experimental helper: $destination/kodelet-audio"
+case ":$PATH:" in
+  *":$destination:"*) ;;
+  *) echo "Add $destination to PATH so Kodelet can find kodelet-audio" >&2 ;;
+esac
 '''
 
 [tasks.audio-test]
