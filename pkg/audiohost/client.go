@@ -167,7 +167,8 @@ func (c *Client) Send(command Command) error {
 func (c *Client) acceptCommand(command Command) error {
 	switch command.Type {
 	case "record":
-		if c.mode == "" && command.MaxAudioBytes >= 0 && command.MaxDurationSeconds >= 0 {
+		// Mirror the helper's minimums; zero limits are also omitted from JSON.
+		if c.mode == "" && command.MaxAudioBytes >= 2 && command.MaxDurationSeconds > 0 {
 			c.mode = "recording"
 			return nil
 		}

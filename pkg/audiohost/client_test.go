@@ -202,6 +202,8 @@ func installFixtureHelper(t *testing.T) string {
 	return directory
 }
 
+var recordCommand = Command{Type: "record", MaxAudioBytes: 32000, MaxDurationSeconds: 1}
+
 func setupFixture(t *testing.T, mode string) string {
 	t.Helper()
 	installFixtureHelper(t)
@@ -330,11 +332,18 @@ func TestRecordingAndRealtimeModes(t *testing.T) {
 	assert.Empty(t, c.events, "Start consumes ready and sends no device command")
 	assert.Error(t, c.Send(Command{Type: "finish"}))
 	assert.Error(t, c.Send(Command{Type: "hello", Protocol: 1}))
-	assert.Error(t, c.Send(Command{Type: "record", MaxAudioBytes: -1}))
-	require.NoError(t, c.Send(Command{Type: "record", MaxAudioBytes: 32000, MaxDurationSeconds: 1}))
+	for _, invalid := range []Command{
+		{Type: "record", MaxAudioBytes: -1, MaxDurationSeconds: 1},
+		{Type: "record", MaxDurationSeconds: 1},
+		{Type: "record", MaxAudioBytes: 1, MaxDurationSeconds: 1},
+		{Type: "record", MaxAudioBytes: 32000},
+	} {
+		assert.Error(t, c.Send(invalid), "the helper would reject %+v", invalid)
+	}
+	require.NoError(t, c.Send(recordCommand))
 	assert.Equal(t, "recording", nextEvent(t, c).Type)
 	assert.Equal(t, Event{Type: "audio", Audio: []byte{0, 0, 0xff, 0x7f}}, nextEvent(t, c))
-	assert.Error(t, c.Send(Command{Type: "record"}))
+	assert.Error(t, c.Send(recordCommand))
 	assert.Error(t, c.Send(Command{Type: "createOffer"}))
 	require.NoError(t, c.Send(Command{Type: "finish"}))
 	assert.Equal(t, "recorded", nextEvent(t, c).Type)
@@ -353,7 +362,7 @@ func TestRecordingAndRealtimeModes(t *testing.T) {
 		require.NoError(t, c.Send(Command{Type: "mute", Muted: muted}))
 		assert.Equal(t, Event{Type: "muted", Muted: muted}, nextEvent(t, c))
 	}
-	assert.Error(t, c.Send(Command{Type: "record"}))
+	assert.Error(t, c.Send(recordCommand))
 	require.NoError(t, c.Close())
 	assert.Equal(t, "closed", nextEvent(t, c).Type)
 	_, ok := <-c.Events()
@@ -410,7 +419,7 @@ func TestContextCancellation(t *testing.T) {
 		t.Cleanup(cancel)
 		c, err := Start(ctx)
 		require.NoError(t, err)
-		require.NoError(t, c.Send(Command{Type: "record"}))
+		require.NoError(t, c.Send(recordCommand))
 		cancel()
 		awaitExit(t, c)
 		assert.ErrorIs(t, c.Close(), context.Canceled)
@@ -427,7 +436,7 @@ func TestProcessAndProtocolFailures(t *testing.T) {
 	for _, mode := range []string{"crash", "eof", "error", "malformed", "unexpected"} {
 		t.Run(mode, func(t *testing.T) {
 			c := startFixture(t, mode)
-			require.NoError(t, c.Send(Command{Type: "record"}))
+			require.NoError(t, c.Send(recordCommand))
 			event := nextEvent(t, c)
 			assert.Equal(t, "error", event.Type)
 			assert.NotEmpty(t, event.Message)
@@ -445,7 +454,7 @@ func TestProcessAndProtocolFailures(t *testing.T) {
 
 func TestEventOverflowIsExplicitAndPreservesQueuedAudio(t *testing.T) {
 	c := startFixture(t, "overflow")
-	require.NoError(t, c.Send(Command{Type: "record"}))
+	require.NoError(t, c.Send(recordCommand))
 	awaitExit(t, c) // Deliberately do not consume events until overflow.
 	assert.ErrorContains(t, c.Close(), "queue overflow")
 	assert.Equal(t, "recording", nextEvent(t, c).Type)
