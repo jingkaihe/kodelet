@@ -276,6 +276,8 @@ func runRealtimeAudio(ctx context.Context, client realtimeAudioClient, request c
 				}(event.SDP)
 			case "connected":
 				connecting.Stop()
+			case "level":
+				continue // Calls have no level meter; avoid redrawing ten times a second.
 			case "error":
 				return errors.New(event.Message)
 			}

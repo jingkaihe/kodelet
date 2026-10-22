@@ -437,15 +437,17 @@ func (c testRealtimeAudioClient) EndRealtime(ctx context.Context, id string) err
 }
 
 func TestRealtimeAudioContinuesAcrossAgentRunsAndCleansUp(t *testing.T) {
-	peer := &testAudioPeer{events: make(chan audiohost.Event, 2)}
+	peer := &testAudioPeer{events: make(chan audiohost.Event, 3)}
 	peer.events <- audiohost.Event{Type: "offer", SDP: "offer"}
 	peer.events <- audiohost.Event{Type: "connected"}
+	peer.events <- audiohost.Event{Type: "level", Level: 0.5}
 	closed := false
 	client := testRealtimeAudioClient{
 		start: func(context.Context) (chat.RealtimeSession, error) {
 			return chat.RealtimeSession{ID: "call", ConversationID: "conv", Answer: "answer"}, nil
 		},
 		stream: func(_ context.Context, emit func(chat.RealtimeEvent)) error {
+			assert.Eventually(t, func() bool { return len(peer.events) == 0 }, time.Second, time.Millisecond, "consume helper events first")
 			emit(chat.RealtimeEvent{Kind: "transcript", Text: "hello", Role: "user"})
 			emit(chat.RealtimeEvent{Kind: "agent-started"})
 			emit(chat.RealtimeEvent{Kind: "agent-completed"})
@@ -473,6 +475,7 @@ func TestRealtimeAudioContinuesAcrossAgentRunsAndCleansUp(t *testing.T) {
 		if msg.caption != nil && msg.caption.Kind == "transcript" {
 			captions = append(captions, msg.caption.Text)
 		}
+		assert.NotEqual(t, "level", msg.event.Type, "calls render no level meter")
 	}, peer.start)
 	require.NoError(t, err)
 	assert.True(t, conversationReady)
