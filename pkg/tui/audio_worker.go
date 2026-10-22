@@ -179,10 +179,17 @@ func runRealtimeAudio(ctx context.Context, client realtimeAudioClient, request c
 	callID := ""
 	defer func() {
 		cancel()
-		_ = peer.Close() // Release the microphone before waiting for server cleanup.
-		if callID != "" {
-			closeRealtimeCall(client, callID)
-		}
+		// End the server call while the helper releases the microphone, so both
+		// bounded cleanups fit within the TUI's exit wait.
+		ended := make(chan struct{})
+		go func(id string) {
+			defer close(ended)
+			if id != "" {
+				closeRealtimeCall(client, id)
+			}
+		}(callID)
+		_ = peer.Close()
+		<-ended
 	}()
 	type allocation struct {
 		session chat.RealtimeSession

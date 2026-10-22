@@ -137,6 +137,10 @@ func fixture(mode string) error {
 			if mode == "close-stall" {
 				time.Sleep(time.Minute)
 			}
+			if mode == "close-slow" {
+				// Like a helper closing its WebRTC peer within its own one-second bound.
+				time.Sleep(1500 * time.Millisecond)
+			}
 			if err := fixtureEvent(Event{Type: "closed"}); err != nil {
 				return err
 			}
@@ -456,7 +460,7 @@ func TestEventOverflowIsExplicitAndPreservesQueuedAudio(t *testing.T) {
 }
 
 func TestCloseIsConcurrentAndBounded(t *testing.T) {
-	for _, mode := range []string{"normal", "close-stall", "exit-stall"} {
+	for _, mode := range []string{"normal", "close-slow", "close-stall", "exit-stall"} {
 		t.Run(mode, func(t *testing.T) {
 			c := startFixture(t, mode)
 			results := make(chan error, 8)
@@ -466,7 +470,7 @@ func TestCloseIsConcurrentAndBounded(t *testing.T) {
 			awaitExit(t, c)
 			for range cap(results) {
 				err := <-results
-				if mode == "normal" {
+				if mode == "normal" || mode == "close-slow" {
 					assert.NoError(t, err)
 				} else {
 					require.Error(t, err)

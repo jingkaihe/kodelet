@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -303,7 +304,7 @@ func TestAudioTalkCreatesConversationWithDraftSettings(t *testing.T) {
 type testAudioPeer struct {
 	events chan audiohost.Event
 	sent   []audiohost.Command
-	closed bool
+	closed atomic.Bool
 }
 
 func (p *testAudioPeer) Send(command audiohost.Command) error {
@@ -311,7 +312,7 @@ func (p *testAudioPeer) Send(command audiohost.Command) error {
 	return nil
 }
 func (p *testAudioPeer) Events() <-chan audiohost.Event           { return p.events }
-func (p *testAudioPeer) Close() error                             { p.closed = true; return nil }
+func (p *testAudioPeer) Close() error                             { p.closed.Store(true); return nil }
 func (p *testAudioPeer) start(context.Context) (audioPeer, error) { return p, nil }
 
 type testDictationClient struct {
@@ -339,7 +340,7 @@ func TestDictationWorkerWAVAndRecordingLimits(t *testing.T) {
 			client := &testDictationClient{caps: transcriptiontypes.Capabilities{
 				Enabled: true, Available: true, MaxAudioBytes: 48, MaxDurationSeconds: 5, MimeTypes: []string{"audio/wav"},
 			}}
-			client.upload = func() { assert.True(t, peer.closed, "release microphone before uploading") }
+			client.upload = func() { assert.True(t, peer.closed.Load(), "release microphone before uploading") }
 			pcm := []byte{1, 2, 3, 4}
 			switch test {
 			case "limit":
@@ -426,7 +427,7 @@ func TestRealtimeAudioContinuesAcrossAgentRunsAndCleansUp(t *testing.T) {
 			return nil
 		},
 		end: func(ctx context.Context, id string) error {
-			assert.True(t, peer.closed)
+			// Ending the call runs alongside the helper close, not after it.
 			assert.NoError(t, ctx.Err(), "cleanup uses a fresh context")
 			assert.Equal(t, "call", id)
 			closed = true
@@ -448,7 +449,8 @@ func TestRealtimeAudioContinuesAcrossAgentRunsAndCleansUp(t *testing.T) {
 	}, peer.start)
 	require.NoError(t, err)
 	assert.True(t, conversationReady)
-	assert.True(t, closed)
+	assert.True(t, peer.closed.Load(), "release the microphone")
+	assert.True(t, closed, "cleanup waits for the call to end")
 	assert.Equal(t, []string{"hello", "next request"}, captions, "agent completion must not end the call")
 	assert.Equal(t, []audiohost.Command{{Type: "createOffer"}, {Type: "answer", SDP: "answer"}}, peer.sent)
 }
@@ -484,7 +486,7 @@ func TestRealtimeAudioClosesLateAllocationAfterCancel(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("audio did not stop promptly")
 	}
-	assert.True(t, peer.closed)
+	assert.True(t, peer.closed.Load())
 	close(release)
 	select {
 	case id := <-ended:

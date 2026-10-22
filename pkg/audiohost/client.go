@@ -17,6 +17,10 @@ const (
 	shutdownTimeout = time.Second
 	writeTimeout    = 3 * time.Second
 	eventQueueSize  = 32
+
+	// A graceful close may spend one second closing the peer and another second
+	// flushing events and stopping the runtime after releasing devices.
+	closeTimeout = 3 * time.Second
 )
 
 // Client owns one local helper. Drain Events while using it. An overflowing
@@ -340,9 +344,9 @@ func (c *Client) run(ctx context.Context) {
 	var deadline <-chan time.Time
 	var closeWritten chan struct{}
 	stop, canceled := c.stop, ctx.Done()
-	startDeadline := func() {
+	startDeadline := func(timeout time.Duration) {
 		if timer == nil {
-			timer = time.NewTimer(shutdownTimeout)
+			timer = time.NewTimer(timeout)
 			deadline = timer.C
 		}
 	}
@@ -363,7 +367,7 @@ func (c *Client) run(ctx context.Context) {
 			kill(err)
 		case <-stop:
 			stop = nil
-			startDeadline()
+			startDeadline(closeTimeout)
 			closeWritten = make(chan struct{})
 			go func() {
 				defer close(closeWritten)
@@ -377,7 +381,7 @@ func (c *Client) run(ctx context.Context) {
 			if result.err != nil {
 				kill(result.err)
 			}
-			startDeadline()
+			startDeadline(shutdownTimeout)
 		case err := <-waits:
 			waits = nil
 			c.stdin.Close()
@@ -386,7 +390,7 @@ func (c *Client) run(ctx context.Context) {
 			}
 			// Drain buffered stdout before closing it, but do not wait forever for
 			// a descendant that inherited a pipe.
-			startDeadline()
+			startDeadline(shutdownTimeout)
 		case <-deadline:
 			deadline = nil
 			kill(errors.New("audio helper shutdown timed out"))
