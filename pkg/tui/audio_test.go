@@ -109,6 +109,33 @@ func TestAudioRecordingKeysAndCallMute(t *testing.T) {
 	assert.Equal(t, "stopping", m.audio.phase)
 }
 
+func TestAudioEscClosesOverlaysBeforeEndingCall(t *testing.T) {
+	m := newThemeTestModel(t, Config{})
+	m.slashCommands = withTUIBuiltInSlashCommands(nil)
+	ctx, cancel := context.WithCancel(m.ctx)
+	defer cancel()
+	m.audio = &tuiAudioSession{cancel: cancel, mode: "talk", phase: "connected"}
+	esc := tea.KeyPressMsg{Code: tea.KeyEscape}
+
+	m.textarea.SetValue("/")
+	require.True(t, m.slashCommandSuggestionsOpen())
+	updated, _ := m.Update(esc)
+	*m = updated.(model)
+	assert.False(t, m.slashCommandSuggestionsOpen())
+	assert.NoError(t, ctx.Err(), "dismissing suggestions keeps the call")
+
+	m.reasoningPickerOpen = true
+	updated, _ = m.Update(esc)
+	*m = updated.(model)
+	assert.False(t, m.reasoningPickerOpen)
+	assert.NoError(t, ctx.Err(), "closing the reasoning picker keeps the call")
+
+	updated, _ = m.Update(esc)
+	*m = updated.(model)
+	assert.ErrorIs(t, ctx.Err(), context.Canceled)
+	assert.Equal(t, "stopping", m.audio.phase)
+}
+
 func TestAudioTalkStreamsBothSpeakersIntoTranscript(t *testing.T) {
 	m := newThemeTestModel(t, Config{})
 	_, cancel := context.WithCancel(m.ctx)

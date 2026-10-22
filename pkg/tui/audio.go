@@ -79,7 +79,7 @@ func (m *model) handleAudioInput(msg tea.Msg) (tea.Cmd, bool) {
 		m.cancelAudio()
 		return nil, false
 	}
-	if m.activeUIPrompt != nil || m.conversationPicker != nil || m.infoDialogOpen() || m.modelPickerOpen || m.historySearch != nil {
+	if m.activeUIPrompt != nil || m.conversationPicker != nil || m.infoDialogOpen() || m.modelPickerOpen || m.reasoningPickerOpen || m.historySearch != nil {
 		return nil, false
 	}
 	if _, focused := m.focusedExtensionSurfaceKey(); focused {
@@ -87,6 +87,9 @@ func (m *model) handleAudioInput(msg tea.Msg) (tea.Cmd, bool) {
 	}
 	if m.audio != nil {
 		if key.String() == "esc" {
+			if m.slashCommandSuggestionsOpen() {
+				return nil, false // Dismiss suggestions first; another Esc stops audio.
+			}
 			m.cancelAudio()
 			return nil, true
 		}
