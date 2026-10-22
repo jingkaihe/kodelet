@@ -277,6 +277,9 @@ func parseActualCommandForTest(t *testing.T, cmd *cobra.Command, args ...string)
 
 func setServerConfigForTest(t *testing.T, value string) {
 	t.Helper()
+	// Without a configured server, resolution falls back to a running local
+	// daemon. Keep these tests independent of the developer's own daemon.
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	previous := viper.Get("server")
 	wasSet := viper.IsSet("server")
 	viper.Set("server", value)
