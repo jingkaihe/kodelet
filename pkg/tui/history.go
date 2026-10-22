@@ -68,12 +68,13 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 	ensureAssistant := func(anchor *int) int {
 		if len(entries) == 0 || entries[len(entries)-1].kind != entryAssistant ||
 			entries[len(entries)-1].realtimeID != "" ||
-			(anchor != nil && (entries[len(entries)-1].codingAnchor == nil || *entries[len(entries)-1].codingAnchor != *anchor)) ||
 			(len(entries[len(entries)-1].blocks) > 0 &&
 				(entries[len(entries)-1].blocks[0].kind == blockCompaction || entries[len(entries)-1].blocks[0].kind == blockResourcesReloaded)) {
-			entries = append(entries, chatEntry{kind: entryAssistant, codingAnchor: anchor})
+			entries = append(entries, chatEntry{kind: entryAssistant})
 		}
-		return len(entries) - 1
+		index := len(entries) - 1
+		entries[index].codingSpan = extendCodingSpan(entries[index].codingSpan, anchor)
+		return index
 	}
 
 	for _, msg := range messages {
@@ -86,7 +87,7 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 		case "resources-reloaded", "resource-reload-refused":
 			if msg.ResourceReloadID != "" && !hasResourceReloadMarker(entries, msg.ResourceReloadID) {
 				entry := resourceReloadEntry(msg.ResourceReloadID, msg.Content, msg.Kind == "resource-reload-refused")
-				entry.codingAnchor = msg.Anchor
+				entry.codingSpan = extendCodingSpan(nil, msg.Anchor)
 				entries = append(entries, entry)
 			}
 		case "context-compacted":
@@ -96,7 +97,7 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 		case "text":
 			switch msg.Role {
 			case "user":
-				entries = append(entries, chatEntry{kind: entryUser, content: strings.TrimSpace(msg.Content), codingAnchor: msg.Anchor})
+				entries = append(entries, chatEntry{kind: entryUser, content: strings.TrimSpace(msg.Content), codingSpan: extendCodingSpan(nil, msg.Anchor)})
 			case "assistant":
 				text := strings.TrimSpace(msg.Content)
 				if text == "" {

@@ -302,22 +302,26 @@ func upsertAudioTranscript(entries []chatEntry, entry chatEntry) ([]chatEntry, i
 		}
 		return entries, index
 	}
-	position := 0
+	position := 0 // Coding messages before the current entry.
 	for index, existing := range entries {
 		if existing.realtimeID != "" {
 			if existing.realtimeAnchor <= entry.realtimeAnchor {
 				continue
 			}
 		} else {
-			if existing.kind == entryInfo || (existing.codingAnchor == nil && len(existing.blocks) > 0 &&
+			if existing.kind == entryInfo || (existing.codingSpan == nil && len(existing.blocks) > 0 &&
 				(existing.blocks[0].kind == blockCompaction || existing.blocks[0].kind == blockResourcesReloaded)) {
 				continue
 			}
-			if existing.codingAnchor != nil {
-				position = *existing.codingAnchor
+			// Live entries have no saved span and count as one coding message.
+			first, last := position, position
+			if existing.codingSpan != nil {
+				first, last = existing.codingSpan.first, existing.codingSpan.last
 			}
-			if position < entry.realtimeAnchor {
-				position++
+			// A caption positioned inside a merged saved reply follows that reply;
+			// the next history load places it between the reply's messages.
+			if first < entry.realtimeAnchor {
+				position = last + 1
 				continue
 			}
 		}

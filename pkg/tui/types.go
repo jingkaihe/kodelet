@@ -124,7 +124,22 @@ type chatEntry struct {
 	realtimeID     string
 	realtimeAnchor int  // Server-owned coding-message position for this utterance.
 	realtimeLive   bool // Only live captions override a racing history snapshot.
-	codingAnchor   *int
+	codingSpan     *codingSpan
+}
+
+// codingSpan is the inclusive range of saved coding-message positions that one
+// entry renders. Consecutive saved assistant messages share one entry, as live
+// streaming does, so captions can still be positioned without splitting replies.
+type codingSpan struct{ first, last int }
+
+func extendCodingSpan(span *codingSpan, anchor *int) *codingSpan {
+	if anchor == nil {
+		return span
+	}
+	if span == nil {
+		return &codingSpan{first: *anchor, last: *anchor}
+	}
+	return &codingSpan{first: min(span.first, *anchor), last: max(span.last, *anchor)}
 }
 
 type historySearchState struct {

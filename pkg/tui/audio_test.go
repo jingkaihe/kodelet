@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/binary"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -212,6 +213,38 @@ func TestAudioTalkRestoresSavedTranscriptAndReconcilesLiveUpdates(t *testing.T) 
 		assert.Equal(t, 1, m.entries[2].realtimeAnchor, "updates never move an existing utterance")
 		assert.Equal(t, "follow up", m.entries[3].content)
 		assert.Equal(t, "coding reply two", m.entries[4].content)
+	}
+}
+
+func TestSavedAssistantMessagesMergeLikeLiveRepliesAroundCaptions(t *testing.T) {
+	entries := entriesFromHistory([]conversations.StreamableMessage{
+		{Anchor: new(0), Kind: "text", Role: "user", Content: "check files"},
+		{Anchor: new(1), Kind: "tool-use", Role: "assistant", ToolCallID: "one", ToolName: "file_read", Input: "{}"},
+		{Anchor: new(1), Kind: "tool-result", Role: "user", ToolCallID: "one", ToolName: "file_read", Content: "first"},
+		{Anchor: new(2), Kind: "tool-use", Role: "assistant", ToolCallID: "two", ToolName: "file_read", Input: "{}"},
+		{Anchor: new(2), Kind: "text", Role: "assistant", Content: "both read"},
+		{ID: "voice:user", Anchor: new(3), Kind: "text", Role: "user", Content: "spoken follow-up"},
+		{Anchor: new(3), Kind: "text", Role: "assistant", Content: "after the caption"},
+	})
+	require.Len(t, entries, 4)
+	assert.Equal(t, &codingSpan{first: 1, last: 2}, entries[1].codingSpan)
+	require.Len(t, entries[1].blocks, 2)
+	assert.Len(t, entries[1].blocks[0].tools, 2, "consecutive saved tool calls stay grouped")
+	assert.Equal(t, "voice:user", entries[2].realtimeID, "captions still split saved replies")
+	assert.Equal(t, &codingSpan{first: 3, last: 3}, entries[3].codingSpan)
+
+	for _, test := range []struct {
+		anchor int
+		index  int
+	}{
+		{anchor: 1, index: 1}, // Before the merged reply.
+		{anchor: 2, index: 2}, // Inside it: after the reply until history reloads.
+		{anchor: 3, index: 3}, // Equal anchors keep arrival order.
+		{anchor: 4, index: 4},
+	} {
+		inserted, index := upsertAudioTranscript(slices.Clone(entries), chatEntry{kind: entryUser, realtimeID: "live", realtimeAnchor: test.anchor})
+		assert.Equal(t, test.index, index, "anchor %d", test.anchor)
+		assert.Equal(t, "live", inserted[index].realtimeID)
 	}
 }
 
