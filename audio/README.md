@@ -33,7 +33,7 @@ mise run audio-lint
 mise run audio-install
 ```
 
-Or build independently with `cd audio && cargo build --release --locked`. The executable is `audio/target/release/kodelet-audio`. The root install task applies a local ad-hoc macOS signature with identifier `com.kodelet.audio`; no Developer ID, hardened runtime, or notarization is used. The macOS executable embeds a matching bundle identifier and `NSMicrophoneUsageDescription` in `__TEXT,__info_plist`. Actual microphone permission is still controlled by macOS/TCC, often attributed to the launching terminal. Grant the relevant app microphone access in System Settings; an ad-hoc signature does not bypass consent.
+Or build independently with `cd audio && cargo build --release --locked`. The executable is `audio/target/release/kodelet-audio`. Kodelet runs the first `kodelet-audio` executable found in an absolute `PATH` entry; it never downloads the helper. The root install task applies a local ad-hoc macOS signature with identifier `com.kodelet.audio`; no Developer ID, hardened runtime, or notarization is used. The macOS executable embeds a matching bundle identifier and `NSMicrophoneUsageDescription` in `__TEXT,__info_plist`. Actual microphone permission is still controlled by macOS/TCC, often attributed to the launching terminal. Grant the relevant app microphone access in System Settings; an ad-hoc signature does not bypass consent.
 
 ## Protocol 1
 

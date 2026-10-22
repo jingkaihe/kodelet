@@ -5,15 +5,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sync"
 	"time"
 
-	conversationtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/pkg/errors"
 )
 
 const (
+	helperName      = "kodelet-audio"
 	startupTimeout  = 5 * time.Second
 	shutdownTimeout = time.Second
 	writeTimeout    = 3 * time.Second
@@ -41,11 +40,11 @@ type Client struct {
 	err     error
 }
 
-// Start launches the explicitly configured KODELET_AUDIO_HELPER (an absolute
-// path), or <Kodelet base path>/bin/kodelet-audio. It never searches PATH or
-// downloads a helper. Startup only exchanges hello/ready protocol 1; it does not
-// open audio devices. The context owns the process until exit, including after
-// Start returns. The ready event is consumed by Start, not exposed on Events.
+// Start launches the first kodelet-audio executable in PATH, ignoring relative
+// PATH entries. It never downloads a helper. Startup only exchanges hello/ready
+// protocol 1; it does not open audio devices. The context owns the process until
+// exit, including after Start returns. The ready event is consumed by Start, not
+// exposed on Events.
 func Start(ctx context.Context) (*Client, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -120,18 +119,12 @@ func Start(ctx context.Context) (*Client, error) {
 }
 
 func helperPath() (string, error) {
-	if path, set := os.LookupEnv("KODELET_AUDIO_HELPER"); set {
-		if !filepath.IsAbs(path) {
-			return "", errors.New("KODELET_AUDIO_HELPER must be an absolute executable path")
-		}
-		return path, nil
-	}
-	base, err := conversationtypes.GetDefaultBasePath()
+	// LookPath rejects matches from relative PATH entries such as ".".
+	path, err := exec.LookPath(helperName)
 	if err != nil {
-		return "", errors.Wrap(err, "resolve audio helper base path")
+		return "", errors.Wrap(err, "find kodelet-audio in PATH (build and install it with mise run audio-install)")
 	}
-	path, err := filepath.Abs(filepath.Join(base, "bin", "kodelet-audio"))
-	return path, errors.Wrap(err, "resolve audio helper path")
+	return path, nil
 }
 
 // Send serializes a control command. It returns after writing, not after the

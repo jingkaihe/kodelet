@@ -19,8 +19,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The test executable doubles as the helper; Start still executes exactly the
-// configured path, without test-only process arguments or production hooks.
+// The test executable doubles as the helper through a kodelet-audio symlink in
+// PATH, without test-only process arguments or production hooks.
 func TestMain(m *testing.M) {
 	if mode := os.Getenv("KODELET_AUDIOHOST_TEST_FIXTURE"); mode != "" {
 		if err := fixture(mode); err != nil {
@@ -188,11 +188,19 @@ func fixtureEvent(event Event) error {
 	return err
 }
 
-func setupFixture(t *testing.T, mode string) string {
+func installFixtureHelper(t *testing.T) string {
 	t.Helper()
 	executable, err := os.Executable()
 	require.NoError(t, err)
-	t.Setenv("KODELET_AUDIO_HELPER", executable)
+	directory := t.TempDir()
+	require.NoError(t, os.Symlink(executable, filepath.Join(directory, helperName)))
+	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return directory
+}
+
+func setupFixture(t *testing.T, mode string) string {
+	t.Helper()
+	installFixtureHelper(t)
 	t.Setenv("KODELET_AUDIOHOST_TEST_FIXTURE", mode)
 	pidPath := filepath.Join(t.TempDir(), "pid")
 	t.Setenv("KODELET_AUDIOHOST_TEST_PID", pidPath)
@@ -495,41 +503,29 @@ func TestCloseInterruptsBlockedSend(t *testing.T) {
 }
 
 func TestHelperPaths(t *testing.T) {
-	for _, path := range []string{"", "kodelet-audio", "./kodelet-audio"} {
-		t.Run("invalid-"+path, func(t *testing.T) {
-			t.Setenv("KODELET_AUDIO_HELPER", path)
-			_, err := Start(t.Context())
-			assert.ErrorContains(t, err, "absolute")
-		})
-	}
 	t.Run("missing", func(t *testing.T) {
-		t.Setenv("KODELET_AUDIO_HELPER", filepath.Join(t.TempDir(), "missing"))
+		t.Setenv("PATH", t.TempDir())
 		_, err := Start(t.Context())
-		assert.ErrorContains(t, err, "build and install")
+		assert.ErrorContains(t, err, "kodelet-audio in PATH")
+		assert.ErrorContains(t, err, "mise run audio-install")
 	})
-	t.Run("managed", func(t *testing.T) {
+	t.Run("first PATH match", func(t *testing.T) {
 		setupFixture(t, "normal")
-		require.NoError(t, os.Unsetenv("KODELET_AUDIO_HELPER"))
-		base := t.TempDir()
-		t.Setenv("KODELET_BASE_PATH", base)
-		t.Setenv("PATH", "")
-		require.NoError(t, os.Mkdir(filepath.Join(base, "bin"), 0o755))
-		executable, err := os.Executable()
+		first := installFixtureHelper(t)
+		path, err := helperPath()
 		require.NoError(t, err)
-		require.NoError(t, os.Symlink(executable, filepath.Join(base, "bin", "kodelet-audio")))
+		assert.Equal(t, filepath.Join(first, helperName), path)
 		c, err := Start(t.Context())
 		require.NoError(t, err)
 		assert.NoError(t, c.Close())
 	})
-	t.Run("home", func(t *testing.T) {
-		t.Setenv("KODELET_AUDIO_HELPER", "")
-		require.NoError(t, os.Unsetenv("KODELET_AUDIO_HELPER"))
-		t.Setenv("KODELET_BASE_PATH", "")
-		home := t.TempDir()
-		t.Setenv("HOME", home)
-		path, err := helperPath()
-		require.NoError(t, err)
-		assert.Equal(t, filepath.Join(home, ".kodelet", "bin", "kodelet-audio"), path)
+	t.Run("relative PATH entries are ignored", func(t *testing.T) {
+		directory := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(directory, helperName), []byte("#!/bin/sh\n"), 0o755))
+		t.Chdir(directory)
+		t.Setenv("PATH", ".")
+		_, err := helperPath()
+		assert.ErrorContains(t, err, "kodelet-audio in PATH")
 	})
 	t.Run("already canceled", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
