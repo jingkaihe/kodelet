@@ -1,7 +1,10 @@
-name: Release
+name: Release and audio CI
 
 on:
+  pull_request:
+    branches: [main]
   push:
+    branches: [main]
     tags:
       - 'v*'
 
@@ -25,7 +28,7 @@ jobs:
           ' >> "$GITHUB_OUTPUT"
 
   audio:
-    name: Build audio / ${{ matrix.goos }}-${{ matrix.goarch }}
+    name: Test and build audio / ${{ matrix.goos }}-${{ matrix.goarch }}
     needs: audio-targets
     # Runner selection only; supported platforms come from GoReleaser.
     runs-on: >-
@@ -58,6 +61,12 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install cmake pkgconf opus gstreamer
 
+      - name: Lint audio helper
+        run: mise run audio-lint
+
+      - name: Test audio without devices or providers
+        run: mise run audio-test
+
       - name: Build audio binary
         env:
           AUDIO_TARGET: ${{ matrix.goos }}-${{ matrix.goarch }}
@@ -75,6 +84,7 @@ jobs:
 
   release:
     name: Create Release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: audio
     runs-on: kodelet-runner
     permissions:
@@ -107,6 +117,7 @@ jobs:
 
   npm-release:
     name: Publish TypeScript SDK to npm
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: read
