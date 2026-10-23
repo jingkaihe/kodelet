@@ -208,6 +208,8 @@ describe('ChatPage streaming, steering, and navigation', () => {
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
 
     await act(async () => {
+      voiceEvent('agent-completed', 'voice-3');
+      // The completion snapshot was requested before this caption arrived.
       realtimeEvents.emit({
         kind: 'transcript',
         id: 'spoken',
@@ -216,7 +218,6 @@ describe('ChatPage streaming, steering, and navigation', () => {
         final: true,
         conversationId: 'conv-123',
       });
-      voiceEvent('agent-completed', 'voice-3');
     });
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
@@ -224,6 +225,69 @@ describe('ChatPage streaming, steering, and navigation', () => {
     expect(screen.getByText('Keep this caption')).toBeInTheDocument();
     expect(screen.getByText('hello from the runner')).toBeInTheDocument();
     expect(mockStreamConversation).toHaveBeenCalledTimes(2);
+  });
+
+  it('lets saved captions replace older live text unless they raced the snapshot', async () => {
+    setRouteParams({ id: 'conv-123' });
+    const saved = (messages: { id: string; content: string }[]) => ({
+      id: 'conv-123',
+      runnerId: 'runner-1',
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+      messageCount: messages.length,
+      messages: messages.map((message) => ({ ...message, anchor: 0, role: 'user' })),
+      toolResults: {},
+    });
+    mockGetConversation.mockResolvedValue(saved([]));
+    mockStreamConversation.mockImplementation(() => new Promise(() => {}));
+    render(<ChatPage />);
+    await waitFor(() => expect(mockStreamConversation).toHaveBeenCalledOnce());
+
+    const caption = (id: string, text: string) =>
+      realtimeEvents.emit({
+        kind: 'transcript',
+        id,
+        role: 'user',
+        text,
+        final: true,
+        conversationId: 'conv-123',
+      });
+    let resolveSnapshot!: (data: unknown) => void;
+    const requestSnapshot = (turnId: string) => {
+      mockGetConversation.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSnapshot = resolve;
+          })
+      );
+      realtimeEvents.emit({ kind: 'agent-started', conversationId: 'conv-123', turnId });
+      realtimeEvents.emit({ kind: 'agent-completed', conversationId: 'conv-123', turnId });
+    };
+
+    await act(async () => caption('spoken', 'Live caption'));
+    expect(screen.getByText('Live caption')).toBeInTheDocument();
+    await act(async () => {
+      requestSnapshot('voice-1');
+      caption('late', 'Raced caption');
+    });
+    // The server saved a newer final caption that the live stream never delivered.
+    await act(async () => resolveSnapshot(saved([{ id: 'spoken', content: 'Saved caption' }])));
+    expect(screen.getByText('Saved caption')).toBeInTheDocument();
+    expect(screen.queryByText('Live caption')).not.toBeInTheDocument();
+    expect(screen.getByText('Raced caption')).toBeInTheDocument();
+
+    await act(async () => requestSnapshot('voice-2'));
+    await act(async () =>
+      resolveSnapshot(
+        saved([
+          { id: 'spoken', content: 'Saved caption' },
+          { id: 'late', content: 'Saved raced caption' },
+        ])
+      )
+    );
+    expect(screen.getByText('Saved raced caption')).toBeInTheDocument();
+    expect(screen.queryByText('Raced caption')).not.toBeInTheDocument();
+    expect(screen.getByText('Saved caption')).toBeInTheDocument();
   });
 
   it('allows steering a TUI-started conversation while its remote runner is busy', async () => {
