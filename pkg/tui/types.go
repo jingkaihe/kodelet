@@ -122,8 +122,8 @@ type chatEntry struct {
 
 	// Voice updates replace one utterance without sharing the coding reply.
 	realtimeID     string
-	realtimeAnchor int  // Server-owned coding-message position for this utterance.
-	realtimeLive   bool // Only live captions override a racing history snapshot.
+	realtimeAnchor int    // Server-owned coding-message position for this utterance.
+	realtimeSeq    uint64 // Arrival order of a live caption; zero when loaded from history.
 	codingSpan     *codingSpan
 }
 
@@ -202,6 +202,7 @@ type conversationState struct {
 	resourcesLoading     bool
 	resourceReload       bool
 	discoveryID          uint64
+	realtimeCaptionSeq   uint64 // Counts live captions received for this conversation.
 	readinessStartedAt   time.Time
 	readyDuration        time.Duration
 
@@ -405,7 +406,9 @@ type conversationHistoryRefreshMsg struct {
 	runID   int
 	turn    int
 	attempt int
-	history initialHistoryMsg
+	// captionSeq is the last live caption received before the request.
+	captionSeq uint64
+	history    initialHistoryMsg
 }
 
 type initialHistoryMsg struct {

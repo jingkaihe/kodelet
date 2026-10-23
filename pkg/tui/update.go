@@ -426,7 +426,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if state == nil || state.streamRunID != msg.runID || state.streamTurn != msg.turn || (state.running && (!state.streamTurnUncertain || state.streamConnectedActive)) {
 			return m, nil
 		}
-		return m, refreshConversationHistoryFromSourceAttempt(m.ctx, state.key, state.conversationID, msg.runID, msg.turn, msg.attempt, m.conversationSource)
+		return m, refreshConversationHistoryFromSourceAttempt(
+			m.ctx,
+			state.key,
+			state.conversationID,
+			msg.runID,
+			msg.turn,
+			msg.attempt,
+			state.realtimeCaptionSeq,
+			m.conversationSource,
+		)
 
 	case conversationStreamReconnectMsg:
 		state := m.stateForKey(msg.conversationKey)
@@ -485,7 +494,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "ready"
 		}
 		m.clearActiveAssistantEntry()
-		m.entries = mergeAudioTranscript(history.entries, m.entries)
+		m.entries = mergeAudioTranscript(history.entries, m.entries, msg.captionSeq)
 		m.usage = history.usage
 		if parentID := strings.TrimSpace(history.parentConversationID); parentID != "" {
 			m.parentConversationID = parentID
@@ -1703,7 +1712,16 @@ func (m *model) finishObservedConversationRun(state *conversationState, runID in
 		return tea.Batch(promptFocusCmd, m.startConversationRunPreservingComposer(state, queuedFollowUp)), false
 	}
 	if event.Kind == "done" || event.Kind == "error" {
-		return tea.Batch(promptFocusCmd, refreshConversationHistoryFromSource(m.ctx, state.key, state.conversationID, runID, turn, m.conversationSource)), false
+		refresh := refreshConversationHistoryFromSource(
+			m.ctx,
+			state.key,
+			state.conversationID,
+			runID,
+			turn,
+			state.realtimeCaptionSeq,
+			m.conversationSource,
+		)
+		return tea.Batch(promptFocusCmd, refresh), false
 	}
 	return promptFocusCmd, false
 }

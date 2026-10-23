@@ -25,6 +25,8 @@ type tuiAudioSession struct {
 	phase    string
 	level    float64
 	muted    bool
+	// The call gives a draft its conversation ID, so it owns that transition.
+	createsConversation bool
 }
 
 type tuiAudioMsg struct {
@@ -32,6 +34,7 @@ type tuiAudioMsg struct {
 	event             audiohost.Event
 	caption           *chat.RealtimeEvent
 	text              string
+	cwd               string // The workspace the server validated or saved.
 	err               error
 	done              bool
 	conversationReady bool
@@ -136,9 +139,18 @@ func (m *model) startAudio(mode string) tea.Cmd {
 	if m.runner == nil || m.conversationState == nil || m.startupPending || m.initialHistoryPending {
 		return m.audioNotice("Wait for chat to finish loading.")
 	}
+	createsConversation := false
 	if mode == "talk" {
 		if !m.loaded {
 			return m.audioNotice("Wait for chat to finish loading.")
+		}
+		if strings.TrimSpace(m.conversationID) == "" {
+			// As for a typed first turn, the ID makes the draft's pending discovery
+			// obsolete. Discovery restarts once voice saves the conversation.
+			createsConversation = true
+			m.resourcesLoading = false
+			m.readinessStartedAt = time.Time{}
+			m.readyDuration = 0
 		}
 		m.ensureConversationID(m.conversationState)
 	}
@@ -146,6 +158,7 @@ func (m *model) startAudio(mode string) tea.Cmd {
 	session := &tuiAudioSession{
 		cancel: cancel, controls: make(chan audiohost.Command, 8), done: make(chan struct{}),
 		key: m.key, mode: mode, draft: m.textarea.Value(), started: time.Now(), phase: "starting",
+		createsConversation: createsConversation,
 	}
 	m.audio = session
 	m.resize()
@@ -224,10 +237,27 @@ func (m *model) updateAudio(msg tuiAudioMsg) tea.Cmd {
 		}
 		return nil
 	}
+	if msg.cwd != "" {
+		// Later typed turns and calls must match the server's saved workspace,
+		// which an idle conversation stream does not report.
+		if state := m.stateForKey(session.key); state != nil {
+			state.cwd = msg.cwd
+			if m.remote {
+				state.requestedCWD = msg.cwd
+			}
+		}
+		return nil
+	}
 	if msg.conversationReady {
 		// The voice POST has now persisted the empty conversation. Subscribe only
 		// after that point, so the normal transcript also receives delegated work.
-		return m.startConversationStream(m.stateForKey(session.key))
+		state := m.stateForKey(session.key)
+		stream := m.startConversationStream(state)
+		if !session.createsConversation || !m.remote || state == nil {
+			return stream
+		}
+		// Replace the draft discovery that the allocated ID made obsolete.
+		return tea.Batch(stream, m.loadRemoteSlashCommands(state))
 	}
 	if session.phase == "stopping" {
 		return nil
@@ -269,7 +299,8 @@ func (m *model) updateAudioTranscript(event chat.RealtimeEvent) tea.Cmd {
 		return nil
 	}
 	entry := audioTranscriptEntry(event)
-	entry.realtimeLive = true
+	m.realtimeCaptionSeq++
+	entry.realtimeSeq = m.realtimeCaptionSeq
 	if event.Anchor == nil {
 		// Older servers without positions can still append live captions.
 		for _, existing := range m.entries {
@@ -289,12 +320,13 @@ func (m *model) updateAudioTranscript(event chat.RealtimeEvent) tea.Cmd {
 	return m.queueTranscriptRefresh(m.autoFollow)
 }
 
-// Reapply only locally received captions over a racing GET, as the Web UI does.
-// Restored entries alone must not overwrite newer persisted text from the server.
-func mergeAudioTranscript(history, current []chatEntry) []chatEntry {
+// The server saves each caption before streaming it, so history requested after
+// a caption arrived has that text or newer. Reapply only captions received after
+// the request (captionSeq), which may have raced it; history replaces the rest.
+func mergeAudioTranscript(history, current []chatEntry, captionSeq uint64) []chatEntry {
 	result := slices.Clone(history)
 	for _, entry := range current {
-		if entry.realtimeLive {
+		if entry.realtimeSeq > captionSeq {
 			result, _ = upsertAudioTranscript(result, entry)
 		}
 	}

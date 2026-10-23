@@ -44,11 +44,32 @@ func loadConversationHistoryFromSource(ctx context.Context, conversationKey, con
 	}
 }
 
-func refreshConversationHistoryFromSource(ctx context.Context, conversationKey, conversationID string, runID, turn int, source chat.ConversationSource) tea.Cmd {
-	return refreshConversationHistoryFromSourceAttempt(ctx, conversationKey, conversationID, runID, turn, 0, source)
+func refreshConversationHistoryFromSource(
+	ctx context.Context,
+	conversationKey, conversationID string,
+	runID, turn int,
+	captionSeq uint64,
+	source chat.ConversationSource,
+) tea.Cmd {
+	return refreshConversationHistoryFromSourceAttempt(
+		ctx,
+		conversationKey,
+		conversationID,
+		runID,
+		turn,
+		0,
+		captionSeq,
+		source,
+	)
 }
 
-func refreshConversationHistoryFromSourceAttempt(ctx context.Context, conversationKey, conversationID string, runID, turn, attempt int, source chat.ConversationSource) tea.Cmd {
+func refreshConversationHistoryFromSourceAttempt(
+	ctx context.Context,
+	conversationKey, conversationID string,
+	runID, turn, attempt int,
+	captionSeq uint64,
+	source chat.ConversationSource,
+) tea.Cmd {
 	if source == nil {
 		return nil
 	}
@@ -57,7 +78,13 @@ func refreshConversationHistoryFromSourceAttempt(ctx context.Context, conversati
 		defer cancel()
 		load := loadConversationHistoryFromSource(attemptCtx, conversationKey, conversationID, source)
 		history, _ := load().(initialHistoryMsg)
-		return conversationHistoryRefreshMsg{runID: runID, turn: turn, attempt: attempt, history: history}
+		return conversationHistoryRefreshMsg{
+			runID:      runID,
+			turn:       turn,
+			attempt:    attempt,
+			captionSeq: captionSeq,
+			history:    history,
+		}
 	}
 }
 

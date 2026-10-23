@@ -964,6 +964,7 @@ func TestConfiguredChatRunnerRealtimePreservesCLIOptionsAndSavedAffinity(t *test
 		}, "cedar")
 		require.NoError(t, err)
 		assert.Equal(t, "call", session.ID)
+		assert.Equal(t, "/workspace", session.CWD)
 		want := cliOptions.Clone()
 		if want == nil {
 			want = &llmtypes.ExecutionOptions{}
@@ -1016,6 +1017,8 @@ func TestConfiguredChatRunnerRealtimeCreatesConversation(t *testing.T) {
 	}, "")
 	require.NoError(t, err)
 	assert.Equal(t, "new", session.ConversationID)
+	assert.Equal(t, "/resolved/project", session.CWD,
+		"the TUI must send the saved workspace afterwards")
 	assert.Equal(t, chatpkg.ChatRequest{
 		ConversationID: "new", Profile: "coding", RunnerID: "runner", CWD: "/resolved/project",
 		EnvironmentProfile: "sandbox", ReasoningEffort: "high",

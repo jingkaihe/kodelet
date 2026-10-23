@@ -15,6 +15,8 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	transcriptiontypes "github.com/jingkaihe/kodelet/pkg/types/transcription"
 	"github.com/pkg/errors"
@@ -253,7 +255,7 @@ func TestAudioTalkRestoresSavedTranscriptAndReconcilesLiveUpdates(t *testing.T) 
 	require.Len(t, m.entries, 4)
 	assert.Equal(t, "voice:user", m.entries[0].realtimeID)
 	assert.Equal(t, "voice:assistant", m.entries[2].realtimeID)
-	assert.False(t, m.entries[2].realtimeLive)
+	assert.Zero(t, m.entries[2].realtimeSeq)
 	view := xansi.Strip(m.viewport.View())
 	assert.Contains(t, view, "spoken request")
 	assert.Contains(t, view, "spoken reply")
@@ -261,16 +263,54 @@ func TestAudioTalkRestoresSavedTranscriptAndReconcilesLiveUpdates(t *testing.T) 
 	// An old restored caption cannot overwrite a newer server checkpoint.
 	runner.history.Messages[2].Content = "saved complete reply"
 	history = load().(initialHistoryMsg)
-	m.entries = mergeAudioTranscript(history.entries, m.entries)
+	m.entries = mergeAudioTranscript(history.entries, m.entries, m.realtimeCaptionSeq)
 	assert.Equal(t, "saved complete reply", m.entries[2].content)
-	// But live deltas must survive a snapshot taken before those deltas.
-	m.updateAudioTranscript(chat.RealtimeEvent{ID: "voice:assistant", Role: "assistant", Text: "live complete reply", Anchor: new(99)})
-	m.updateAudioTranscript(chat.RealtimeEvent{ID: "voice:next", Role: "user", Text: "follow up", Anchor: new(1)})
+	// But live deltas must survive a snapshot requested before those deltas.
+	requested := m.realtimeCaptionSeq
+	m.updateAudioTranscript(chat.RealtimeEvent{
+		ID: "voice:assistant", Role: "assistant", Text: "live complete reply", Anchor: new(99),
+	})
+	m.updateAudioTranscript(chat.RealtimeEvent{
+		ID: "voice:next", Role: "user", Text: "follow up", Anchor: new(1),
+	})
 	for range 2 {
-		m.entries = mergeAudioTranscript(history.entries, m.entries)
+		m.entries = mergeAudioTranscript(history.entries, m.entries, requested)
 		require.Len(t, m.entries, 5)
 		assert.Equal(t, "live complete reply", m.entries[2].content)
 		assert.Equal(t, 1, m.entries[2].realtimeAnchor, "updates never move an existing utterance")
+		assert.Equal(t, "follow up", m.entries[3].content)
+		assert.Equal(t, "coding reply two", m.entries[4].content)
+	}
+
+	// The server saved a final caption that an interrupted call never delivered.
+	runner.history.Messages[2].Content = "saved final reply"
+	runner.history.Messages = slices.Insert(
+		runner.history.Messages,
+		3,
+		conversations.StreamableMessage{
+			ID: "voice:next", Anchor: new(1), Kind: "text", Role: "user", Content: "follow up",
+		},
+	)
+	_, refresh := m.Update(conversationStreamReconcileMsg{conversationKey: m.key})
+	// A caption received after the request can still be newer than its snapshot.
+	m.updateAudioTranscript(chat.RealtimeEvent{
+		ID: "voice:user", Role: "user", Text: "spoken request, continued",
+	})
+	updated, _ = m.Update(conversationHistoryRefreshFromCmd(t, refresh))
+	*m = updated.(model)
+	require.Len(t, m.entries, 5)
+	assert.Equal(t, "spoken request, continued", m.entries[0].content)
+	assert.Equal(t, "saved final reply", m.entries[2].content,
+		"history requested after a caption replaces it")
+	runner.history.Messages[0].Content = "spoken request, continued"
+	runner.history.Messages[2].Content = "saved final reply, edited"
+	for range 2 {
+		_, refresh = m.Update(conversationStreamReconcileMsg{conversationKey: m.key})
+		updated, _ = m.Update(conversationHistoryRefreshFromCmd(t, refresh))
+		*m = updated.(model)
+		require.Len(t, m.entries, 5)
+		assert.Equal(t, "spoken request, continued", m.entries[0].content)
+		assert.Equal(t, "saved final reply, edited", m.entries[2].content)
 		assert.Equal(t, "follow up", m.entries[3].content)
 		assert.Equal(t, "coding reply two", m.entries[4].content)
 	}
@@ -358,6 +398,110 @@ func TestAudioTalkCreatesConversationWithDraftSettings(t *testing.T) {
 	require.NotNil(t, m.updateAudio(tuiAudioMsg{session: m.audio, conversationReady: true}))
 	assert.NotZero(t, m.streamRunID, "attach coding results after voice creates the conversation")
 	m.stopConversationStream(m.conversationState)
+}
+
+type audioDiscoveryRunner struct {
+	*streamingConversationSourceRunner
+	targets []chat.WorkspaceTarget
+}
+
+func (r *audioDiscoveryRunner) DiscoverWorkspace(
+	_ context.Context,
+	target chat.WorkspaceTarget,
+) (protocol.WorkspaceDiscoverResult, error) {
+	r.targets = append(r.targets, target)
+	return protocol.WorkspaceDiscoverResult{
+		CWD:      "/resolved/project",
+		Commands: []slashcommands.Command{{Name: "extension-command"}},
+		Shortcuts: []protocol.ShortcutDescriptor{
+			{Key: "ctrl+k", ExtensionID: "extension", Generation: 1},
+		},
+	}, nil
+}
+
+func TestAudioTalkSettlesDraftWorkspaceAfterCreatingConversation(t *testing.T) {
+	runner := &audioDiscoveryRunner{
+		streamingConversationSourceRunner: newStreamingConversationSourceRunner(),
+	}
+	m := newThemeTestModel(t, Config{Remote: true, Runner: runner, CWD: "~/project"})
+	draftDiscovery := m.loadRemoteSlashCommands(m.conversationState)
+	require.True(t, m.resourcesLoading)
+	_, handled := m.handleLocalSlashCommand("/talk")
+	require.True(t, handled)
+	require.NotNil(t, m.audio)
+	t.Cleanup(m.audio.cancel)
+	session := m.audio
+	assert.False(t, m.resourcesLoading, "the allocated ID makes the draft's discovery obsolete")
+	updated, _ := m.Update(draftDiscovery())
+	*m = updated.(model)
+	assert.NotContains(t, slashCommandNames(m.slashCommands), "extension-command")
+
+	// The resolved workspace arrives before the call is ready, even while stopping.
+	session.phase = "stopping"
+	assert.Nil(t, m.updateAudio(tuiAudioMsg{session: session, cwd: "/resolved/project"}))
+	assert.Equal(t, "/resolved/project", m.cwd)
+	request := m.conversationRequest(m.conversationState)
+	assert.Equal(t, "/resolved/project", request.CWD, "later turns must match the saved workspace")
+
+	ready := m.updateAudio(tuiAudioMsg{session: session, conversationReady: true})
+	require.NotNil(t, ready)
+	t.Cleanup(func() { m.stopConversationStream(m.conversationState) })
+	batch, ok := ready().(tea.BatchMsg)
+	require.True(t, ok)
+	var discovered []slashCommandsMsg
+	for _, child := range batch {
+		if child == nil {
+			continue
+		}
+		if msg, ok := child().(slashCommandsMsg); ok {
+			discovered = append(discovered, msg)
+		}
+	}
+	require.Len(t, discovered, 1, "restart discovery once the conversation is saved")
+	assert.Equal(t, []chat.WorkspaceTarget{
+		{CWD: "~/project"},
+		{ConversationID: m.conversationID},
+	}, runner.targets)
+	updated, _ = m.Update(discovered[0])
+	*m = updated.(model)
+	assert.Contains(t, slashCommandNames(m.slashCommands), "extension-command")
+	require.Len(t, m.extensionShortcuts, 1)
+	assert.False(t, m.resourcesLoading)
+
+	// Calling into a saved conversation keeps its discovery.
+	m.audio = nil
+	runner.targets = nil
+	_, handled = m.handleLocalSlashCommand("/talk")
+	require.True(t, handled)
+	require.NotNil(t, m.audio)
+	t.Cleanup(m.audio.cancel)
+	m.stopConversationStream(m.conversationState)
+	require.NotNil(t, m.updateAudio(tuiAudioMsg{session: m.audio, conversationReady: true}))
+	assert.Empty(t, runner.targets)
+}
+
+func TestRealtimeAudioReportsResolvedWorkspaceWhenSetupFails(t *testing.T) {
+	peer := &testAudioPeer{events: make(chan audiohost.Event, 1)}
+	peer.events <- audiohost.Event{Type: "offer", SDP: "offer"}
+	client := testRealtimeAudioClient{
+		start: func(context.Context) (chat.RealtimeSession, error) {
+			// The server can save a voice-first conversation before negotiation fails.
+			session := chat.RealtimeSession{CWD: "/resolved/project"}
+			return session, errors.New("could not start live voice")
+		},
+		end: func(context.Context, string) error { return nil },
+	}
+	var workspaces []string
+	emit := func(msg tuiAudioMsg) {
+		assert.False(t, msg.conversationReady)
+		if msg.cwd != "" {
+			workspaces = append(workspaces, msg.cwd)
+		}
+	}
+	request := chat.ChatRequest{ConversationID: "conv"}
+	err := runRealtimeAudio(t.Context(), client, request, nil, emit, peer.start)
+	require.ErrorContains(t, err, "could not start live voice")
+	assert.Equal(t, []string{"/resolved/project"}, workspaces)
 }
 
 type testAudioPeer struct {
@@ -508,7 +652,9 @@ func TestRealtimeAudioContinuesAcrossAgentRunsAndCleansUp(t *testing.T) {
 	closed := false
 	client := testRealtimeAudioClient{
 		start: func(context.Context) (chat.RealtimeSession, error) {
-			return chat.RealtimeSession{ID: "call", ConversationID: "conv", Answer: "answer"}, nil
+			return chat.RealtimeSession{
+				ID: "call", ConversationID: "conv", Answer: "answer", CWD: "/resolved",
+			}, nil
 		},
 		stream: func(_ context.Context, emit func(chat.RealtimeEvent)) error {
 			assert.Eventually(t, func() bool { return len(peer.events) == 0 }, time.Second, time.Millisecond, "consume helper events first")
@@ -529,9 +675,14 @@ func TestRealtimeAudioContinuesAcrossAgentRunsAndCleansUp(t *testing.T) {
 	}
 	var captions []string
 	conversationReady := false
+	cwd := ""
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	err := runRealtimeAudio(ctx, client, chat.ChatRequest{ConversationID: "conv"}, nil, func(msg tuiAudioMsg) {
+		if msg.cwd != "" {
+			cwd = msg.cwd
+			assert.False(t, conversationReady, "sync the workspace before attaching the conversation")
+		}
 		if msg.conversationReady {
 			conversationReady = true
 			assert.Equal(t, []audiohost.Command{{Type: "createOffer"}}, peer.sent, "attach the conversation before opening devices")
@@ -543,6 +694,7 @@ func TestRealtimeAudioContinuesAcrossAgentRunsAndCleansUp(t *testing.T) {
 	}, peer.start)
 	require.NoError(t, err)
 	assert.True(t, conversationReady)
+	assert.Equal(t, "/resolved", cwd)
 	assert.True(t, peer.closed.Load(), "release the microphone")
 	assert.True(t, closed, "cleanup waits for the call to end")
 	assert.Equal(t, []string{"hello", "next request"}, captions, "agent completion must not end the call")

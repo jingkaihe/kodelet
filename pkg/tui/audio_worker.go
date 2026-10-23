@@ -285,6 +285,10 @@ func runRealtimeAudio(ctx context.Context, client realtimeAudioClient, request c
 			}
 		case result := <-allocated:
 			callID = result.session.ID
+			if result.session.CWD != "" {
+				// Sync even after a failure, which can follow saving the conversation.
+				emit(tuiAudioMsg{cwd: result.session.CWD})
+			}
 			if result.err != nil {
 				return result.err
 			}

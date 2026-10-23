@@ -222,7 +222,11 @@ func (r *configuredChatRunner) StartRealtime(ctx context.Context, offer string, 
 	if err != nil {
 		return chatpkg.RealtimeSession{}, err
 	}
-	return r.Client.StartRealtime(ctx, offer, request, voice)
+	session, err := r.Client.StartRealtime(ctx, offer, request, voice)
+	// Report the resolved workspace even on failure: the server may already
+	// have saved a voice-first conversation with it.
+	session.CWD = request.CWD
+	return session, err
 }
 
 func (r *configuredChatRunner) Run(ctx context.Context, request chatpkg.ChatRequest, sink chatpkg.ChatEventSink) (string, error) {

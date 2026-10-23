@@ -32,6 +32,9 @@ type RealtimeSession struct {
 	ID             string `json:"id"`
 	ConversationID string `json:"conversationId"`
 	Answer         string `json:"answer"`
+	// CWD is the resolved workspace the call was validated against or saved
+	// with. The server does not return it; callers that resolve it set it.
+	CWD string `json:"-"`
 }
 
 // RealtimeEvent is presentation only; only the server's provider sideband can
