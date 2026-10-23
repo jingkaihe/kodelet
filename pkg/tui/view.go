@@ -302,8 +302,8 @@ func (m model) renderShortcutsDialog() string {
 	}
 	overridden := make(map[string]struct{}, len(m.extensionShortcuts))
 	baseRows = append(baseRows,
-		shortcutHelpRow{shortcut: "Ctrl+Alt+V", description: "Dictate into draft (experimental)"},
-		shortcutHelpRow{shortcut: "Ctrl+Alt+R", description: "Start/end voice call (experimental)"},
+		shortcutHelpRow{shortcut: "Ctrl+Alt+V", description: "Dictate into draft"},
+		shortcutHelpRow{shortcut: "Ctrl+Alt+R", description: "Start/end voice call"},
 		shortcutHelpRow{shortcut: "Ctrl+Alt+M", description: "Mute/unmute voice call"},
 	)
 	for _, shortcut := range m.extensionShortcuts {

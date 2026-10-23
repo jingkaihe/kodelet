@@ -23,6 +23,54 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAudioCompactStatus(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		mode     string
+		muted    bool
+		status   string
+		controls string
+	}{
+		{
+			name: "dictation", mode: "voice",
+			status:   "Dictation · recording",
+			controls: "▰▰▰▰▰▱▱▱▱▱ · Enter: finish · Esc: cancel",
+		},
+		{
+			name: "talk", mode: "talk",
+			status:   "Talk · recording",
+			controls: "Ctrl+Alt+M: mute · Esc: end",
+		},
+		{
+			name: "muted talk", mode: "talk", muted: true,
+			status:   "Talk · recording (muted)",
+			controls: "Ctrl+Alt+M: unmute · Esc: end",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newThemeTestModel(t, Config{})
+			assert.Empty(t, m.renderAudio())
+			assert.Zero(t, m.audioHeight())
+			m.audio = &tuiAudioSession{
+				mode: tt.mode, phase: "recording", started: time.Now(),
+				level: 0.5, muted: tt.muted,
+			}
+
+			view := m.renderAudio()
+			assert.Equal(t, 1, m.audioHeight())
+			assert.Equal(t, 1, lineCount(view))
+			assert.Contains(t, view, tt.status)
+			assert.Contains(t, view, tt.controls)
+			assert.Regexp(t, ` · \d{2}:\d{2} · `, view)
+			assert.NotContains(t, view, "experimental")
+
+			m.width = 40
+			assert.Equal(t, 1, lineCount(m.renderAudio()))
+			assert.LessOrEqual(t, xansi.StringWidth(m.renderAudio()), m.contentWidth())
+		})
+	}
+}
+
 func TestAudioCommandsAndDraftCommit(t *testing.T) {
 	m := newThemeTestModel(t, Config{})
 	_, handled := m.handleLocalSlashCommand("/voice extra")

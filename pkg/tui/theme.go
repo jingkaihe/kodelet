@@ -140,12 +140,12 @@ func tuiBuiltInSlashCommands() []slashcommands.Command {
 		},
 		{
 			Name:        "voice",
-			Description: "Dictate into the draft (experimental)",
+			Description: "Dictate into draft",
 			Placeholder: "/voice",
 		},
 		{
 			Name:        "talk",
-			Description: "Start a realtime voice call (experimental)",
+			Description: "Start a voice call",
 			Hint:        "stop|mute (optional)",
 			Placeholder: "/talk [stop|mute]",
 		},

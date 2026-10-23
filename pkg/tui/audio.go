@@ -48,7 +48,7 @@ func audioTick(session *tuiAudioSession) tea.Cmd {
 
 func (m *model) audioNotice(message string) tea.Cmd {
 	return m.addUINotification(uiNotification{
-		level: uiNotificationWarning, title: "Experimental audio", message: message,
+		level: uiNotificationWarning, title: "Audio", message: message,
 	})
 }
 
@@ -389,10 +389,7 @@ func (m model) audioHeight() int {
 	if m.audio == nil {
 		return 0
 	}
-	if m.audio.mode == "talk" {
-		return 1
-	}
-	return 3
+	return 1
 }
 
 func (m model) renderAudio() string {
@@ -402,27 +399,22 @@ func (m model) renderAudio() string {
 	s := m.audio
 	label, controls := "Dictation", "Enter: finish · Esc: cancel"
 	if s.mode == "talk" {
-		label, controls = "Talk", "Ctrl+Alt+M: mute · Esc: end call"
+		label, controls = "Talk", "Ctrl+Alt+M: mute · Esc: end"
+		if s.muted {
+			controls = "Ctrl+Alt+M: unmute · Esc: end"
+		}
+	} else {
+		level := int(min(1, max(0, s.level)) * 10)
+		controls = strings.Repeat("▰", level) + strings.Repeat("▱", 10-level) + " · " + controls
 	}
 	state := s.phase
 	if s.muted {
-		state += " (microphone muted)"
+		state += " (muted)"
 	}
 	seconds := int(time.Since(s.started).Seconds())
 	header := fmt.Sprintf(
-		"%s (experimental) · %s · %02d:%02d · %s",
+		"%s · %s · %02d:%02d · %s",
 		label, state, seconds/60, seconds%60, controls,
 	)
-	lines := []string{header}
-	if s.mode != "talk" {
-		level := int(min(1, max(0, s.level)) * 20)
-		lines = append(lines,
-			"Microphone: "+strings.Repeat("▰", level)+strings.Repeat("▱", 20-level),
-			"Text will be inserted into your draft, never sent automatically.",
-		)
-	}
-	for i := range lines {
-		lines[i] = fitVisible(normalizeSingleLinePaste(lines[i]), m.contentWidth())
-	}
-	return strings.Join(lines, "\n")
+	return fitVisible(normalizeSingleLinePaste(header), m.contentWidth())
 }
