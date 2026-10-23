@@ -6,8 +6,15 @@ on:
       - 'v*'
 
 jobs:
+  audio:
+    name: Build audio release binaries
+    uses: ./.github/workflows/audio.yml
+    permissions:
+      contents: read
+
   release:
     name: Create Release
+    needs: audio
     runs-on: kodelet-runner
     permissions:
       contents: write
@@ -24,6 +31,13 @@ jobs:
           experimental: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download native audio binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: kodelet-audio-*
+          path: .build/audio
+          merge-multiple: true
 
       - name: Create GitHub Release
         run: mise run github-release

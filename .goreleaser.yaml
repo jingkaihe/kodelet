@@ -44,6 +44,14 @@ snapshot:
 
 checksum:
   name_template: checksums.txt
+  extra_files:
+    - glob: .build/audio/kodelet-audio-*
+
+# Native Rust builds run on their own hosts before the Go release job. Keep
+# them outside dist/, which GoReleaser removes with --clean.
+release:
+  extra_files:
+    - glob: .build/audio/kodelet-audio-*
 
 nfpms:
   - id: kodelet-linux
