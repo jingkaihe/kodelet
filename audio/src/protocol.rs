@@ -66,28 +66,40 @@ pub fn frame(kind: u8, payload: &[u8]) -> io::Result<Vec<u8>> {
 }
 
 // A stalled parent must never block audio processing. Queue saturation ends the session.
+#[derive(Clone)]
 pub struct Output {
     sender: SyncSender<Vec<u8>>,
 }
 
 impl Output {
     pub fn start() -> (Self, mpsc::Receiver<()>) {
+        Self::spawn(io::stdout())
+    }
+
+    fn spawn(mut writer: impl Write + Send + 'static) -> (Self, mpsc::Receiver<()>) {
         let (sender, receiver) = mpsc::sync_channel::<Vec<u8>>(32);
         let (done, finished) = mpsc::channel();
         std::thread::spawn(move || {
-            let mut stdout = io::stdout().lock();
-            for bytes in receiver {
-                if stdout
+            // An empty buffer is never a frame: it is finish's stop request.
+            for bytes in receiver.iter().take_while(|bytes| !bytes.is_empty()) {
+                if writer
                     .write_all(&bytes)
-                    .and_then(|_| stdout.flush())
+                    .and_then(|_| writer.flush())
                     .is_err()
                 {
                     break;
                 }
             }
+            // Later events from remaining clones fail instead of being buffered.
+            drop(receiver);
             let _ = done.send(());
         });
         (Self { sender }, finished)
+    }
+
+    /// Stops the writer after already queued events, even while clones remain.
+    pub fn finish(self) {
+        let _ = self.sender.try_send(Vec::new());
     }
 
     pub fn event(&self, value: Value) -> Result<(), &'static str> {
@@ -108,6 +120,44 @@ impl Output {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Captured {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn finish_flushes_and_stops_the_writer_while_clones_remain() {
+        let written = Captured::default();
+        let (output, finished) = Output::spawn(written.clone());
+        let reader = output.clone(); // The stdin reader keeps a clone for fatal input errors.
+        output.event(json!({"type":"closed"})).unwrap();
+        output.finish();
+        finished
+            .recv_timeout(Duration::from_secs(1))
+            .expect("finish must not wait for every clone to drop");
+        assert_eq!(
+            *written.0.lock().unwrap(),
+            frame(JSON, br#"{"type":"closed"}"#).unwrap()
+        );
+        assert!(
+            reader
+                .event(json!({"type":"error","message":"late"}))
+                .is_err()
+        );
+    }
 
     #[test]
     fn framing_and_eof() {

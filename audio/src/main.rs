@@ -15,9 +15,15 @@ use processing::{Converter, Processor, pcm16};
 use protocol::{Command, Output};
 use serde_json::json;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TrySendError;
 
 type Result<T> = std::result::Result<T, &'static str>;
+
+const COMMANDS_FELL_BEHIND: &str =
+    "audio commands arrived faster than the helper could process them";
 
 fn main() {
     let args: Vec<_> = std::env::args().skip(1).collect();
@@ -33,24 +39,18 @@ fn main() {
         std::process::exit(2);
     }
     let (output, finished) = Output::start();
-    let (sender, mut commands) = tokio::sync::mpsc::channel(16);
+    let (sender, mut commands) = mpsc::channel(16);
+    // Set once the reader has reported a fatal input failure itself.
+    let input_failure = Arc::new(OnceLock::new());
+    let reader_failure = input_failure.clone();
+    let reporter = output.clone();
     std::thread::spawn(move || {
-        let mut input = std::io::stdin().lock();
-        loop {
-            match protocol::read_command(&mut input) {
-                Ok(Some(command)) => {
-                    if sender.try_send(Ok(command)).is_err() {
-                        break;
-                    }
-                }
-                Ok(None) => break,
-                Err(_) => {
-                    let _ = sender.try_send(Err("invalid audio command frame"));
-                    break;
-                }
-            }
+        if let Err(message) = forward_commands(&mut std::io::stdin().lock(), &sender) {
+            // The session loop is behind, so report directly rather than queueing.
+            let _ = reader_failure.set(message);
+            let _ = reporter.event(json!({"type":"error","message":message}));
         }
-        drop(sender);
+        drop((sender, reporter));
         // Parent EOF must also terminate stalled native startup or a blocked stdout writer.
         std::thread::sleep(Duration::from_secs(2));
         std::process::exit(1);
@@ -71,18 +71,45 @@ fn main() {
             _ => return Err("expected audio protocol 1 handshake"),
         }
         let mut session = Session::default();
-        let result = session.run(&output, &mut commands).await;
+        let result = session.run(&output, &mut commands, &input_failure).await;
         session.close().await;
         result
     });
-    if let Err(message) = result {
+    // The reader reports its own failure; do not repeat or contradict it.
+    if let Err(message) = result
+        && input_failure.get().is_none()
+    {
         let _ = output.event(json!({"type":"error","message":message}));
     }
-    drop(output);
+    output.finish();
     let _ = finished.recv_timeout(Duration::from_millis(500));
     runtime.shutdown_timeout(Duration::from_millis(500));
-    if result.is_err() {
+    if result.is_err() || input_failure.get().is_some() {
         std::process::exit(1);
+    }
+}
+
+/// Forwards parent commands without blocking, so stdin EOF always reaches the
+/// shutdown watchdog. Returns an error when the bounded queue is full because the
+/// session loop has fallen behind; the caller must report it.
+fn forward_commands(
+    input: &mut impl std::io::Read,
+    sender: &mpsc::Sender<Result<Command>>,
+) -> Result<()> {
+    loop {
+        let (item, last) = match protocol::read_command(input) {
+            Ok(Some(command)) => (Ok(command), false),
+            Ok(None) => return Ok(()),
+            // Queued in order, so the session rejects it after earlier commands.
+            Err(_) => (Err("invalid audio command frame"), true),
+        };
+        match sender.try_send(item) {
+            Ok(()) if !last => {}
+            Ok(()) | Err(TrySendError::Closed(_)) => return Ok(()),
+            Err(TrySendError::Full(item)) => {
+                return Err(item.err().unwrap_or(COMMANDS_FELL_BEHIND));
+            }
+        }
     }
 }
 
@@ -97,12 +124,17 @@ impl Session {
     async fn run(
         &mut self,
         output: &Output,
-        commands: &mut tokio::sync::mpsc::Receiver<Result<Command>>,
+        commands: &mut mpsc::Receiver<Result<Command>>,
+        input_failure: &OnceLock<&'static str>,
     ) -> Result<()> {
         let mut tick = tokio::time::interval(Duration::from_millis(10));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut last_level = Instant::now();
         loop {
+            // Do not act on commands queued before the reader gave up.
+            if let Some(message) = input_failure.get() {
+                return Err(message);
+            }
             tokio::select! {
                 biased;
                 command = commands.recv() => match command {
@@ -287,6 +319,57 @@ fn peak(samples: &[f32]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn command_reader_reports_a_stalled_queue_instead_of_blocking() {
+        let hello = protocol::frame(protocol::JSON, br#"{"type":"hello","protocol":1}"#).unwrap();
+        let invalid = [0, 0, 0, 0];
+
+        // Nothing drains the queue, as when the session loop is stalled.
+        let (sender, mut queue) = mpsc::channel(1);
+        assert_eq!(
+            forward_commands(&mut hello.repeat(2).as_slice(), &sender),
+            Err(COMMANDS_FELL_BEHIND)
+        );
+        assert!(matches!(
+            queue.try_recv(),
+            Ok(Ok(Command::Hello { protocol: 1 }))
+        ));
+        let (sender, _queue) = mpsc::channel(1);
+        assert_eq!(
+            forward_commands(
+                &mut [hello.as_slice(), &invalid].concat().as_slice(),
+                &sender
+            ),
+            Err("invalid audio command frame"),
+            "a full queue still reports the more specific failure"
+        );
+
+        // With room, an invalid frame follows earlier commands, and EOF is not an error.
+        let (sender, mut queue) = mpsc::channel(4);
+        assert_eq!(
+            forward_commands(
+                &mut [hello.as_slice(), &invalid].concat().as_slice(),
+                &sender
+            ),
+            Ok(())
+        );
+        assert!(matches!(
+            queue.try_recv(),
+            Ok(Ok(Command::Hello { protocol: 1 }))
+        ));
+        assert!(matches!(
+            queue.try_recv(),
+            Ok(Err("invalid audio command frame"))
+        ));
+        assert_eq!(forward_commands(&mut hello.as_slice(), &sender), Ok(()));
+        drop(queue);
+        assert_eq!(
+            forward_commands(&mut hello.repeat(3).as_slice(), &sender),
+            Ok(()),
+            "a finished session ignores further input"
+        );
+    }
+
     #[test]
     fn recording_limits_count_raw_pcm_and_are_bounded() {
         assert_eq!(recording_limit(32_000, 60).unwrap(), 16_000);
