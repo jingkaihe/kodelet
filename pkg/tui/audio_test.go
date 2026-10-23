@@ -389,19 +389,31 @@ func (p *testAudioPeer) start(ctx context.Context) (audioPeer, error) {
 }
 
 type testDictationClient struct {
-	caps   transcriptiontypes.Capabilities
-	audio  []byte
-	upload func()
+	caps       transcriptiontypes.Capabilities
+	audio      []byte
+	upload     func()
+	discover   func(context.Context) error
+	transcribe func(context.Context) error
 }
 
-func (c *testDictationClient) TranscriptionCapabilities(context.Context) (transcriptiontypes.Capabilities, error) {
+func (c *testDictationClient) TranscriptionCapabilities(ctx context.Context) (transcriptiontypes.Capabilities, error) {
+	if c.discover != nil {
+		if err := c.discover(ctx); err != nil {
+			return transcriptiontypes.Capabilities{}, err
+		}
+	}
 	return c.caps, nil
 }
 
-func (c *testDictationClient) TranscribeAudio(_ context.Context, data []byte, _, _, _ string) (transcriptiontypes.Result, error) {
+func (c *testDictationClient) TranscribeAudio(ctx context.Context, data []byte, _, _, _ string) (transcriptiontypes.Result, error) {
 	c.audio = data
 	if c.upload != nil {
 		c.upload()
+	}
+	if c.transcribe != nil {
+		if err := c.transcribe(ctx); err != nil {
+			return transcriptiontypes.Result{}, err
+		}
 	}
 	return transcriptiontypes.Result{Text: "spoken words"}, nil
 }
@@ -461,12 +473,18 @@ func TestDictationWorkerWAVAndRecordingLimits(t *testing.T) {
 }
 
 type testRealtimeAudioClient struct {
-	start  func(context.Context) (chat.RealtimeSession, error)
-	stream func(context.Context, func(chat.RealtimeEvent)) error
-	end    func(context.Context, string) error
+	discover func(context.Context) error
+	start    func(context.Context) (chat.RealtimeSession, error)
+	stream   func(context.Context, func(chat.RealtimeEvent)) error
+	end      func(context.Context, string) error
 }
 
-func (c testRealtimeAudioClient) RealtimeCapabilities(context.Context) (chat.RealtimeCapabilities, error) {
+func (c testRealtimeAudioClient) RealtimeCapabilities(ctx context.Context) (chat.RealtimeCapabilities, error) {
+	if c.discover != nil {
+		if err := c.discover(ctx); err != nil {
+			return chat.RealtimeCapabilities{}, err
+		}
+	}
 	return chat.RealtimeCapabilities{Enabled: true, Available: true}, nil
 }
 
@@ -664,6 +682,73 @@ func TestRealtimeAudioConnectionDeadlineStartsAfterSlowOffer(t *testing.T) {
 			assert.True(t, peer.closed.Load())
 		})
 	}
+}
+
+func TestAudioWorkerTimeoutsExplainWhichDeadlineExpired(t *testing.T) {
+	previousDiscovery, previousTranscription, previousCall := audioDiscoveryTimeout, transcriptionTimeout, realtimeCallLimit
+	t.Cleanup(func() {
+		audioDiscoveryTimeout, transcriptionTimeout, realtimeCallLimit = previousDiscovery, previousTranscription, previousCall
+	})
+	audioDiscoveryTimeout, transcriptionTimeout, realtimeCallLimit = 50*time.Millisecond, 50*time.Millisecond, 200*time.Millisecond
+	blockUntilDone := func(ctx context.Context) error {
+		<-ctx.Done()
+		return errors.Wrap(ctx.Err(), "request failed")
+	}
+	caps := transcriptiontypes.Capabilities{
+		Enabled: true, Available: true, MaxAudioBytes: 48, MaxDurationSeconds: 5, MimeTypes: []string{"audio/wav"},
+	}
+	dictate := func(ctx context.Context, client *testDictationClient) error {
+		peer := &testAudioPeer{events: make(chan audiohost.Event, 3)}
+		peer.events <- audiohost.Event{Type: "recording"}
+		peer.events <- audiohost.Event{Type: "audio", Audio: []byte{1, 2}}
+		peer.events <- audiohost.Event{Type: "recorded"}
+		_, err := runDictation(ctx, client, nil, func(tuiAudioMsg) {}, peer.start)
+		return err
+	}
+	call := func(ctx context.Context, discover func(context.Context) error) error {
+		peer := &testAudioPeer{events: make(chan audiohost.Event, 2)}
+		peer.events <- audiohost.Event{Type: "offer", SDP: "offer"}
+		peer.events <- audiohost.Event{Type: "connected"}
+		client := testRealtimeAudioClient{
+			discover: discover,
+			start: func(context.Context) (chat.RealtimeSession, error) {
+				return chat.RealtimeSession{ID: "call", ConversationID: "conv", Answer: "answer"}, nil
+			},
+			stream: func(ctx context.Context, _ func(chat.RealtimeEvent)) error { return blockUntilDone(ctx) },
+			end:    func(context.Context, string) error { return nil },
+		}
+		return runRealtimeAudio(ctx, client, chat.ChatRequest{ConversationID: "conv"}, nil, func(tuiAudioMsg) {}, peer.start)
+	}
+	for _, test := range []struct {
+		name string
+		run  func(context.Context) error
+		want error
+	}{
+		{"dictation availability", func(ctx context.Context) error {
+			return dictate(ctx, &testDictationClient{caps: caps, discover: blockUntilDone})
+		}, errDictationDiscoveryTimeout},
+		{"transcription", func(ctx context.Context) error {
+			return dictate(ctx, &testDictationClient{caps: caps, transcribe: blockUntilDone})
+		}, errTranscriptionTimeout},
+		{"voice call availability", func(ctx context.Context) error { return call(ctx, blockUntilDone) }, errRealtimeDiscoveryTimeout},
+		{"call limit", func(ctx context.Context) error { return call(ctx, nil) }, errRealtimeCallLimit},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			err := test.run(ctx)
+			require.ErrorIs(t, err, test.want)
+			assert.Equal(t, test.want.Error(), err.Error())
+		})
+	}
+
+	t.Run("an expired parent context keeps its error", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		defer cancel()
+		err := dictate(ctx, &testDictationClient{caps: caps, discover: blockUntilDone})
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.NotErrorIs(t, err, errDictationDiscoveryTimeout)
+	})
 }
 
 func TestRealtimeAudioClosesLateAllocationAfterCancel(t *testing.T) {
