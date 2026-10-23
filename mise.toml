@@ -106,6 +106,7 @@ run = 'cargo test --manifest-path audio/Cargo.toml --locked'
 description = "Check Rust formatting and lint the experimental audio helper"
 tools = { rust = "1.99.1" }
 run = [
+  "rustup component add rustfmt clippy",
   "cargo fmt --manifest-path audio/Cargo.toml --check",
   "cargo clippy --manifest-path audio/Cargo.toml --locked --all-targets -- -D warnings",
 ]
