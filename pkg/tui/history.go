@@ -106,14 +106,18 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 
 	for _, msg := range messages {
 		if msg.ID != "" && msg.Kind == "text" {
-			entry := audioTranscriptEntry(chat.RealtimeEvent{ID: msg.ID, Role: msg.Role, Text: msg.Content, Anchor: msg.Anchor})
+			entry := audioTranscriptEntry(chat.RealtimeEvent{
+				ID: msg.ID, Role: msg.Role, Text: msg.Content, Anchor: msg.Anchor,
+			})
 			entries = append(entries, entry)
 			continue
 		}
 		switch msg.Kind {
 		case "resources-reloaded", "resource-reload-refused":
 			if msg.ResourceReloadID != "" && !hasResourceReloadMarker(entries, msg.ResourceReloadID) {
-				entry := resourceReloadEntry(msg.ResourceReloadID, msg.Content, msg.Kind == "resource-reload-refused")
+				entry := resourceReloadEntry(
+					msg.ResourceReloadID, msg.Content, msg.Kind == "resource-reload-refused",
+				)
 				entry.codingSpan = extendCodingSpan(nil, msg.Anchor)
 				entries = append(entries, entry)
 			}
@@ -124,7 +128,11 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 		case "text":
 			switch msg.Role {
 			case "user":
-				entries = append(entries, chatEntry{kind: entryUser, content: strings.TrimSpace(msg.Content), codingSpan: extendCodingSpan(nil, msg.Anchor)})
+				entries = append(entries, chatEntry{
+					kind:       entryUser,
+					content:    strings.TrimSpace(msg.Content),
+					codingSpan: extendCodingSpan(nil, msg.Anchor),
+				})
 			case "assistant":
 				text := strings.TrimSpace(msg.Content)
 				if text == "" {

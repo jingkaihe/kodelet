@@ -145,43 +145,76 @@ impl Session {
                         output.event(json!({"type":"closed"}))?;
                         return Ok(());
                     }
-                    Some(Ok(Command::Record { max_audio_bytes, max_duration_seconds })) if !self.used => {
+                    Some(Ok(Command::Record {
+                        max_audio_bytes,
+                        max_duration_seconds,
+                    })) if !self.used => {
                         let limit = recording_limit(max_audio_bytes, max_duration_seconds)?;
                         let devices = Devices::open(false)?;
-                        self.recording = Some(Recording { converter: Converter::new(devices.input_rate, 16_000)?, devices, remaining: limit, deadline: Instant::now() + Duration::from_secs(max_duration_seconds.min(600)), peak: 0.0 });
+                        self.recording = Some(Recording {
+                            converter: Converter::new(devices.input_rate, 16_000)?,
+                            devices,
+                            remaining: limit,
+                            deadline: Instant::now()
+                                + Duration::from_secs(max_duration_seconds.min(600)),
+                            peak: 0.0,
+                        });
                         self.used = true;
                         output.event(json!({"type":"recording"}))?;
                     }
-                    Some(Ok(Command::Finish {})) if self.recording.is_some() => self.finish(output)?,
+                    Some(Ok(Command::Finish {})) if self.recording.is_some() => {
+                        self.finish(output)?
+                    }
                     // The parent's finish can race the automatic byte/duration limit.
                     Some(Ok(Command::Finish {})) if self.used && self.call.is_none() => {},
                     Some(Ok(Command::CreateOffer {})) if !self.used => {
-                        // Cold plugin discovery can be slow; finish it before the parent allocates a call.
+                        // Cold plugin discovery can be slow; finish it before the parent
+                        // allocates a call.
                         playout::initialize()?;
                         let (peer, sdp) = realtime::Peer::offer().await?;
                         self.used = true;
                         self.call = Some(Call { peer, audio: None });
                         output.event(json!({"type":"offer","sdp":sdp}))?;
                     }
-                    Some(Ok(Command::Answer { sdp })) if self.call.as_ref().is_some_and(|call| call.audio.is_none()) => {
+                    Some(Ok(Command::Answer { sdp }))
+                        if self.call.as_ref().is_some_and(|call| call.audio.is_none()) =>
+                    {
                         let call = self.call.as_mut().unwrap();
                         call.peer.answer(sdp).await?;
                         let devices = Devices::open(true)?;
                         let processor = Processor::new(devices.input_rate, devices.output_rate)?;
-                        let playout = playout::Playout::new(devices.output_rate, devices.buffers.clone())?;
-                        let mut encoder = opus::Encoder::new(48_000, opus::Channels::Mono, opus::Application::Voip).map_err(|_| "could not create silence encoder")?;
+                        let playout =
+                            playout::Playout::new(devices.output_rate, devices.buffers.clone())?;
+                        let mut encoder = opus::Encoder::new(
+                            48_000,
+                            opus::Channels::Mono,
+                            opus::Application::Voip,
+                        )
+                        .map_err(|_| "could not create silence encoder")?;
                         let mut silence = vec![0; 1275];
-                        let len = encoder.encode_float(&[0.0; 960], &mut silence).map_err(|_| "could not encode silence")?;
+                        let len = encoder
+                            .encode_float(&[0.0; 960], &mut silence)
+                            .map_err(|_| "could not encode silence")?;
                         silence.truncate(len);
                         devices.buffers.check()?;
                         devices.buffers.mute(false);
-                        call.audio = Some(CallAudio { devices, processor, playout, silence, next_silence: Instant::now(), peak: 0.0 });
+                        call.audio = Some(CallAudio {
+                            devices,
+                            processor,
+                            playout,
+                            silence,
+                            next_silence: Instant::now(),
+                            peak: 0.0,
+                        });
                         output.event(json!({"type":"connected"}))?;
                     }
-                    Some(Ok(Command::Mute { muted })) if self.call.as_ref().is_some_and(|call| call.audio.is_some()) => {
+                    Some(Ok(Command::Mute { muted }))
+                        if self.call.as_ref().is_some_and(|call| call.audio.is_some()) =>
+                    {
                         let audio = self.call.as_mut().unwrap().audio.as_mut().unwrap();
                         audio.devices.buffers.mute(muted);
-                        audio.processor = Processor::new(audio.devices.input_rate, audio.devices.output_rate)?;
+                        audio.processor =
+                            Processor::new(audio.devices.input_rate, audio.devices.output_rate)?;
                         audio.peak = 0.0;
                         output.event(json!({"type":"muted","muted":muted}))?;
                     }
@@ -190,12 +223,25 @@ impl Session {
                 _ = tick.tick() => {
                     if let Some(recording) = self.recording.as_mut() {
                         recording.drain(output)?;
-                        if recording.remaining == 0 || Instant::now() >= recording.deadline { self.finish(output)?; }
+                        if recording.remaining == 0 || Instant::now() >= recording.deadline {
+                            self.finish(output)?;
+                        }
                     }
-                    if let Some(call) = self.call.as_mut() { call.service().await?; }
+                    if let Some(call) = self.call.as_mut() {
+                        call.service().await?;
+                    }
                     if last_level.elapsed() >= Duration::from_millis(100) {
-                        let peak = if let Some(recording) = self.recording.as_mut() { Some(std::mem::take(&mut recording.peak)) } else { self.call.as_mut().and_then(|call| call.audio.as_mut()).map(|audio| std::mem::take(&mut audio.peak)) };
-                        if let Some(peak) = peak { output.event(json!({"type":"level","level":peak.clamp(0.0, 1.0)}))?; }
+                        let peak = if let Some(recording) = self.recording.as_mut() {
+                            Some(std::mem::take(&mut recording.peak))
+                        } else {
+                            self.call
+                                .as_mut()
+                                .and_then(|call| call.audio.as_mut())
+                                .map(|audio| std::mem::take(&mut audio.peak))
+                        };
+                        if let Some(peak) = peak {
+                            output.event(json!({"type":"level","level":peak.clamp(0.0, 1.0)}))?;
+                        }
                         last_level = Instant::now();
                     }
                 }

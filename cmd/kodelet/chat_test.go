@@ -902,7 +902,8 @@ func TestConfiguredChatRunnerAppliesPickedModelOverCLIOptions(t *testing.T) {
 func TestConfiguredChatRunnerLoadsSavedVoiceTranscript(t *testing.T) {
 	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/api/conversations/saved", r.URL.Path)
-		assert.Empty(t, r.URL.Query().Get("format"), "use the Web UI's persisted transcript projection")
+		assert.Empty(t, r.URL.Query().Get("format"),
+			"use the Web UI's persisted transcript projection")
 		_, err := w.Write([]byte(`{
 			"id":"saved","messages":[
 				{"id":"voice:user","anchor":0,"role":"user","content":"spoken request"},
@@ -936,7 +937,8 @@ func TestConfiguredChatRunnerRealtimePreservesCLIOptionsAndSavedAffinity(t *test
 		daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/api/conversations/saved":
-				assert.Equal(t, "stream", r.URL.Query().Get("format"), "affinity must fail closed on runner lookup errors")
+				assert.Equal(t, "stream", r.URL.Query().Get("format"),
+					"affinity must fail closed on runner lookup errors")
 				require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
 					"id": "saved", "cwd": "/workspace", "runnerId": "runner",
 					"profile": "coding", "environmentProfile": "sandbox",
@@ -955,11 +957,19 @@ func TestConfiguredChatRunnerRealtimePreservesCLIOptionsAndSavedAffinity(t *test
 		t.Cleanup(daemon.Close)
 		client, err := chatpkg.NewClient(daemon.URL, "", "")
 		require.NoError(t, err)
-		runner := &configuredChatRunner{Client: client, options: cliOptions.Clone(), runnerID: "default", defaultCWD: "/default"}
+		runner := &configuredChatRunner{
+			Client:     client,
+			options:    cliOptions.Clone(),
+			runnerID:   "default",
+			defaultCWD: "/default",
+		}
 		session, err := runner.StartRealtime(t.Context(), "offer", chatpkg.ChatRequest{
 			ConversationID: " saved ",
 			Options: &llmtypes.ExecutionOptions{
-				Model: new("picked-model"), NoTools: new(false), NoExtensions: new(false), NoSkills: new(false),
+				Model:        new("picked-model"),
+				NoTools:      new(false),
+				NoExtensions: new(false),
+				NoSkills:     new(false),
 			},
 		}, "cedar")
 		require.NoError(t, err)
@@ -994,10 +1004,15 @@ func TestConfiguredChatRunnerRealtimeCreatesConversation(t *testing.T) {
 			assert.Equal(t, "coding", r.URL.Query().Get("profile"))
 			assert.Equal(t, "sandbox", r.URL.Query().Get("environmentProfile"))
 			assert.Equal(t, "~/project", r.URL.Query().Get("cwd"))
-			require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceDiscoverResult{CWD: "/resolved/project", EnvironmentProfile: "sandbox"}))
+			require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceDiscoverResult{
+				CWD:                "/resolved/project",
+				EnvironmentProfile: "sandbox",
+			}))
 		case "/api/realtime":
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&submitted))
-			require.NoError(t, json.NewEncoder(w).Encode(chatpkg.RealtimeSession{ID: "call", ConversationID: "new", Answer: "answer"}))
+			require.NoError(t, json.NewEncoder(w).Encode(chatpkg.RealtimeSession{
+				ID: "call", ConversationID: "new", Answer: "answer",
+			}))
 		default:
 			t.Errorf("unexpected endpoint: %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -1022,7 +1037,10 @@ func TestConfiguredChatRunnerRealtimeCreatesConversation(t *testing.T) {
 	assert.Equal(t, chatpkg.ChatRequest{
 		ConversationID: "new", Profile: "coding", RunnerID: "runner", CWD: "/resolved/project",
 		EnvironmentProfile: "sandbox", ReasoningEffort: "high",
-		Options:            &llmtypes.ExecutionOptions{Model: new("picked-model"), NoTools: new(true)},
+		Options: &llmtypes.ExecutionOptions{
+			Model:   new("picked-model"),
+			NoTools: new(true),
+		},
 		ClientCapabilities: &chatpkg.ChatClientCapabilities{},
 	}, submitted.Chat)
 }
@@ -1033,32 +1051,52 @@ func TestConfiguredChatRunnerRealtimePreservesSavedConversationAffinity(t *testi
 		request                         chatpkg.ChatRequest
 	}{
 		{name: "empty", wantError: "conversation ID is required"},
-		{name: "runner", explicitRunner: "other", request: chatpkg.ChatRequest{ConversationID: "saved"}, wantError: "different runner"},
-		{name: "directory", request: chatpkg.ChatRequest{ConversationID: "saved", CWD: "/other"}, wantError: "working directory cannot be changed"},
-		{name: "profile", request: chatpkg.ChatRequest{ConversationID: "saved", Profile: "other"}, wantError: "model profile cannot be changed"},
-		{name: "environment", request: chatpkg.ChatRequest{ConversationID: "saved", EnvironmentProfile: "other"}, wantError: "runner profile cannot be changed"},
+		{
+			name:           "runner",
+			explicitRunner: "other",
+			request:        chatpkg.ChatRequest{ConversationID: "saved"},
+			wantError:      "different runner",
+		},
+		{
+			name:      "directory",
+			request:   chatpkg.ChatRequest{ConversationID: "saved", CWD: "/other"},
+			wantError: "working directory cannot be changed",
+		},
+		{
+			name:      "profile",
+			request:   chatpkg.ChatRequest{ConversationID: "saved", Profile: "other"},
+			wantError: "model profile cannot be changed",
+		},
+		{
+			name:      "environment",
+			request:   chatpkg.ChatRequest{ConversationID: "saved", EnvironmentProfile: "other"},
+			wantError: "runner profile cannot be changed",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var posts atomic.Int32
-			daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method == http.MethodPost {
-					posts.Add(1)
-				}
-				if r.URL.Path != "/api/conversations/saved" {
-					http.NotFound(w, r)
-					return
-				}
-				require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
-					"id": "saved", "cwd": "/workspace", "runnerId": "runner",
-				}))
-			}))
+			daemon := httptest.NewServer(http.HandlerFunc(
+				func(w http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodPost {
+						posts.Add(1)
+					}
+					if r.URL.Path != "/api/conversations/saved" {
+						http.NotFound(w, r)
+						return
+					}
+					require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+						"id": "saved", "cwd": "/workspace", "runnerId": "runner",
+					}))
+				},
+			))
 			t.Cleanup(daemon.Close)
 			client, err := chatpkg.NewClient(daemon.URL, "", "")
 			require.NoError(t, err)
 			runner := &configuredChatRunner{Client: client, explicitRunnerID: test.explicitRunner}
 			_, err = runner.StartRealtime(t.Context(), "offer", test.request, "")
 			require.ErrorContains(t, err, test.wantError)
-			assert.Zero(t, posts.Load(), "must not negotiate a call or allocate a fresh conversation")
+			assert.Zero(t, posts.Load(),
+				"must not negotiate a call or allocate a fresh conversation")
 		})
 	}
 }

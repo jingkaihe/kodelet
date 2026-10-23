@@ -106,7 +106,8 @@ func fixture(mode string) error {
 				count = eventQueueSize * 2
 			}
 			for i := range count {
-				if _, err := os.Stdout.Write(fixtureFrame(pcmFrame, []byte{byte(i), 0, 0xff, 0x7f})); err != nil {
+				frame := fixtureFrame(pcmFrame, []byte{byte(i), 0, 0xff, 0x7f})
+				if _, err := os.Stdout.Write(frame); err != nil {
 					return err
 				}
 			}
@@ -316,7 +317,9 @@ func TestRejectMalformedFrames(t *testing.T) {
 		"two JSON values":  fixtureFrame(jsonFrame, []byte(`{"type":"closed"} {}`)),
 		"missing type":     fixtureFrame(jsonFrame, []byte(`{}`)),
 		"JSON audio":       fixtureFrame(jsonFrame, []byte(`{"type":"audio"}`)),
-		"oversized SDP":    fixtureFrame(jsonFrame, []byte(`{"type":"offer","sdp":"`+strings.Repeat("x", maxSDPBytes+1)+`"}`)),
+		"oversized SDP": fixtureFrame(jsonFrame, []byte(
+			`{"type":"offer","sdp":"`+strings.Repeat("x", maxSDPBytes+1)+`"}`,
+		)),
 	}
 	for name, input := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -373,7 +376,13 @@ func TestRecordingAndRealtimeModes(t *testing.T) {
 }
 
 func TestHandshakeFailureReapsChild(t *testing.T) {
-	for _, mode := range []string{"handshake-mismatch", "handshake-audio", "handshake-eof", "handshake-error", "handshake-stall"} {
+	for _, mode := range []string{
+		"handshake-mismatch",
+		"handshake-audio",
+		"handshake-eof",
+		"handshake-error",
+		"handshake-stall",
+	} {
 		t.Run(mode, func(t *testing.T) {
 			pid := setupFixture(t, mode)
 			c, err := Start(t.Context())
@@ -534,7 +543,11 @@ func TestHelperPaths(t *testing.T) {
 	})
 	t.Run("relative PATH entries are ignored", func(t *testing.T) {
 		directory := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(directory, helperName), []byte("#!/bin/sh\n"), 0o755))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(directory, helperName),
+			[]byte("#!/bin/sh\n"),
+			0o755,
+		))
 		t.Chdir(directory)
 		t.Setenv("PATH", ".")
 		_, err := helperPath()

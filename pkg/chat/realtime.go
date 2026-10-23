@@ -63,7 +63,12 @@ func (r *Client) RealtimeCapabilities(ctx context.Context) (RealtimeCapabilities
 // Session-extension attachments and parent creation retain server restrictions.
 // If the response includes an ID even on validation failure, the caller can use
 // EndRealtime to clean up the allocated call.
-func (r *Client) StartRealtime(ctx context.Context, offer string, request ChatRequest, voice string) (RealtimeSession, error) {
+func (r *Client) StartRealtime(
+	ctx context.Context,
+	offer string,
+	request ChatRequest,
+	voice string,
+) (RealtimeSession, error) {
 	var result RealtimeSession
 	if strings.TrimSpace(offer) == "" {
 		return result, errors.New("a realtime SDP offer is required")
@@ -82,10 +87,14 @@ func (r *Client) StartRealtime(ctx context.Context, offer string, request ChatRe
 		Chat  ChatRequest `json:"chat"`
 		Voice string      `json:"voice,omitempty"`
 	}{Offer: offer, Chat: request, Voice: strings.TrimSpace(voice)}
-	if err := r.realtimeAPIRequest(ctx, http.MethodPost, []string{"api", "realtime"}, payload, &result); err != nil {
+	if err := r.realtimeAPIRequest(
+		ctx, http.MethodPost, []string{"api", "realtime"}, payload, &result,
+	); err != nil {
 		return result, err
 	}
-	if strings.TrimSpace(result.ID) == "" || strings.TrimSpace(result.Answer) == "" || result.ConversationID != request.ConversationID {
+	if strings.TrimSpace(result.ID) == "" ||
+		strings.TrimSpace(result.Answer) == "" ||
+		result.ConversationID != request.ConversationID {
 		return result, errors.New("server returned an invalid realtime session")
 	}
 	return result, nil
@@ -98,7 +107,9 @@ func (r *Client) EndRealtime(ctx context.Context, callID string) error {
 	if callID == "" {
 		return errors.New("realtime call ID is required")
 	}
-	return r.realtimeAPIRequest(ctx, http.MethodDelete, []string{"api", "realtime", callID}, nil, nil)
+	return r.realtimeAPIRequest(
+		ctx, http.MethodDelete, []string{"api", "realtime", callID}, nil, nil,
+	)
 }
 
 // StreamRealtime attaches once to a call's NDJSON presentation stream. The caller
@@ -106,7 +117,11 @@ func (r *Client) EndRealtime(ctx context.Context, callID string) error {
 // for this stream without changing its transport or the shared Client. It never
 // reconnects. onEvent runs synchronously and must not block. A closed event ends
 // the stream successfully; EOF without one reports an interrupted call.
-func (r *Client) StreamRealtime(ctx context.Context, callID string, onEvent func(RealtimeEvent)) error {
+func (r *Client) StreamRealtime(
+	ctx context.Context,
+	callID string,
+	onEvent func(RealtimeEvent),
+) error {
 	if r == nil || r.client == nil {
 		return errors.New("the chat connection is not initialized")
 	}
@@ -130,7 +145,9 @@ func (r *Client) StreamRealtime(ctx context.Context, callID string, onEvent func
 	request.Header.Set("Accept", "application/x-ndjson")
 	client := *r.client
 	client.Timeout = 0
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
 	response, err := client.Do(request)
 	if err != nil {
 		return errors.Wrap(err, "failed to stream realtime events")
@@ -151,10 +168,14 @@ func (r *Client) StreamRealtime(ctx context.Context, callID string, onEvent func
 		}
 		var event RealtimeEvent
 		if err := json.Unmarshal(line, &event); err != nil {
-			return &ControlPlaneStreamProtocolError{err: errors.Wrap(err, "failed to decode realtime event")}
+			return &ControlPlaneStreamProtocolError{
+				err: errors.Wrap(err, "failed to decode realtime event"),
+			}
 		}
 		if strings.TrimSpace(event.Kind) == "" {
-			return &ControlPlaneStreamProtocolError{err: errors.New("realtime event kind is required")}
+			return &ControlPlaneStreamProtocolError{
+				err: errors.New("realtime event kind is required"),
+			}
 		}
 		onEvent(event)
 		if event.Kind == "closed" {
@@ -174,7 +195,12 @@ func (r *Client) StreamRealtime(ctx context.Context, callID string, onEvent func
 	return errors.Wrap(io.ErrUnexpectedEOF, "realtime stream ended without a closed event")
 }
 
-func (r *Client) realtimeAPIRequest(ctx context.Context, method string, path []string, payload, result any) error {
+func (r *Client) realtimeAPIRequest(
+	ctx context.Context,
+	method string,
+	path []string,
+	payload, result any,
+) error {
 	if r == nil || r.client == nil {
 		return errors.New("the chat connection is not initialized")
 	}
@@ -202,10 +228,15 @@ func (r *Client) realtimeAPIRequest(ctx context.Context, method string, path []s
 		request.Header.Set("Content-Type", "application/json")
 	}
 	client := *r.client
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
 	response, err := client.Do(request)
 	if err != nil {
-		return errors.Wrap(err, "realtime request failed; check the conversation before starting another call")
+		return errors.Wrap(
+			err,
+			"realtime request failed; check the conversation before starting another call",
+		)
 	}
 	defer response.Body.Close()
 	wantStatus := http.StatusOK

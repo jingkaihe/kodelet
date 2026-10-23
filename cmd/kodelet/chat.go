@@ -111,7 +111,10 @@ type configuredChatRunner struct {
 }
 
 // LoadConversation supplies the TUI with the Web UI's display transcript.
-func (r *configuredChatRunner) LoadConversation(ctx context.Context, conversationID string) (chatpkg.ConversationHistory, error) {
+func (r *configuredChatRunner) LoadConversation(
+	ctx context.Context,
+	conversationID string,
+) (chatpkg.ConversationHistory, error) {
 	return r.LoadConversationTranscript(ctx, conversationID)
 }
 
@@ -199,7 +202,9 @@ func (r *configuredChatRunner) AppendMessageHistory(ctx context.Context, target 
 	return r.Client.AppendMessageHistory(ctx, target, entry)
 }
 
-func (r *configuredChatRunner) executionOptions(selected *llmtypes.ExecutionOptions) *llmtypes.ExecutionOptions {
+func (r *configuredChatRunner) executionOptions(
+	selected *llmtypes.ExecutionOptions,
+) *llmtypes.ExecutionOptions {
 	// The TUI only sends the model it selected; every other option comes from the CLI.
 	options := r.options.Clone()
 	if selected != nil && selected.Model != nil {
@@ -213,7 +218,12 @@ func (r *configuredChatRunner) executionOptions(selected *llmtypes.ExecutionOpti
 
 // StartRealtime keeps voice delegates subject to the same CLI options and saved
 // affinity as typed turns, including when voice creates the conversation.
-func (r *configuredChatRunner) StartRealtime(ctx context.Context, offer string, request chatpkg.ChatRequest, voice string) (chatpkg.RealtimeSession, error) {
+func (r *configuredChatRunner) StartRealtime(
+	ctx context.Context,
+	offer string,
+	request chatpkg.ChatRequest,
+	voice string,
+) (chatpkg.RealtimeSession, error) {
 	request.ConversationID = strings.TrimSpace(request.ConversationID)
 	if request.ConversationID == "" {
 		return chatpkg.RealtimeSession{}, errors.New("conversation ID is required")
@@ -229,19 +239,32 @@ func (r *configuredChatRunner) StartRealtime(ctx context.Context, offer string, 
 	return session, err
 }
 
-func (r *configuredChatRunner) Run(ctx context.Context, request chatpkg.ChatRequest, sink chatpkg.ChatEventSink) (string, error) {
+func (r *configuredChatRunner) Run(
+	ctx context.Context,
+	request chatpkg.ChatRequest,
+	sink chatpkg.ChatEventSink,
+) (string, error) {
 	request, err := r.prepareRequest(ctx, request)
 	if err != nil {
 		return request.ConversationID, err
 	}
 	id, err := r.Client.Run(ctx, request, sink)
 	if err != nil {
-		return id, errors.Wrapf(err, "chat failed or the connection was interrupted; before sending the message again, check 'kodelet conversation turn %s %s'", request.ConversationID, request.TurnID)
+		return id, errors.Wrapf(
+			err,
+			"chat failed or the connection was interrupted; before sending the message "+
+				"again, check 'kodelet conversation turn %s %s'",
+			request.ConversationID,
+			request.TurnID,
+		)
 	}
 	return id, nil
 }
 
-func (r *configuredChatRunner) prepareRequest(ctx context.Context, request chatpkg.ChatRequest) (chatpkg.ChatRequest, error) {
+func (r *configuredChatRunner) prepareRequest(
+	ctx context.Context,
+	request chatpkg.ChatRequest,
+) (chatpkg.ChatRequest, error) {
 	request.Options = r.executionOptions(request.Options)
 	var history chatpkg.ConversationHistory
 	var err error

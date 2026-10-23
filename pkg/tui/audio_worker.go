@@ -21,7 +21,9 @@ type audioPeer interface {
 
 type dictationClient interface {
 	TranscriptionCapabilities(context.Context) (transcriptiontypes.Capabilities, error)
-	TranscribeAudio(context.Context, []byte, string, string, string) (transcriptiontypes.Result, error)
+	TranscribeAudio(
+		context.Context, []byte, string, string, string,
+	) (transcriptiontypes.Result, error)
 }
 
 type realtimeAudioClient interface {
@@ -42,9 +44,11 @@ var (
 
 var (
 	errDictationDiscoveryTimeout = errors.New("timed out checking whether dictation is available")
-	errRealtimeDiscoveryTimeout  = errors.New("timed out checking whether voice calls are available")
-	errTranscriptionTimeout      = errors.New("transcription timed out")
-	errRealtimeCallLimit         = errors.New("voice call reached the 30-minute limit")
+	errRealtimeDiscoveryTimeout  = errors.New(
+		"timed out checking whether voice calls are available",
+	)
+	errTranscriptionTimeout = errors.New("transcription timed out")
+	errRealtimeCallLimit    = errors.New("voice call reached the 30-minute limit")
 )
 
 // deadlineError reports cause instead of err when ctx's own deadline, created
@@ -60,7 +64,10 @@ func deadlineError(ctx context.Context, err, cause error) error {
 // so the caller's Close can release devices gracefully instead of the helper
 // being killed. Canceling ctx during the handshake still aborts startup without
 // sending any command. Call release after Close.
-func startSessionPeer(ctx context.Context, start func(context.Context) (audioPeer, error)) (audioPeer, context.CancelFunc, error) {
+func startSessionPeer(
+	ctx context.Context,
+	start func(context.Context) (audioPeer, error),
+) (audioPeer, context.CancelFunc, error) {
 	helper, kill := context.WithCancel(context.WithoutCancel(ctx))
 	abortStartup := context.AfterFunc(ctx, kill)
 	peer, err := start(helper)
@@ -79,7 +86,15 @@ func startSessionPeer(ctx context.Context, start func(context.Context) (audioPee
 	return peer, kill, nil
 }
 
-func runTUIAudio(ctx context.Context, mode string, runner any, request chat.ChatRequest, controls <-chan audiohost.Command, emit func(tuiAudioMsg), start func(context.Context) (audioPeer, error)) (string, error) {
+func runTUIAudio(
+	ctx context.Context,
+	mode string,
+	runner any,
+	request chat.ChatRequest,
+	controls <-chan audiohost.Command,
+	emit func(tuiAudioMsg),
+	start func(context.Context) (audioPeer, error),
+) (string, error) {
 	if mode == "voice" {
 		client, ok := runner.(dictationClient)
 		if !ok {
@@ -94,8 +109,16 @@ func runTUIAudio(ctx context.Context, mode string, runner any, request chat.Chat
 	return "", runRealtimeAudio(ctx, client, request, controls, emit, start)
 }
 
-func runDictation(ctx context.Context, client dictationClient, controls <-chan audiohost.Command, emit func(tuiAudioMsg), start func(context.Context) (audioPeer, error)) (string, error) {
-	discovery, cancel := context.WithTimeoutCause(ctx, audioDiscoveryTimeout, errDictationDiscoveryTimeout)
+func runDictation(
+	ctx context.Context,
+	client dictationClient,
+	controls <-chan audiohost.Command,
+	emit func(tuiAudioMsg),
+	start func(context.Context) (audioPeer, error),
+) (string, error) {
+	discovery, cancel := context.WithTimeoutCause(
+		ctx, audioDiscoveryTimeout, errDictationDiscoveryTimeout,
+	)
 	caps, err := client.TranscriptionCapabilities(discovery)
 	err = deadlineError(discovery, err, errDictationDiscoveryTimeout)
 	cancel()
@@ -105,7 +128,9 @@ func runDictation(ctx context.Context, client dictationClient, controls <-chan a
 	if !caps.Enabled || !caps.Available {
 		return "", errors.New("dictation unavailable: " + caps.Reason)
 	}
-	if !slices.Contains(caps.MimeTypes, "audio/wav") || caps.MaxAudioBytes <= 44 || caps.MaxDurationSeconds <= 0 {
+	if !slices.Contains(caps.MimeTypes, "audio/wav") ||
+		caps.MaxAudioBytes <= 44 ||
+		caps.MaxDurationSeconds <= 0 {
 		return "", errors.New("the server does not advertise usable WAV recording limits")
 	}
 	peer, release, err := startSessionPeer(ctx, start)
@@ -116,7 +141,9 @@ func runDictation(ctx context.Context, client dictationClient, controls <-chan a
 	defer peer.Close()
 	maxBytes := min(caps.MaxAudioBytes, transcriptiontypes.MaxAudioBytes) - 44
 	maxSeconds := min(caps.MaxDurationSeconds, transcriptiontypes.MaxDurationSeconds)
-	if err := peer.Send(audiohost.Command{Type: "record", MaxAudioBytes: maxBytes, MaxDurationSeconds: maxSeconds}); err != nil {
+	if err := peer.Send(audiohost.Command{
+		Type: "record", MaxAudioBytes: maxBytes, MaxDurationSeconds: maxSeconds,
+	}); err != nil {
 		return "", err
 	}
 	// The helper enforces sample limits; the parent also bounds startup, stalled
@@ -159,7 +186,9 @@ func runDictation(ctx context.Context, client dictationClient, controls <-chan a
 				}
 			case "audio":
 				if len(event.Audio)%2 != 0 || int64(len(pcm)+len(event.Audio)) > maxBytes {
-					return "", errors.New("audio helper exceeded the recording limit or returned invalid PCM")
+					return "", errors.New(
+						"audio helper exceeded the recording limit or returned invalid PCM",
+					)
 				}
 				pcm = append(pcm, event.Audio...)
 				continue
@@ -173,9 +202,13 @@ func runDictation(ctx context.Context, client dictationClient, controls <-chan a
 					return "", errors.New("no audio was recorded")
 				}
 				emit(tuiAudioMsg{event: audiohost.Event{Type: "transcribing"}})
-				upload, cancel := context.WithTimeoutCause(ctx, transcriptionTimeout, errTranscriptionTimeout)
+				upload, cancel := context.WithTimeoutCause(
+					ctx, transcriptionTimeout, errTranscriptionTimeout,
+				)
 				defer cancel()
-				result, err := client.TranscribeAudio(upload, dictationWAV(pcm), "dictation.wav", "audio/wav", "")
+				result, err := client.TranscribeAudio(
+					upload, dictationWAV(pcm), "dictation.wav", "audio/wav", "",
+				)
 				err = deadlineError(upload, err, errTranscriptionTimeout)
 				if err == nil && strings.TrimSpace(result.Text) == "" {
 					err = errors.New("no speech detected")
@@ -213,14 +246,23 @@ var (
 	realtimeConnectTimeout = 90 * time.Second
 )
 
-func runRealtimeAudio(ctx context.Context, client realtimeAudioClient, request chat.ChatRequest, controls <-chan audiohost.Command, emit func(tuiAudioMsg), start func(context.Context) (audioPeer, error)) (err error) {
+func runRealtimeAudio(
+	ctx context.Context,
+	client realtimeAudioClient,
+	request chat.ChatRequest,
+	controls <-chan audiohost.Command,
+	emit func(tuiAudioMsg),
+	start func(context.Context) (audioPeer, error),
+) (err error) {
 	ctx, cancel := context.WithTimeoutCause(ctx, realtimeCallLimit, errRealtimeCallLimit)
 	defer func() {
 		// Whatever failed after the call limit expired failed because of it.
 		err = deadlineError(ctx, err, errRealtimeCallLimit)
 		cancel()
 	}()
-	discovery, stop := context.WithTimeoutCause(ctx, audioDiscoveryTimeout, errRealtimeDiscoveryTimeout)
+	discovery, stop := context.WithTimeoutCause(
+		ctx, audioDiscoveryTimeout, errRealtimeDiscoveryTimeout,
+	)
 	caps, err := client.RealtimeCapabilities(discovery)
 	err = deadlineError(discovery, err, errRealtimeDiscoveryTimeout)
 	stop()
@@ -308,7 +350,9 @@ func runRealtimeAudio(ctx context.Context, client realtimeAudioClient, request c
 				case <-ctx.Done():
 				}
 			}(callID)
-			if err := peer.Send(audiohost.Command{Type: "answer", SDP: result.session.Answer}); err != nil {
+			if err := peer.Send(audiohost.Command{
+				Type: "answer", SDP: result.session.Answer,
+			}); err != nil {
 				return err
 			}
 		case update := <-events:

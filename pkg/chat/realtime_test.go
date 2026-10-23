@@ -32,7 +32,12 @@ func TestClientRealtimeUsesConversationOwnerAndCapabilities(t *testing.T) {
 		assert.Equal(t, owner.Load(), r.Header.Get(ClientIDHeader))
 		switch {
 		case r.URL.Path == "/prefix/api/realtime" && r.Method == http.MethodGet:
-			_, _ = io.WriteString(w, `{"enabled":true,"available":true,"defaultVoice":"marin","voices":["marin","cedar"]}`)
+			_, _ = io.WriteString(w, `{
+	"enabled": true,
+	"available": true,
+	"defaultVoice": "marin",
+	"voices": ["marin", "cedar"]
+}`)
 		case r.URL.Path == "/prefix/api/realtime" && r.Method == http.MethodPost:
 			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 			var request struct {
@@ -49,19 +54,36 @@ func TestClientRealtimeUsesConversationOwnerAndCapabilities(t *testing.T) {
 			assert.Equal(t, "runner", request.Chat.RunnerID)
 			assert.Equal(t, "/workspace", request.Chat.CWD)
 			assert.Equal(t, "coding", request.Chat.Profile)
-			assert.Equal(t, &ChatClientCapabilities{InteractiveUI: true}, request.Chat.ClientCapabilities)
+			assert.Equal(
+				t,
+				&ChatClientCapabilities{InteractiveUI: true},
+				request.Chat.ClientCapabilities,
+			)
 			assert.Equal(t, &llmtypes.ExecutionOptions{NoTools: new(true)}, request.Chat.Options)
-			_, _ = io.WriteString(w, `{"id":"call/with?name","conversationId":"saved","answer":"answer"}`)
+			_, _ = io.WriteString(w, `{
+	"id": "call/with?name",
+	"conversationId": "saved",
+	"answer": "answer"
+}`)
 		case r.Method == http.MethodGet:
-			assert.Equal(t, "/prefix/api/realtime/call%2Fwith%3Fname/events", r.URL.EscapedPath())
+			assert.Equal(
+				t,
+				"/prefix/api/realtime/call%2Fwith%3Fname/events",
+				r.URL.EscapedPath(),
+			)
 			assert.Equal(t, "application/x-ndjson", r.Header.Get("Accept"))
-			_, _ = io.WriteString(w, `
-
-{"kind":"transcript","id":"utterance","role":"user","text":"café","final":true,"conversationId":"saved","anchor":0}
-{"kind":"agent-started","conversationId":"saved","turnId":"voice-turn"}
-{"kind":"warning","text":"warning"}
-{"kind":"error","text":"interrupted"}
-{"kind":"closed","conversationId":"saved"}`)
+			// NDJSON: one event per line, after blank keep-alive lines.
+			events := []string{
+				"",
+				"",
+				`{"kind":"transcript","id":"utterance","role":"user","text":"café","final":true,` +
+					`"conversationId":"saved","anchor":0}`,
+				`{"kind":"agent-started","conversationId":"saved","turnId":"voice-turn"}`,
+				`{"kind":"warning","text":"warning"}`,
+				`{"kind":"error","text":"interrupted"}`,
+				`{"kind":"closed","conversationId":"saved"}`,
+			}
+			_, _ = io.WriteString(w, strings.Join(events, "\n"))
 		case r.Method == http.MethodDelete:
 			assert.Equal(t, "/prefix/api/realtime/call%2Fwith%3Fname", r.URL.EscapedPath())
 			w.WriteHeader(http.StatusNoContent)
@@ -70,13 +92,23 @@ func TestClientRealtimeUsesConversationOwnerAndCapabilities(t *testing.T) {
 		}
 	}))
 	t.Cleanup(server.Close)
-	client, err := NewClient(server.URL+"/prefix", "client-token", "runner", WithHTTPClient(server.Client()))
+	client, err := NewClient(
+		server.URL+"/prefix",
+		"client-token",
+		"runner",
+		WithHTTPClient(server.Client()),
+	)
 	require.NoError(t, err)
 	ctx := extensions.ContextWithUIInputBroker(t.Context(), &staticControlPlaneUIBroker{})
 	require.NoError(t, client.StreamConversation(ctx, "saved", &collectingChatSink{}))
 	capabilities, err := client.RealtimeCapabilities(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, RealtimeCapabilities{Enabled: true, Available: true, DefaultVoice: "marin", Voices: []string{"marin", "cedar"}}, capabilities)
+	assert.Equal(t, RealtimeCapabilities{
+		Enabled:      true,
+		Available:    true,
+		DefaultVoice: "marin",
+		Voices:       []string{"marin", "cedar"},
+	}, capabilities)
 	request := ChatRequest{
 		ConversationID: " saved ", RunnerID: "other", CWD: "/workspace", Profile: "coding",
 		Options:            &llmtypes.ExecutionOptions{NoTools: new(true)},
@@ -84,12 +116,31 @@ func TestClientRealtimeUsesConversationOwnerAndCapabilities(t *testing.T) {
 	}
 	session, err := client.StartRealtime(ctx, "v=0\r\n", request, " cedar ")
 	require.NoError(t, err)
-	assert.Equal(t, RealtimeSession{ID: "call/with?name", ConversationID: "saved", Answer: "answer"}, session)
-	assert.Equal(t, &ChatClientCapabilities{PersistentSurfaces: true}, request.ClientCapabilities, "do not mutate caller input")
+	assert.Equal(t, RealtimeSession{
+		ID:             "call/with?name",
+		ConversationID: "saved",
+		Answer:         "answer",
+	}, session)
+	assert.Equal(
+		t,
+		&ChatClientCapabilities{PersistentSurfaces: true},
+		request.ClientCapabilities,
+		"do not mutate caller input",
+	)
 	var events []RealtimeEvent
-	require.NoError(t, client.StreamRealtime(ctx, session.ID, func(event RealtimeEvent) { events = append(events, event) }))
+	require.NoError(t, client.StreamRealtime(ctx, session.ID, func(event RealtimeEvent) {
+		events = append(events, event)
+	}))
 	require.Len(t, events, 5)
-	assert.Equal(t, RealtimeEvent{Kind: "transcript", ID: "utterance", Role: "user", Text: "café", Final: true, ConversationID: "saved", Anchor: new(0)}, events[0])
+	assert.Equal(t, RealtimeEvent{
+		Kind:           "transcript",
+		ID:             "utterance",
+		Role:           "user",
+		Text:           "café",
+		Final:          true,
+		ConversationID: "saved",
+		Anchor:         new(0),
+	}, events[0])
 	assert.Equal(t, "voice-turn", events[1].TurnID)
 	assert.Nil(t, events[1].Anchor)
 	require.NoError(t, client.EndRealtime(ctx, session.ID))
@@ -101,19 +152,37 @@ func TestClientStartRealtimeErrorsNeverRetry(t *testing.T) {
 		name, body, wantError string
 		status                int
 	}{
-		{"unavailable", `{"error":"voice unavailable"}`, "voice unavailable", http.StatusServiceUnavailable},
+		{
+			"unavailable", `{"error":"voice unavailable"}`,
+			"voice unavailable", http.StatusServiceUnavailable,
+		},
 		{"redirect", ``, "HTTP 307", http.StatusTemporaryRedirect},
 		{"invalid JSON", `{`, "invalid realtime response", http.StatusOK},
 		{"multiple responses", `{} {}`, "invalid realtime response", http.StatusOK},
-		{"oversized response", strings.Repeat(" ", maxRealtimeResponseBytes+1), "size limit", http.StatusOK},
+		{
+			"oversized response", strings.Repeat(" ", maxRealtimeResponseBytes+1),
+			"size limit", http.StatusOK,
+		},
 		{"missing session", `null`, "invalid realtime session", http.StatusOK},
-		{"missing call ID", `{"conversationId":"saved","answer":"answer"}`, "invalid realtime session", http.StatusOK},
-		{"missing answer", `{"id":"call","conversationId":"saved"}`, "invalid realtime session", http.StatusOK},
-		{"wrong conversation", `{"id":"call","conversationId":"other","answer":"answer"}`, "invalid realtime session", http.StatusOK},
+		{
+			"missing call ID", `{"conversationId":"saved","answer":"answer"}`,
+			"invalid realtime session", http.StatusOK,
+		},
+		{
+			"missing answer", `{"id":"call","conversationId":"saved"}`,
+			"invalid realtime session", http.StatusOK,
+		},
+		{
+			"wrong conversation", `{"id":"call","conversationId":"other","answer":"answer"}`,
+			"invalid realtime session", http.StatusOK,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var calls atomic.Int32
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			server := httptest.NewServer(http.HandlerFunc(func(
+				w http.ResponseWriter,
+				_ *http.Request,
+			) {
 				calls.Add(1)
 				w.Header().Set("Location", "/redirected")
 				w.WriteHeader(test.status)
@@ -122,7 +191,9 @@ func TestClientStartRealtimeErrorsNeverRetry(t *testing.T) {
 			t.Cleanup(server.Close)
 			client, err := NewClient(server.URL, "", "")
 			require.NoError(t, err)
-			session, err := client.StartRealtime(t.Context(), "offer", ChatRequest{ConversationID: "saved"}, "")
+			session, err := client.StartRealtime(
+				t.Context(), "offer", ChatRequest{ConversationID: "saved"}, "",
+			)
 			assert.ErrorContains(t, err, test.wantError)
 			assert.EqualValues(t, 1, calls.Load())
 			if test.name == "wrong conversation" {
@@ -146,7 +217,9 @@ func TestClientRealtimeOwnerErrors(t *testing.T) {
 	client, err := NewClient(server.URL, "", "")
 	require.NoError(t, err)
 	_, capabilitiesErr := client.RealtimeCapabilities(t.Context())
-	streamErr := client.StreamRealtime(t.Context(), "call", func(RealtimeEvent) { t.Error("unexpected event") })
+	streamErr := client.StreamRealtime(t.Context(), "call", func(RealtimeEvent) {
+		t.Error("unexpected event")
+	})
 	endErr := client.EndRealtime(t.Context(), "call")
 	for _, err := range []error{capabilitiesErr, streamErr, endErr} {
 		var responseErr *ControlPlaneHTTPError
@@ -157,7 +230,13 @@ func TestClientRealtimeOwnerErrors(t *testing.T) {
 }
 
 func TestClientStreamRealtimeRejectsBrokenStreams(t *testing.T) {
-	for _, body := range []string{"{\n", "null\n", "{}\n", strings.Repeat("x", maxRealtimeResponseBytes+1), `{"kind":"state"}`} {
+	for _, body := range []string{
+		"{\n",
+		"null\n",
+		"{}\n",
+		strings.Repeat("x", maxRealtimeResponseBytes+1),
+		`{"kind":"state"}`,
+	} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = io.WriteString(w, body)
 		}))
@@ -179,7 +258,10 @@ func TestClientStreamRealtimeRejectsBrokenStreams(t *testing.T) {
 func TestClientStreamRealtimeHasNoTotalSizeOrClientTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for range 20 {
-			_ = json.NewEncoder(w).Encode(RealtimeEvent{Kind: "transcript", Text: strings.Repeat("x", 70*1024)})
+			_ = json.NewEncoder(w).Encode(RealtimeEvent{
+				Kind: "transcript",
+				Text: strings.Repeat("x", 70*1024),
+			})
 		}
 		_, _ = io.WriteString(w, "{\"kind\":\"closed\"}\n")
 		w.(http.Flusher).Flush()
@@ -202,7 +284,10 @@ func TestClientRealtimeCancellation(t *testing.T) {
 		t.Run(method, func(t *testing.T) {
 			started := make(chan struct{})
 			stopped := make(chan struct{})
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := httptest.NewServer(http.HandlerFunc(func(
+				w http.ResponseWriter,
+				r *http.Request,
+			) {
 				_, _ = io.Copy(io.Discard, r.Body)
 				if method == "stream" {
 					w.(http.Flusher).Flush()
@@ -223,9 +308,13 @@ func TestClientRealtimeCancellation(t *testing.T) {
 				case "capabilities":
 					_, err = client.RealtimeCapabilities(ctx)
 				case "start":
-					_, err = client.StartRealtime(ctx, "offer", ChatRequest{ConversationID: "saved"}, "")
+					_, err = client.StartRealtime(
+						ctx, "offer", ChatRequest{ConversationID: "saved"}, "",
+					)
 				case "stream":
-					err = client.StreamRealtime(ctx, "call", func(RealtimeEvent) { t.Error("unexpected event") })
+					err = client.StreamRealtime(ctx, "call", func(RealtimeEvent) {
+						t.Error("unexpected event")
+					})
 				case "end":
 					err = client.EndRealtime(ctx, "call")
 				}

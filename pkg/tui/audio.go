@@ -54,7 +54,8 @@ func (m *model) audioNotice(message string) tea.Cmd {
 
 func (m *model) handleAudioCommand(command, args string) tea.Cmd {
 	args = strings.TrimSpace(args)
-	if command == "voice" && args != "" || command == "talk" && args != "" && args != "stop" && args != "mute" {
+	if command == "voice" && args != "" ||
+		command == "talk" && args != "" && args != "stop" && args != "mute" {
 		return m.audioNotice("Usage: /voice or /talk [stop|mute]")
 	}
 	// A slash command is not part of the draft; keyboard shortcuts preserve it.
@@ -87,7 +88,12 @@ func (m *model) handleAudioInput(msg tea.Msg) (tea.Cmd, bool) {
 		// quits, the TUI's exit cleanup ends audio.
 		return nil, false
 	}
-	if m.activeUIPrompt != nil || m.conversationPicker != nil || m.infoDialogOpen() || m.modelPickerOpen || m.reasoningPickerOpen || m.historySearch != nil {
+	if m.activeUIPrompt != nil ||
+		m.conversationPicker != nil ||
+		m.infoDialogOpen() ||
+		m.modelPickerOpen ||
+		m.reasoningPickerOpen ||
+		m.historySearch != nil {
 		return nil, false
 	}
 	if _, focused := m.focusedExtensionSurfaceKey(); focused {
@@ -136,7 +142,10 @@ func (m *model) startAudio(mode string) tea.Cmd {
 	if m.audio != nil {
 		return m.audioNotice("Finish the active recording or call first.")
 	}
-	if m.runner == nil || m.conversationState == nil || m.startupPending || m.initialHistoryPending {
+	if m.runner == nil ||
+		m.conversationState == nil ||
+		m.startupPending ||
+		m.initialHistoryPending {
 		return m.audioNotice("Wait for chat to finish loading.")
 	}
 	createsConversation := false
@@ -175,7 +184,9 @@ func (m *model) startAudio(mode string) tea.Cmd {
 				case <-uiDone:
 				}
 			}
-			text, err := runTUIAudio(ctx, mode, runner, request, session.controls, emit, startAudioPeer)
+			text, err := runTUIAudio(
+				ctx, mode, runner, request, session.controls, emit, startAudioPeer,
+			)
 			emit(tuiAudioMsg{done: true, text: text, err: err})
 		}()
 		return nil
@@ -334,7 +345,9 @@ func mergeAudioTranscript(history, current []chatEntry, captionSeq uint64) []cha
 }
 
 func upsertAudioTranscript(entries []chatEntry, entry chatEntry) ([]chatEntry, int) {
-	index := slices.IndexFunc(entries, func(existing chatEntry) bool { return existing.realtimeID == entry.realtimeID })
+	index := slices.IndexFunc(entries, func(existing chatEntry) bool {
+		return existing.realtimeID == entry.realtimeID
+	})
 	if index >= 0 {
 		if entries[index].kind == entry.kind {
 			entry.realtimeAnchor = entries[index].realtimeAnchor
@@ -349,8 +362,10 @@ func upsertAudioTranscript(entries []chatEntry, entry chatEntry) ([]chatEntry, i
 				continue
 			}
 		} else {
-			if existing.kind == entryInfo || (existing.codingSpan == nil && len(existing.blocks) > 0 &&
-				(existing.blocks[0].kind == blockCompaction || existing.blocks[0].kind == blockResourcesReloaded)) {
+			if existing.kind == entryInfo ||
+				(existing.codingSpan == nil && len(existing.blocks) > 0 &&
+					(existing.blocks[0].kind == blockCompaction ||
+						existing.blocks[0].kind == blockResourcesReloaded)) {
 				continue
 			}
 			// Live entries have no saved span and count as one coding message.
@@ -394,7 +409,10 @@ func (m model) renderAudio() string {
 		state += " (microphone muted)"
 	}
 	seconds := int(time.Since(s.started).Seconds())
-	header := fmt.Sprintf("%s (experimental) · %s · %02d:%02d · %s", label, state, seconds/60, seconds%60, controls)
+	header := fmt.Sprintf(
+		"%s (experimental) · %s · %02d:%02d · %s",
+		label, state, seconds/60, seconds%60, controls,
+	)
 	lines := []string{header}
 	if s.mode != "talk" {
 		level := int(min(1, max(0, s.level)) * 20)

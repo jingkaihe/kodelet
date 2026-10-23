@@ -130,7 +130,8 @@ impl Peer {
                 failure.store(true, Ordering::Release);
             })
         }));
-        // Provider JSON is intentionally not interpreted. Authenticated server events own delegation.
+        // Provider JSON is intentionally not interpreted. Authenticated server
+        // events own delegation.
         let mut peer = Self {
             connection,
             track,

@@ -591,11 +591,17 @@ func (r *Client) LoadConversation(ctx context.Context, conversationID string) (C
 
 // LoadConversationTranscript loads the same display history as the Web UI,
 // including persisted voice captions and server-owned delegation filtering.
-func (r *Client) LoadConversationTranscript(ctx context.Context, conversationID string) (ConversationHistory, error) {
+func (r *Client) LoadConversationTranscript(
+	ctx context.Context,
+	conversationID string,
+) (ConversationHistory, error) {
 	return r.loadConversation(ctx, conversationID, "")
 }
 
-func (r *Client) loadConversation(ctx context.Context, conversationID, format string) (ConversationHistory, error) {
+func (r *Client) loadConversation(
+	ctx context.Context,
+	conversationID, format string,
+) (ConversationHistory, error) {
 	if r == nil || r.client == nil {
 		return ConversationHistory{}, errors.New("the chat connection is not initialized")
 	}
@@ -746,7 +752,9 @@ func normalizeControlPlaneConversationMessages(messages []controlPlaneConversati
 			anchor = new(codingIndex)
 			codingIndex++
 		}
-		if message.Kind == "context-compacted" || message.Kind == "resources-reloaded" || message.Kind == "resource-reload-refused" {
+		if message.Kind == "context-compacted" ||
+			message.Kind == "resources-reloaded" ||
+			message.Kind == "resource-reload-refused" {
 			result = append(result, conversations.StreamableMessage{
 				Kind: message.Kind, Role: role, Content: content, Anchor: anchor,
 				Compaction: message.Compaction, ResourceReloadID: message.ResourceReloadID,
@@ -755,7 +763,9 @@ func normalizeControlPlaneConversationMessages(messages []controlPlaneConversati
 		}
 		if role == "user" {
 			if strings.TrimSpace(content) != "" {
-				result = append(result, conversations.StreamableMessage{Kind: "text", Role: role, Content: content, ID: message.ID, Anchor: anchor})
+				result = append(result, conversations.StreamableMessage{
+					Kind: "text", Role: role, Content: content, ID: message.ID, Anchor: anchor,
+				})
 			}
 			continue
 		}

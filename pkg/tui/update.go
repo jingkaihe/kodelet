@@ -1736,7 +1736,8 @@ func (m *model) resize() {
 	settingsPickerHeight := m.reasoningPickerHeight() + m.modelPickerHeight()
 	extensionWidgetHeight := m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer) + m.extensionWidgetsHeight(extensions.UIWidgetPlacementBelowComposer)
 	footerHeight := 0
-	viewportHeight := m.height - inputOuterHeight - historySearchHeight - slashCommandHeight - settingsPickerHeight - extensionWidgetHeight - footerHeight - m.audioHeight()
+	viewportHeight := m.height - inputOuterHeight - historySearchHeight - slashCommandHeight -
+		settingsPickerHeight - extensionWidgetHeight - footerHeight - m.audioHeight()
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}

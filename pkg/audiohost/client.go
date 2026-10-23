@@ -88,7 +88,8 @@ func Start(ctx context.Context) (*Client, error) {
 	if err != nil {
 		stdin.Close()
 		stdout.Close()
-		return nil, errors.Wrap(err, "start audio helper (build and install the experimental helper first)")
+		return nil, errors.Wrap(err,
+			"start audio helper (build and install the experimental helper first)")
 	}
 	go c.run(ctx)
 	if err := c.write(Command{Type: "hello", Protocol: protocolVersion}); err != nil {
@@ -126,7 +127,8 @@ func helperPath() (string, error) {
 	// LookPath rejects matches from relative PATH entries such as ".".
 	path, err := exec.LookPath(helperName)
 	if err != nil {
-		return "", errors.Wrap(err, "find kodelet-audio in PATH (build and install it with mise run audio-install)")
+		return "", errors.Wrap(err,
+			"find kodelet-audio in PATH (build and install it with mise run audio-install)")
 	}
 	return path, nil
 }
@@ -283,14 +285,19 @@ func (c *Client) read() readResult {
 			return readResult{err: err}
 		}
 		if len(c.events) >= eventQueueSize {
-			return readResult{err: errors.New("audio event queue overflow; recording or call aborted")}
+			return readResult{
+				err: errors.New("audio event queue overflow; recording or call aborted"),
+			}
 		}
 		c.events <- event
 		switch event.Type {
 		case "closed":
 			return readResult{}
 		case "error":
-			return readResult{err: errors.New("audio helper reported an error: " + event.Message), reported: true}
+			return readResult{
+				err:      errors.New("audio helper reported an error: " + event.Message),
+				reported: true,
+			}
 		}
 	}
 }
