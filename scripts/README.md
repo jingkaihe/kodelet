@@ -19,7 +19,7 @@ Extracts the top release notes from `RELEASE.md` for use in GitHub releases.
 
 ### `run-github-release.sh`
 
-Requires all four native audio release binaries in `.build/audio/`, then extracts the top `RELEASE.md` entry into a temporary file and passes it to GoReleaser via `--release-notes`. GitHub Actions supplies these binaries using the reusable native audio workflow; for manual publishing, collect the outputs of `mise run audio-package` on each supported platform first. See [audio release infrastructure](../audio/README.md#release-infrastructure).
+Extracts the top `RELEASE.md` entry into a temporary file and passes it to GoReleaser via `--release-notes`.
 
 **Usage:**
 ```bash

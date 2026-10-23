@@ -75,33 +75,6 @@ mkdir -p bin
 install -m 755 audio/target/release/kodelet-audio bin/kodelet-audio
 '''
 
-[tasks.audio-package]
-description = "Stage the native audio binary for GoReleaser (runtime libraries not bundled)"
-depends = ["audio-build"]
-run = '''
-set -eu
-case "$(uname -s)/$(uname -m)" in
-  Darwin/arm64) target=darwin-arm64 ;;
-  Darwin/x86_64) target=darwin-amd64 ;;
-  Linux/aarch64) target=linux-arm64 ;;
-  Linux/x86_64) target=linux-amd64 ;;
-  *)
-    echo "Unsupported native audio target" >&2
-    exit 1
-    ;;
-esac
-mkdir -p .build/audio
-artifact=".build/audio/kodelet-audio-$target"
-install -m 755 bin/kodelet-audio "$artifact"
-case "$target" in
-  darwin-*)
-    codesign --force --sign - --identifier com.kodelet.audio "$artifact"
-    codesign --verify --strict "$artifact"
-    ;;
-esac
-"$artifact" --version
-'''
-
 [tasks.audio-install]
 description = "Build the experimental helper into ./bin and install it into ~/.local/bin"
 depends = ["audio-build"]
