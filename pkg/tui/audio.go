@@ -75,8 +75,13 @@ func (m *model) handleAudioInput(msg tea.Msg) (tea.Cmd, bool) {
 	if !ok || m.startupPending || m.startupErr != nil {
 		return nil, false
 	}
-	if key.String() == "ctrl+c" || key.String() == "ctrl+d" {
+	switch key.String() {
+	case "ctrl+c":
 		m.cancelAudio()
+		return nil, false
+	case "ctrl+d":
+		// Ctrl+D also dismisses overlays and is ignored during a run. When it
+		// quits, the TUI's exit cleanup ends audio.
 		return nil, false
 	}
 	if m.activeUIPrompt != nil || m.conversationPicker != nil || m.infoDialogOpen() || m.modelPickerOpen || m.reasoningPickerOpen || m.historySearch != nil {

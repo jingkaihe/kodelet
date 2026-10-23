@@ -136,6 +136,38 @@ func TestAudioEscClosesOverlaysBeforeEndingCall(t *testing.T) {
 	assert.Equal(t, "stopping", m.audio.phase)
 }
 
+func TestAudioCtrlDEndsAudioOnlyWhenItQuits(t *testing.T) {
+	ctrlD := tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl}
+	require.Equal(t, "ctrl+d", ctrlD.String())
+	for _, mode := range []string{"voice", "talk"} {
+		t.Run(mode, func(t *testing.T) {
+			m := newThemeTestModel(t, Config{})
+			ctx, cancel := context.WithCancel(m.ctx)
+			defer cancel()
+			m.audio = &tuiAudioSession{cancel: cancel, mode: mode, phase: "recording"}
+
+			m.shortcutsOpen = true
+			updated, _ := m.Update(ctrlD)
+			*m = updated.(model)
+			assert.False(t, m.shortcutsOpen)
+			assert.NoError(t, ctx.Err(), "dismissing a dialog keeps audio")
+
+			m.running = true
+			updated, cmd := m.Update(ctrlD)
+			*m = updated.(model)
+			assert.Nil(t, cmd)
+			assert.NoError(t, ctx.Err(), "Ctrl+D is ignored during a run, so audio continues")
+
+			m.running = false
+			updated, cmd = m.Update(ctrlD)
+			*m = updated.(model)
+			require.NotNil(t, cmd)
+			assert.IsType(t, tea.QuitMsg{}, cmd())
+			assert.ErrorIs(t, ctx.Err(), context.Canceled, "quitting ends audio")
+		})
+	}
+}
+
 func TestAudioTalkStreamsBothSpeakersIntoTranscript(t *testing.T) {
 	m := newThemeTestModel(t, Config{})
 	_, cancel := context.WithCancel(m.ctx)
