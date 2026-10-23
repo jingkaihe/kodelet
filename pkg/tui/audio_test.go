@@ -32,19 +32,23 @@ func TestAudioCompactStatus(t *testing.T) {
 		controls string
 	}{
 		{
-			name: "dictation", mode: "voice",
+			name:     "dictation",
+			mode:     "voice",
 			status:   "Dictation · recording",
 			controls: "▰▰▰▰▰▱▱▱▱▱ · Enter: finish · Esc: cancel",
 		},
 		{
-			name: "talk", mode: "talk",
-			status:   "Talk · recording",
-			controls: "Ctrl+Alt+M: mute · Esc: end",
+			name:     "talk",
+			mode:     "talk",
+			status:   "Talk · connected",
+			controls: "▰▰▰▰▰▱▱▱▱▱ · Ctrl+Alt+M: mute · Esc: end",
 		},
 		{
-			name: "muted talk", mode: "talk", muted: true,
-			status:   "Talk · recording (muted)",
-			controls: "Ctrl+Alt+M: unmute · Esc: end",
+			name:     "muted talk",
+			mode:     "talk",
+			muted:    true,
+			status:   "Talk · connected (muted)",
+			controls: "▱▱▱▱▱▱▱▱▱▱ · Ctrl+Alt+M: unmute · Esc: end",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -52,9 +56,18 @@ func TestAudioCompactStatus(t *testing.T) {
 			assert.Empty(t, m.renderAudio())
 			assert.Zero(t, m.audioHeight())
 			m.audio = &tuiAudioSession{
-				mode: tt.mode, phase: "recording", started: time.Now(),
-				level: 0.5, muted: tt.muted,
+				mode:    tt.mode,
+				phase:   "recording",
+				started: time.Now(),
+				muted:   tt.muted,
 			}
+			if tt.mode == "talk" {
+				m.audio.phase = "connected"
+			}
+			m.updateAudio(tuiAudioMsg{
+				session: m.audio,
+				event:   audiohost.Event{Type: "level", Level: 0.5},
+			})
 
 			view := m.renderAudio()
 			assert.Equal(t, 1, m.audioHeight())
@@ -81,7 +94,12 @@ func TestAudioCommandsAndDraftCommit(t *testing.T) {
 	m.textarea.CursorEnd()
 	_, cancel := context.WithCancel(m.ctx)
 	session := &tuiAudioSession{
-		cancel: cancel, key: m.key, mode: "voice", draft: "hello ", phase: "transcribing",
+		cancel:          cancel,
+		key:             m.key,
+		mode:            "voice",
+		draft:           "hello ",
+		phase:           "transcribing",
+		finishRequested: true,
 	}
 	m.audio = session
 	cancel() // Worker cleanup may run before Bubble Tea receives completion.
@@ -115,7 +133,13 @@ func TestAudioDiscardsCanceledStaleAndChangedDraftResults(t *testing.T) {
 			m.textarea.SetValue("draft")
 			_, cancel := context.WithCancel(m.ctx)
 			defer cancel()
-			session := &tuiAudioSession{cancel: cancel, mode: "voice", key: m.key, draft: "draft"}
+			session := &tuiAudioSession{
+				cancel:          cancel,
+				mode:            "voice",
+				key:             m.key,
+				draft:           "draft",
+				finishRequested: true,
+			}
 			m.audio = session
 			switch test {
 			case "canceled":
@@ -130,6 +154,107 @@ func TestAudioDiscardsCanceledStaleAndChangedDraftResults(t *testing.T) {
 			m.updateAudio(tuiAudioMsg{session: session, done: true, text: "should not appear"})
 			assert.Equal(t, "draft", m.textarea.Value())
 		})
+	}
+}
+
+func TestAudioDictationPreviewPreservesDraftUntilFinish(t *testing.T) {
+	m := newThemeTestModel(t, Config{})
+	m.textarea.SetValue("before after")
+	m.textarea.SetCursorColumn(7)
+	_, cancel := context.WithCancel(m.ctx)
+	defer cancel()
+	session := &tuiAudioSession{
+		cancel:   cancel,
+		mode:     "voice",
+		key:      m.key,
+		draft:    m.textarea.Value(),
+		phase:    "recording",
+		started:  time.Now(),
+		controls: make(chan audiohost.Command, 1),
+	}
+	m.audio = session
+	m.resize()
+	height := m.viewport.Height()
+	preview := func(text string) {
+		m.updateAudio(tuiAudioMsg{
+			session: session,
+			event:   audiohost.Event{Type: "preview"},
+			text:    text,
+		})
+	}
+	preview("first draft")
+	preview("corrected \x1b[31mwords\x1b[0m")
+	assert.Equal(t, "corrected words", session.preview)
+	assert.NotContains(t, m.renderAudio(), "first draft")
+	assert.Contains(t, m.renderAudio(), "corrected words")
+	assert.Equal(t, "recording", session.phase, "preview uploads do not end capture")
+	assert.Equal(t, "before after", m.textarea.Value())
+	assert.False(t, m.running)
+
+	m.updateAudio(tuiAudioMsg{
+		session: session,
+		event:   audiohost.Event{Type: "preview"},
+		err:     errors.New("upload failed"),
+	})
+	assert.Equal(t, "corrected words", session.preview, "a failed upload keeps the preview")
+	preview("one\ntwo\nthree\nfour")
+	assert.Equal(t, 4, m.audioHeight())
+	assert.Equal(t, m.audioHeight(), lineCount(m.renderAudio()))
+	assert.Equal(t, height-3, m.viewport.Height())
+	assert.Equal(t, []string{"two", "three", "four"}, m.audioPreviewLines())
+
+	_, handled := m.handleAudioInput(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.True(t, handled)
+	assert.Equal(t, "finish", (<-session.controls).Type)
+	m.updateAudio(tuiAudioMsg{session: session, done: true, text: "final words "})
+	assert.Nil(t, m.audio)
+	assert.Equal(t, "before final words after", m.textarea.Value(),
+		"preserve the insertion point")
+	assert.False(t, m.running, "dictation must never submit a turn")
+}
+
+func TestAudioDictationReviewRequiresExplicitAcceptance(t *testing.T) {
+	for _, reason := range []string{"limit", "upload failure"} {
+		for _, action := range []string{"keep", "cancel"} {
+			t.Run(reason+"/"+action, func(t *testing.T) {
+				m := newThemeTestModel(t, Config{})
+				m.textarea.SetValue("draft ")
+				m.textarea.CursorEnd()
+				_, cancel := context.WithCancel(m.ctx)
+				defer cancel()
+				session := &tuiAudioSession{
+					cancel:  cancel,
+					key:     m.key,
+					mode:    "voice",
+					draft:   "draft ",
+					phase:   "transcribing",
+					started: time.Now(),
+				}
+				m.audio = session
+				msg := tuiAudioMsg{session: session, done: true, text: "last preview"}
+				if reason == "upload failure" {
+					session.finishRequested = true
+					msg.err = errors.New("upload failed")
+				}
+				m.updateAudio(msg)
+				require.Same(t, session, m.audio)
+				assert.Equal(t, "review", session.phase)
+				assert.Equal(t, "draft ", m.textarea.Value())
+				assert.Contains(t, m.renderAudio(), "Enter: keep")
+				key := tea.KeyEscape
+				want := "draft "
+				if action == "keep" {
+					key = tea.KeyEnter
+					want = "draft last preview"
+				}
+				_, handled := m.handleAudioInput(tea.KeyPressMsg{Code: key})
+				assert.True(t, handled)
+				assert.Nil(t, m.audio)
+				assert.Zero(t, m.audioHeight())
+				assert.Equal(t, want, m.textarea.Value())
+				assert.False(t, m.running)
+			})
+		}
 	}
 }
 
@@ -732,6 +857,7 @@ func TestRealtimeAudioContinuesAcrossAgentRunsAndCleansUp(t *testing.T) {
 		},
 	}
 	var captions []string
+	var levels []float64
 	conversationReady := false
 	cwd := ""
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -754,12 +880,15 @@ func TestRealtimeAudioContinuesAcrossAgentRunsAndCleansUp(t *testing.T) {
 			if msg.caption != nil && msg.caption.Kind == "transcript" {
 				captions = append(captions, msg.caption.Text)
 			}
-			assert.NotEqual(t, "level", msg.event.Type, "calls render no level meter")
+			if msg.event.Type == "level" {
+				levels = append(levels, msg.event.Level)
+			}
 		},
 		peer.start,
 	)
 	require.NoError(t, err)
 	assert.True(t, conversationReady)
+	assert.Equal(t, []float64{0.5}, levels, "forward microphone levels to the call UI")
 	assert.Equal(t, "/resolved", cwd)
 	assert.True(t, peer.closed.Load(), "release the microphone")
 	assert.True(t, closed, "cleanup waits for the call to end")
@@ -894,11 +1023,17 @@ func TestRealtimeAudioConnectionDeadlineStartsAfterSlowOffer(t *testing.T) {
 }
 
 func TestAudioWorkerTimeoutsExplainWhichDeadlineExpired(t *testing.T) {
-	previousDiscovery, previousTranscription, previousCall := audioDiscoveryTimeout, transcriptionTimeout, realtimeCallLimit
+	previousDiscovery := audioDiscoveryTimeout
+	previousTranscription := transcriptionTimeout
+	previousCall := realtimeCallLimit
 	t.Cleanup(func() {
-		audioDiscoveryTimeout, transcriptionTimeout, realtimeCallLimit = previousDiscovery, previousTranscription, previousCall
+		audioDiscoveryTimeout = previousDiscovery
+		transcriptionTimeout = previousTranscription
+		realtimeCallLimit = previousCall
 	})
-	audioDiscoveryTimeout, transcriptionTimeout, realtimeCallLimit = 50*time.Millisecond, 50*time.Millisecond, 200*time.Millisecond
+	audioDiscoveryTimeout = 50 * time.Millisecond
+	transcriptionTimeout = 50 * time.Millisecond
+	realtimeCallLimit = 200 * time.Millisecond
 	blockUntilDone := func(ctx context.Context) error {
 		<-ctx.Done()
 		return errors.Wrap(ctx.Err(), "request failed")
@@ -1014,5 +1149,399 @@ func TestRealtimeAudioClosesLateAllocationAfterCancel(t *testing.T) {
 		assert.Equal(t, "late-call", id)
 	case <-time.After(time.Second):
 		t.Fatal("late call leaked")
+	}
+}
+
+type continuousDictationClient func(context.Context, []byte) (string, error)
+
+func (c continuousDictationClient) TranscriptionCapabilities(
+	context.Context,
+) (transcriptiontypes.Capabilities, error) {
+	return transcriptiontypes.Capabilities{
+		Enabled:            true,
+		Available:          true,
+		MaxAudioBytes:      transcriptiontypes.MaxAudioBytes,
+		MaxDurationSeconds: 60,
+		MimeTypes:          []string{"audio/wav"},
+	}, nil
+}
+
+func (c continuousDictationClient) TranscribeAudio(
+	ctx context.Context,
+	audio []byte,
+	_, _, _ string,
+) (transcriptiontypes.Result, error) {
+	text, err := c(ctx, audio)
+	return transcriptiontypes.Result{Text: text}, err
+}
+
+func dictationTestPCM(milliseconds int, amplitude int16) []byte {
+	pcm := make([]byte, milliseconds*16*2)
+	for offset := 0; offset < len(pcm); offset += 2 {
+		binary.LittleEndian.PutUint16(pcm[offset:], uint16(amplitude))
+		amplitude = -amplitude
+	}
+	return pcm
+}
+
+func dictationTestPhrase() []byte {
+	speech := dictationTestPCM(200, 4000)
+	pause := dictationTestPCM(2500, 0)
+	return append(speech, pause...)
+}
+
+func TestDictationContinuousSnapshotsReplaceAndDeduplicate(t *testing.T) {
+	for _, chunkBytes := range []int{222, 640, 19998} {
+		// A snapshot boundary is determined by sample counts, not IPC frames.
+		phrase := dictationTestPhrase()
+		peer := &testAudioPeer{events: make(chan audiohost.Event, len(phrase)/chunkBytes+4)}
+		peer.events <- audiohost.Event{Type: "recording"}
+		for offset := 0; offset < len(phrase); offset += chunkBytes {
+			peer.events <- audiohost.Event{
+				Type:  "audio",
+				Audio: phrase[offset:min(offset+chunkBytes, len(phrase))],
+			}
+		}
+		var uploads [][]byte
+		var previews []string
+		client := continuousDictationClient(func(_ context.Context, audio []byte) (string, error) {
+			assert.False(t, peer.closed.Load(), "pause snapshots must not stop capture")
+			uploads = append(uploads, audio)
+			if len(uploads) == 1 {
+				return "first words", nil
+			}
+			return "corrected full sentence", nil
+		})
+		emit := func(msg tuiAudioMsg) {
+			switch msg.event.Type {
+			case "transcribing":
+				assert.True(t, peer.closed.Load(), "only finishing changes phase")
+			case "preview":
+				assert.NoError(t, msg.err)
+				previews = append(previews, msg.text)
+				if len(previews) == 1 {
+					peer.events <- audiohost.Event{Type: "audio", Audio: phrase}
+				} else {
+					peer.events <- audiohost.Event{
+						Type:  "audio",
+						Audio: dictationTestPCM(500, 0),
+					}
+					peer.events <- audiohost.Event{Type: "recorded"}
+				}
+			}
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+		text, err := runDictation(ctx, client, nil, emit, peer.start)
+		cancel()
+		require.NoError(t, err)
+		assert.Equal(t, "corrected full sentence", text)
+		assert.Equal(t, []string{"first words", "corrected full sentence"}, previews)
+		require.Len(t, uploads, 2,
+			"silence and finish must not repeat a successful snapshot")
+		assert.Equal(t, dictationWAV(phrase), uploads[0])
+		pcm := append(slices.Clone(phrase), phrase...)
+		assert.Equal(t, dictationWAV(pcm), uploads[1])
+		assert.True(t, peer.closed.Load())
+	}
+}
+
+type finishingDictationPeer struct {
+	*testAudioPeer
+	tail []byte
+}
+
+func (p *finishingDictationPeer) Send(command audiohost.Command) error {
+	if err := p.testAudioPeer.Send(command); err != nil {
+		return err
+	}
+	if command.Type == "finish" {
+		p.events <- audiohost.Event{Type: "audio", Audio: p.tail}
+		p.events <- audiohost.Event{Type: "recorded"}
+	}
+	return nil
+}
+
+func (p *finishingDictationPeer) start(ctx context.Context) (audioPeer, error) {
+	p.ctx = ctx
+	return p, nil
+}
+
+func TestDictationDrainsCaptureAndCoalescesPendingUploads(t *testing.T) {
+	peer := &finishingDictationPeer{
+		testAudioPeer: &testAudioPeer{events: make(chan audiohost.Event, 8)},
+		tail:          dictationTestPCM(5, 6000),
+	}
+	phrase := dictationTestPhrase()
+	peer.events <- audiohost.Event{Type: "recording"}
+	var pcm []byte
+	for range 3 {
+		peer.events <- audiohost.Event{Type: "audio", Audio: phrase}
+		pcm = append(pcm, phrase...)
+	}
+	peer.events <- audiohost.Event{Type: "level", Level: 0.75}
+	controls := make(chan audiohost.Command, 1)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var uploads [][]byte
+	client := continuousDictationClient(func(ctx context.Context, audio []byte) (string, error) {
+		uploads = append(uploads, audio)
+		if len(uploads) == 1 {
+			close(started)
+			select {
+			case <-release:
+				return "initial words", nil
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		}
+		assert.True(t, peer.closed.Load(), "release the device before the final upload")
+		return "latest complete transcript", nil
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	emit := func(msg tuiAudioMsg) {
+		switch msg.event.Type {
+		case "level":
+			// Reaching this event proves capture kept draining during the blocked
+			// upload; the intermediate snapshots must stay queued, not run in parallel.
+			select {
+			case <-started:
+			case <-ctx.Done():
+				t.Error("upload did not start")
+				return
+			}
+			assert.Len(t, uploads, 1)
+			assert.False(t, peer.closed.Load())
+			controls <- audiohost.Command{Type: "finish"}
+		case "transcribing":
+			assert.True(t, peer.closed.Load())
+			close(release)
+		}
+	}
+	text, err := runDictation(ctx, client, controls, emit, peer.start)
+	require.NoError(t, err)
+	assert.Equal(t, "latest complete transcript", text)
+	require.Len(t, uploads, 2,
+		"only one in-flight request and the newest waiting snapshot")
+	assert.Equal(t, dictationWAV(phrase), uploads[0])
+	pcm = append(pcm, peer.tail...)
+	assert.Equal(t, dictationWAV(pcm), uploads[1], "include the final flush")
+	require.Len(t, peer.sent, 2)
+	assert.Equal(t, "finish", peer.sent[1].Type)
+	assert.True(t, peer.graceful.Load())
+}
+
+func TestDictationCancelAbortsUploadAndDropsPendingSnapshot(t *testing.T) {
+	peer := &testAudioPeer{events: make(chan audiohost.Event, 4)}
+	phrase := dictationTestPhrase()
+	peer.events <- audiohost.Event{Type: "recording"}
+	peer.events <- audiohost.Event{Type: "audio", Audio: phrase}
+	peer.events <- audiohost.Event{Type: "audio", Audio: phrase}
+	peer.events <- audiohost.Event{Type: "level"}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	started := make(chan struct{})
+	aborted := make(chan struct{})
+	var calls atomic.Int32
+	client := continuousDictationClient(func(ctx context.Context, _ []byte) (string, error) {
+		calls.Add(1)
+		close(started)
+		<-ctx.Done()
+		close(aborted)
+		return "", ctx.Err()
+	})
+	emit := func(msg tuiAudioMsg) {
+		if msg.event.Type == "level" {
+			select {
+			case <-started:
+			case <-ctx.Done():
+				t.Error("upload did not start")
+			}
+			cancel()
+		}
+	}
+	text, err := runDictation(ctx, client, nil, emit, peer.start)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Empty(t, text)
+	select {
+	case <-aborted:
+	case <-time.After(time.Second):
+		t.Fatal("transcription request was not canceled")
+	}
+	assert.Equal(t, int32(1), calls.Load())
+	assert.True(t, peer.closed.Load())
+	assert.True(t, peer.graceful.Load())
+}
+
+func TestDictationRecoversFromInterimUploadFailure(t *testing.T) {
+	peer := &testAudioPeer{events: make(chan audiohost.Event, 3)}
+	phrase := dictationTestPhrase()
+	peer.events <- audiohost.Event{Type: "recording"}
+	peer.events <- audiohost.Event{Type: "audio", Audio: phrase}
+	wantErr := errors.New("temporary transcription failure")
+	calls := 0
+	client := continuousDictationClient(func(_ context.Context, audio []byte) (string, error) {
+		calls++
+		assert.Len(t, audio, 44+calls*len(phrase))
+		if calls == 2 {
+			return "", wantErr
+		}
+		if calls == 1 {
+			return "first preview", nil
+		}
+		return "recovered full transcript", nil
+	})
+	var previews []tuiAudioMsg
+	emit := func(msg tuiAudioMsg) {
+		if msg.event.Type != "preview" {
+			return
+		}
+		previews = append(previews, msg)
+		if len(previews) < 3 {
+			peer.events <- audiohost.Event{Type: "audio", Audio: phrase}
+		} else {
+			peer.events <- audiohost.Event{Type: "recorded"}
+		}
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	text, err := runDictation(ctx, client, nil, emit, peer.start)
+	require.NoError(t, err)
+	assert.Equal(t, "recovered full transcript", text)
+	require.Len(t, previews, 3)
+	assert.Equal(t, "first preview", previews[0].text)
+	assert.ErrorIs(t, previews[1].err, wantErr)
+	assert.Equal(t, "recovered full transcript", previews[2].text)
+	assert.Equal(t, 3, calls)
+}
+
+func TestDictationFinishRetriesFailedSnapshotAndPreservesPartialText(t *testing.T) {
+	type response struct {
+		text string
+		err  error
+	}
+	partial := response{text: "partial transcript"}
+	complete := response{text: "complete transcript"}
+	failed := response{err: errors.New("transcription unavailable")}
+
+	for _, tt := range []struct {
+		name      string
+		responses []response
+		want      response
+	}{
+		{
+			name:      "retry succeeds",
+			responses: []response{partial, failed, complete},
+			want:      complete,
+		},
+		{
+			name:      "retry fails with partial text",
+			responses: []response{partial, failed, failed},
+			want:      response{text: partial.text, err: failed.err},
+		},
+		{
+			name:      "retry fails without partial text",
+			responses: []response{failed, failed},
+			want:      failed,
+		},
+		{
+			name:      "first success on finish",
+			responses: []response{failed, complete},
+			want:      complete,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			peer := &testAudioPeer{events: make(chan audiohost.Event, 3)}
+			phrase := dictationTestPhrase()
+			pcm := slices.Clone(phrase)
+			peer.events <- audiohost.Event{Type: "recording"}
+			peer.events <- audiohost.Event{Type: "audio", Audio: phrase}
+			var uploads [][]byte
+			client := continuousDictationClient(func(
+				_ context.Context,
+				audio []byte,
+			) (string, error) {
+				index := len(uploads)
+				uploads = append(uploads, audio)
+				if !assert.Less(t, index, len(tt.responses), "unexpected upload") {
+					return "", failed.err
+				}
+				assert.Equal(t, len(uploads) == len(tt.responses), peer.closed.Load(),
+					"only the final retry runs after capture closes")
+				result := tt.responses[index]
+				return result.text, result.err
+			})
+			emit := func(msg tuiAudioMsg) {
+				if msg.event.Type != "preview" {
+					return
+				}
+				if msg.err == nil {
+					pcm = append(pcm, phrase...)
+					peer.events <- audiohost.Event{Type: "audio", Audio: phrase}
+					return
+				}
+				assert.ErrorIs(t, msg.err, failed.err)
+				tail := dictationTestPCM(500, 0)
+				pcm = append(pcm, tail...)
+				peer.events <- audiohost.Event{Type: "audio", Audio: tail}
+				peer.events <- audiohost.Event{Type: "recorded"}
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+			defer cancel()
+			text, err := runDictation(ctx, client, nil, emit, peer.start)
+			require.ErrorIs(t, err, tt.want.err)
+			assert.Equal(t, tt.want.text, text)
+			require.Len(t, uploads, len(tt.responses))
+			assert.Equal(t, dictationWAV(pcm), uploads[len(uploads)-1],
+				"retry includes the whole recording and trailing silence")
+		})
+	}
+}
+
+func TestDictationSpeechDetectorSilenceAndNoise(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		segments  [][2]int
+		snapshots []int
+	}{
+		{
+			name: "ignore silence and isolated clicks",
+			segments: [][2]int{
+				{3000, 0}, {100, 16000}, {2000, 0}, {100, 10000}, {3000, 0},
+			},
+		},
+		{
+			name:     "require 180 ms initial speech",
+			segments: [][2]int{{160, 4000}, {3000, 0}},
+		},
+		{
+			name:      "snapshot after exactly 2.5 seconds, without repeats",
+			segments:  [][2]int{{180, 4000}, {2480, 0}, {20, 0}, {6000, 0}},
+			snapshots: []int{2680},
+		},
+		{
+			name: "learn background noise and detect louder speech",
+			segments: [][2]int{
+				{3000, 197}, {2000, 393}, {300, 2621}, {2500, 393},
+			},
+			snapshots: []int{7800},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			detector := dictationSpeechDetector{noiseFloor: 0.003}
+			var snapshots []int
+			elapsed := 0
+			for _, segment := range tt.segments {
+				pcm := dictationTestPCM(segment[0], int16(segment[1]))
+				for offset := 0; offset < len(pcm); offset += 640 {
+					elapsed += 20
+					if detector.push(pcm[offset : offset+640]) {
+						snapshots = append(snapshots, elapsed)
+						detector.dirty = false
+					}
+				}
+			}
+			assert.Equal(t, tt.snapshots, snapshots)
+		})
 	}
 }

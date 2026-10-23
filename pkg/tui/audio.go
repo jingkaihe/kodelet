@@ -21,10 +21,13 @@ type tuiAudioSession struct {
 	key      string
 	mode     string
 	draft    string
+	preview  string
 	started  time.Time
 	phase    string
 	level    float64
 	muted    bool
+	// A recording limit or upload failure requires explicit preview acceptance.
+	finishRequested bool
 	// The call gives a draft its conversation ID, so it owns that transition.
 	createsConversation bool
 }
@@ -108,7 +111,16 @@ func (m *model) handleAudioInput(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		if m.audio.mode == "voice" {
+			if key.String() == "enter" && m.audio.phase == "review" {
+				m.audio.finishRequested = true
+				return m.updateAudio(tuiAudioMsg{
+					session: m.audio,
+					done:    true,
+					text:    m.audio.preview,
+				}), true
+			}
 			if key.String() == "enter" && m.audio.phase == "recording" {
+				m.audio.finishRequested = true
 				m.audio.phase = "transcribing"
 				return m.sendAudioControl(audiohost.Command{Type: "finish"}), true
 			}
@@ -196,6 +208,13 @@ func (m *model) startAudio(mode string) tea.Cmd {
 
 func (m *model) cancelAudio() {
 	if m.audio != nil {
+		if m.audio.phase == "review" {
+			// The worker has already stopped; no completion message will follow.
+			m.audio.cancel()
+			m.audio = nil
+			m.resize()
+			return
+		}
 		m.audio.phase = "stopping"
 		m.audio.cancel()
 	}
@@ -230,6 +249,18 @@ func (m *model) updateAudio(msg tuiAudioMsg) tea.Cmd {
 	session := m.audio
 	if msg.done {
 		canceled := session.phase == "stopping" || errors.Is(msg.err, context.Canceled)
+		needsReview := msg.err != nil || !session.finishRequested
+		if !canceled && session.key == m.key && session.mode == "voice" &&
+			needsReview && strings.TrimSpace(msg.text) != "" {
+			session.phase = "review"
+			session.preview = sanitizeExtensionTranscriptText(msg.text)
+			m.resize()
+			message := "Recording limit reached"
+			if msg.err != nil {
+				message = msg.err.Error()
+			}
+			return m.audioNotice(message + ". Enter keeps the last preview; Esc discards it.")
+		}
 		m.audio = nil
 		m.resize()
 		if canceled || session.key != m.key {
@@ -284,6 +315,15 @@ func (m *model) updateAudio(msg tuiAudioMsg) tea.Cmd {
 		}
 	}
 	switch msg.event.Type {
+	case "preview":
+		if session.mode != "voice" || session.key != m.key {
+			return nil
+		}
+		if msg.err != nil {
+			return m.audioNotice(msg.err.Error())
+		}
+		session.preview = sanitizeExtensionTranscriptText(msg.text)
+		m.resize()
 	case "recording", "transcribing", "connected":
 		session.phase = msg.event.Type
 	case "level":
@@ -389,7 +429,16 @@ func (m model) audioHeight() int {
 	if m.audio == nil {
 		return 0
 	}
-	return 1
+	return 1 + len(m.audioPreviewLines())
+}
+
+func (m model) audioPreviewLines() []string {
+	if m.audio == nil || m.audio.mode != "voice" || m.audio.preview == "" {
+		return nil
+	}
+	lines := strings.Split(wrapText(m.audio.preview, m.contentWidth()), "\n")
+	// Follow the latest words without letting the preview take over the chat.
+	return lines[max(0, len(lines)-3):]
 }
 
 func (m model) renderAudio() string {
@@ -403,10 +452,15 @@ func (m model) renderAudio() string {
 		if s.muted {
 			controls = "Ctrl+Alt+M: unmute · Esc: end"
 		}
-	} else {
-		level := int(min(1, max(0, s.level)) * 10)
-		controls = strings.Repeat("▰", level) + strings.Repeat("▱", 10-level) + " · " + controls
+	} else if s.phase == "review" {
+		controls = "Enter: keep · Esc: cancel"
 	}
+	level := int(min(1, max(0, s.level)) * 10)
+	if s.muted || s.phase != "recording" && s.phase != "connected" {
+		level = 0
+	}
+	meter := strings.Repeat("▰", level) + strings.Repeat("▱", 10-level)
+	controls = meter + " · " + controls
 	state := s.phase
 	if s.muted {
 		state += " (muted)"
@@ -416,5 +470,9 @@ func (m model) renderAudio() string {
 		"%s · %s · %02d:%02d · %s",
 		label, state, seconds/60, seconds%60, controls,
 	)
-	return fitVisible(normalizeSingleLinePaste(header), m.contentWidth())
+	lines := append([]string{header}, m.audioPreviewLines()...)
+	for i := range lines {
+		lines[i] = fitVisible(normalizeSingleLinePaste(lines[i]), m.contentWidth())
+	}
+	return strings.Join(lines, "\n")
 }

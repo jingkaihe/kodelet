@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/binary"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -151,32 +152,99 @@ func runDictation(
 	deadline := time.NewTimer(30 * time.Second)
 	defer deadline.Stop()
 	var pcm []byte
-	recording, finishing := false, false
+	var transcript string
+	var uploadErr error
+	var recording, finishing, recorded bool
+	events := peer.Events()
+	detector := dictationSpeechDetector{noiseFloor: 0.003}
+	var processed, pending int
+	var uploading, snapshotted bool
+	type uploadResult struct {
+		text string
+		err  error
+	}
+	results := make(chan uploadResult, 1)
+	ctx, cancelUploads := context.WithCancel(ctx)
+	defer cancelUploads()
+	uploadNext := func() {
+		if uploading || pending == 0 || ctx.Err() != nil {
+			return
+		}
+		// Copy before starting the request: capture keeps appending to pcm. Only
+		// the newest waiting prefix is needed, not a queue of overlapping WAVs.
+		wav := dictationWAV(pcm[:pending])
+		pending = 0
+		uploading = true
+		upload, cancel := context.WithTimeoutCause(
+			ctx, transcriptionTimeout, errTranscriptionTimeout,
+		)
+		go func() {
+			defer cancel()
+			result, err := client.TranscribeAudio(
+				upload, wav, "dictation.wav", "audio/wav", "",
+			)
+			err = deadlineError(upload, err, errTranscriptionTimeout)
+			if err == nil && strings.TrimSpace(result.Text) == "" {
+				err = errors.New("no speech detected")
+			}
+			results <- uploadResult{text: result.Text, err: err}
+		}()
+	}
+	queueSnapshot := func(size int) {
+		pending = size
+		snapshotted = true
+		detector.dirty = false
+		uploadNext()
+	}
 	for {
+		if err := ctx.Err(); err != nil {
+			return transcript, err
+		}
+		if recorded && !uploading && pending == 0 {
+			return transcript, uploadErr
+		}
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return transcript, ctx.Err()
+		case result := <-results:
+			uploading = false
+			uploadErr = result.err
+			if result.err == nil {
+				transcript = result.text
+			}
+			if !recorded {
+				emit(tuiAudioMsg{
+					event: audiohost.Event{Type: "preview"},
+					text:  result.text,
+					err:   result.err,
+				})
+			}
+			uploadNext()
 		case <-deadline.C:
 			if !recording || finishing {
-				return "", errors.New("audio recording timed out")
+				return transcript, errors.New("audio recording timed out")
 			}
 			finishing = true
 			if err := peer.Send(audiohost.Command{Type: "finish"}); err != nil {
-				return "", err
+				return transcript, err
 			}
 			deadline.Reset(10 * time.Second)
-		case control := <-controls:
+		case control, ok := <-controls:
+			if !ok {
+				controls = nil
+				continue
+			}
 			if control.Type != "finish" || finishing {
 				continue
 			}
 			finishing = true
 			if err := peer.Send(control); err != nil {
-				return "", err
+				return transcript, err
 			}
 			deadline.Reset(10 * time.Second)
-		case event, ok := <-peer.Events():
+		case event, ok := <-events:
 			if !ok {
-				return "", errors.New("audio helper exited before finishing the recording")
+				return transcript, errors.New("audio helper exited before finishing the recording")
 			}
 			switch event.Type {
 			case "recording":
@@ -186,38 +254,97 @@ func runDictation(
 				}
 			case "audio":
 				if len(event.Audio)%2 != 0 || int64(len(pcm)+len(event.Audio)) > maxBytes {
-					return "", errors.New(
+					return transcript, errors.New(
 						"audio helper exceeded the recording limit or returned invalid PCM",
 					)
 				}
 				pcm = append(pcm, event.Audio...)
+				// Analyze fixed 20 ms frames regardless of helper IPC boundaries.
+				for len(pcm)-processed >= 640 {
+					frame := pcm[processed : processed+640]
+					processed += len(frame)
+					if detector.push(frame) {
+						queueSnapshot(processed)
+					}
+				}
 				continue
 			case "error":
-				return "", errors.New(event.Message)
+				return transcript, errors.New(event.Message)
 			case "recorded":
+				recorded = true
+				deadline.Stop()
+				events = nil
+				controls = nil
 				if err := peer.Close(); err != nil {
-					return "", err
+					return transcript, err
 				}
 				if len(pcm) == 0 {
 					return "", errors.New("no audio was recorded")
 				}
 				emit(tuiAudioMsg{event: audiohost.Event{Type: "transcribing"}})
-				upload, cancel := context.WithTimeoutCause(
-					ctx, transcriptionTimeout, errTranscriptionTimeout,
-				)
-				defer cancel()
-				result, err := client.TranscribeAudio(
-					upload, dictationWAV(pcm), "dictation.wav", "audio/wav", "",
-				)
-				err = deadlineError(upload, err, errTranscriptionTimeout)
-				if err == nil && strings.TrimSpace(result.Text) == "" {
-					err = errors.New("no speech detected")
+				if processed < len(pcm) {
+					detector.push(pcm[processed:]) // Include even a tiny final syllable.
 				}
-				return result.Text, err
+				// Silence alone does not need another upload. A failed latest request
+				// is retried on finish; outstanding requests already cover that speech.
+				retryFailedUpload := !uploading && pending == 0 && uploadErr != nil
+				if detector.dirty || !snapshotted || retryFailedUpload {
+					queueSnapshot(len(pcm))
+				}
+				continue
 			}
 			emit(tuiAudioMsg{event: event})
 		}
 	}
+}
+
+// This mirrors the browser's energy detector. Samples always remain in the WAV;
+// speech detection only decides when to refresh the cumulative transcription.
+type dictationSpeechDetector struct {
+	noiseFloor     float64
+	voicedSamples  int
+	silenceSamples int
+	hasSpeech      bool
+	speaking       bool
+	dirty          bool
+}
+
+func (d *dictationSpeechDetector) push(pcm []byte) bool {
+	samples := len(pcm) / 2
+	var energy float64
+	for offset := 0; offset < len(pcm); offset += 2 {
+		sample := float64(int16(binary.LittleEndian.Uint16(pcm[offset:]))) / 32768
+		energy += sample * sample
+	}
+	rms := math.Sqrt(energy / float64(samples))
+	threshold := max(0.01, d.noiseFloor*3)
+	if d.hasSpeech {
+		threshold = max(0.008, d.noiseFloor*1.8)
+	}
+	voiced := rms > threshold
+	if !voiced && !d.speaking {
+		d.noiseFloor += (rms - d.noiseFloor) * 0.05
+	}
+	if voiced {
+		d.voicedSamples += samples
+		d.silenceSamples = 0
+		if d.voicedSamples >= 2880 { // 180 ms of initial speech at 16 kHz.
+			d.hasSpeech = true
+		}
+		if d.hasSpeech {
+			d.dirty = true
+			d.speaking = true
+		}
+	} else {
+		d.silenceSamples += samples
+		if !d.hasSpeech && d.silenceSamples >= 1920 { // Reset isolated clicks after 120 ms.
+			d.voicedSamples = 0
+		}
+		if d.silenceSamples >= 2880 {
+			d.speaking = false
+		}
+	}
+	return d.dirty && d.silenceSamples >= 40000 // 2.5 seconds of silence.
 }
 
 func dictationWAV(pcm []byte) []byte {
@@ -393,8 +520,6 @@ func runRealtimeAudio(
 				}(event.SDP)
 			case "connected":
 				connecting.Stop()
-			case "level":
-				continue // Calls have no level meter; avoid redrawing ten times a second.
 			case "error":
 				return errors.New(event.Message)
 			}
