@@ -124,6 +124,8 @@ impl Session {
                     // The parent's finish can race the automatic byte/duration limit.
                     Some(Ok(Command::Finish {})) if self.used && self.call.is_none() => {},
                     Some(Ok(Command::CreateOffer {})) if !self.used => {
+                        // Cold plugin discovery can be slow; finish it before the parent allocates a call.
+                        playout::initialize()?;
                         let (peer, sdp) = realtime::Peer::offer().await?;
                         self.used = true;
                         self.call = Some(Call { peer, audio: None });
@@ -131,8 +133,6 @@ impl Session {
                     }
                     Some(Ok(Command::Answer { sdp })) if self.call.as_ref().is_some_and(|call| call.audio.is_none()) => {
                         let call = self.call.as_mut().unwrap();
-                        // Cold plugin discovery can be slow; do it before starting media or devices.
-                        playout::initialize()?;
                         call.peer.answer(sdp).await?;
                         let devices = Devices::open(true)?;
                         let processor = Processor::new(devices.input_rate, devices.output_rate)?;

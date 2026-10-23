@@ -156,6 +156,14 @@ func dictationWAV(pcm []byte) []byte {
 	return wav
 }
 
+// Call setup limits; tests shorten them.
+var (
+	// The helper's first offer can include a cold GStreamer plugin-registry scan.
+	realtimeOfferTimeout = 3 * time.Minute
+	// Server allocation, the helper's answer, and ICE/DTLS setup after the offer.
+	realtimeConnectTimeout = 90 * time.Second
+)
+
 func runRealtimeAudio(ctx context.Context, client realtimeAudioClient, request chat.ChatRequest, controls <-chan audiohost.Command, emit func(tuiAudioMsg), start func(context.Context) (audioPeer, error)) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
@@ -202,7 +210,9 @@ func runRealtimeAudio(ctx context.Context, client realtimeAudioClient, request c
 		done  bool
 	}
 	events := make(chan streamUpdate, 32)
-	connecting := time.NewTimer(90 * time.Second)
+	// Slow first-use setup happens before the offer, so the connection deadline
+	// starts only once the offer exists.
+	connecting := time.NewTimer(realtimeOfferTimeout)
 	defer connecting.Stop()
 	offered := false
 	for {
@@ -210,6 +220,9 @@ func runRealtimeAudio(ctx context.Context, client realtimeAudioClient, request c
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-connecting.C:
+			if !offered {
+				return errors.New("audio helper did not prepare the voice call in time")
+			}
 			return errors.New("voice call connection timed out")
 		case control := <-controls:
 			if err := peer.Send(control); err != nil {
@@ -261,6 +274,7 @@ func runRealtimeAudio(ctx context.Context, client realtimeAudioClient, request c
 					return errors.New("audio helper returned a duplicate offer")
 				}
 				offered = true
+				connecting.Reset(realtimeConnectTimeout)
 				go func(offer string) {
 					// Do not lose an allocated call on cancellation. Close late responses.
 					setup, stop := context.WithTimeout(context.WithoutCancel(ctx), 45*time.Second)

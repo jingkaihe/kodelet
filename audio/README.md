@@ -44,7 +44,7 @@ stdin/stdout carry binary frames: a four-byte big-endian unsigned length followe
 | `{"type":"hello","protocol":1}` | `{"type":"ready","protocol":1}`. Required first, within five seconds. No device or network initialization. |
 | `{"type":"record","maxAudioBytes":24000000,"maxDurationSeconds":60}` | `{"type":"recording"}`, then kind-2 PCM chunks: 16000 Hz, mono, signed 16-bit little-endian. |
 | `{"type":"finish"}` | Stop capture, flush the resampler's final partial block, then `{"type":"recorded"}`. Byte/duration limits also finish automatically. |
-| `{"type":"createOffer"}` | `{"type":"offer","sdp":"..."}` with gathered ICE candidates, Opus media, and an `oai-events` data channel. No microphone access yet. |
+| `{"type":"createOffer"}` | Initialize GStreamer, then `{"type":"offer","sdp":"..."}` with gathered ICE candidates, Opus media, and an `oai-events` data channel. No microphone access yet. |
 | `{"type":"answer","sdp":"..."}` | Apply the answer, wait for the data channel to open over ICE/DTLS/SCTP, start devices, then `{"type":"connected"}`. Negotiation has a 20-second deadline. |
 | `{"type":"mute","muted":true}` | `{"type":"muted","muted":true}`. Discard capture and queued pre-mute audio, reset processing, and send encoded silence. False resumes only newly captured input. Playback continues. |
 | `{"type":"close"}` | Release the devices and peer, emit `{"type":"closed"}`, then exit. |
@@ -57,6 +57,6 @@ The ICE dependency is pinned to include the consent-freshness fix: STUN checks c
 
 ## Verification and limitations
 
-The first GStreamer use may scan all installed plugins and take substantially longer than later runs (about 90 seconds with a cold Homebrew registry during development, with warnings from unrelated Python/GTK plugins). Run `mise run audio-test` once after installing or upgrading GStreamer to populate its registry before a live session. The helper initializes this registry before applying the remote answer or opening devices.
+The first GStreamer use may scan all installed plugins and take substantially longer than later runs (about 90 seconds with a cold Homebrew registry during development, with warnings from unrelated Python/GTK plugins). Run `mise run audio-test` once after installing or upgrading GStreamer to populate its registry before a live session. The helper initializes this registry before creating the offer, so a slow first scan finishes before Kodelet asks the server to allocate a call. The TUI allows three minutes for the offer, then 90 seconds to connect.
 
 `mise run audio-test` runs lightweight framing/lifecycle, mute-boundary, PCM/resampler, and synthetic signal-path checks. It does not open a microphone, speaker, or provider connection. `kodelet-audio --version` and hello/close are safe installation smoke checks with no audio/network access. These checks do not validate microphone permissions, device switching, real-device latency/echo cancellation, or interoperability with a live provider. Those require an explicit manual session; headphones are recommended for initial testing. Default devices only are supported, and a device failure requires restarting the session. No TURN service is configured, so restrictive networks may prevent realtime connectivity.

@@ -485,6 +485,47 @@ func TestRealtimeAudioContinuesAcrossAgentRunsAndCleansUp(t *testing.T) {
 	assert.Equal(t, []audiohost.Command{{Type: "createOffer"}, {Type: "answer", SDP: "answer"}}, peer.sent)
 }
 
+func TestRealtimeAudioConnectionDeadlineStartsAfterSlowOffer(t *testing.T) {
+	previousOffer, previousConnect := realtimeOfferTimeout, realtimeConnectTimeout
+	t.Cleanup(func() { realtimeOfferTimeout, realtimeConnectTimeout = previousOffer, previousConnect })
+	for _, test := range []struct {
+		name         string
+		offerTimeout time.Duration
+		err          string
+		sent         []audiohost.Command
+	}{
+		{
+			name: "slow first offer", offerTimeout: 5 * time.Second, err: "voice call connection timed out",
+			sent: []audiohost.Command{{Type: "createOffer"}, {Type: "answer", SDP: "answer"}},
+		},
+		{
+			name: "no offer", offerTimeout: 100 * time.Millisecond, err: "did not prepare the voice call in time",
+			sent: []audiohost.Command{{Type: "createOffer"}},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			realtimeOfferTimeout, realtimeConnectTimeout = test.offerTimeout, 250*time.Millisecond
+			peer := &testAudioPeer{events: make(chan audiohost.Event, 1)}
+			// A cold GStreamer scan delays the offer beyond the connection deadline.
+			offer := time.AfterFunc(400*time.Millisecond, func() { peer.events <- audiohost.Event{Type: "offer", SDP: "offer"} })
+			t.Cleanup(func() { offer.Stop() })
+			client := testRealtimeAudioClient{
+				start: func(context.Context) (chat.RealtimeSession, error) {
+					return chat.RealtimeSession{ID: "call", ConversationID: "conv", Answer: "answer"}, nil
+				},
+				stream: func(ctx context.Context, _ func(chat.RealtimeEvent)) error { <-ctx.Done(); return ctx.Err() },
+				end:    func(context.Context, string) error { return nil },
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			err := runRealtimeAudio(ctx, client, chat.ChatRequest{ConversationID: "conv"}, nil, func(tuiAudioMsg) {}, peer.start)
+			require.ErrorContains(t, err, test.err)
+			assert.Equal(t, test.sent, peer.sent)
+			assert.True(t, peer.closed.Load())
+		})
+	}
+}
+
 func TestRealtimeAudioClosesLateAllocationAfterCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
