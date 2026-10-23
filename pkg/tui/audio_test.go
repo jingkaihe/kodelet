@@ -332,15 +332,29 @@ type testAudioPeer struct {
 	events chan audiohost.Event
 	sent   []audiohost.Command
 	closed atomic.Bool
+	// The helper context must still be live at the first Close for the helper
+	// to shut down gracefully rather than being killed.
+	graceful atomic.Bool
+	ctx      context.Context
 }
 
 func (p *testAudioPeer) Send(command audiohost.Command) error {
 	p.sent = append(p.sent, command)
 	return nil
 }
-func (p *testAudioPeer) Events() <-chan audiohost.Event           { return p.events }
-func (p *testAudioPeer) Close() error                             { p.closed.Store(true); return nil }
-func (p *testAudioPeer) start(context.Context) (audioPeer, error) { return p, nil }
+func (p *testAudioPeer) Events() <-chan audiohost.Event { return p.events }
+
+func (p *testAudioPeer) Close() error {
+	if !p.closed.Swap(true) {
+		p.graceful.Store(p.ctx != nil && p.ctx.Err() == nil)
+	}
+	return nil
+}
+
+func (p *testAudioPeer) start(ctx context.Context) (audioPeer, error) {
+	p.ctx = ctx
+	return p, nil
+}
 
 type testDictationClient struct {
 	caps   transcriptiontypes.Capabilities
@@ -485,6 +499,100 @@ func TestRealtimeAudioContinuesAcrossAgentRunsAndCleansUp(t *testing.T) {
 	assert.Equal(t, []audiohost.Command{{Type: "createOffer"}, {Type: "answer", SDP: "answer"}}, peer.sent)
 }
 
+func TestAudioCancelClosesHelperGracefully(t *testing.T) {
+	for _, mode := range []string{"voice", "talk"} {
+		t.Run(mode, func(t *testing.T) {
+			peer := &testAudioPeer{events: make(chan audiohost.Event, 2)}
+			active := "recording"
+			var runner any = &testDictationClient{caps: transcriptiontypes.Capabilities{
+				Enabled: true, Available: true, MaxAudioBytes: 48, MaxDurationSeconds: 5, MimeTypes: []string{"audio/wav"},
+			}}
+			if mode == "talk" {
+				active = "connected"
+				runner = testRealtimeAudioClient{
+					start: func(context.Context) (chat.RealtimeSession, error) {
+						return chat.RealtimeSession{ID: "call", ConversationID: "conv", Answer: "answer"}, nil
+					},
+					stream: func(ctx context.Context, _ func(chat.RealtimeEvent)) error { <-ctx.Done(); return ctx.Err() },
+					end:    func(context.Context, string) error { return nil },
+				}
+				peer.events <- audiohost.Event{Type: "offer", SDP: "offer"}
+			}
+			peer.events <- audiohost.Event{Type: active}
+			ready := make(chan struct{})
+			emit := func(msg tuiAudioMsg) {
+				if msg.event.Type == active {
+					close(ready)
+				}
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			result := make(chan error, 1)
+			go func() {
+				_, err := runTUIAudio(ctx, mode, runner, chat.ChatRequest{ConversationID: "conv"}, nil, emit, peer.start)
+				result <- err
+			}()
+			select {
+			case <-ready:
+			case <-time.After(time.Second):
+				t.Fatal("audio did not start")
+			}
+			cancel() // Esc, /talk stop, switching conversations, or exiting the TUI.
+			select {
+			case err := <-result:
+				require.ErrorIs(t, err, context.Canceled)
+			case <-time.After(time.Second):
+				t.Fatal("audio did not stop promptly")
+			}
+			assert.True(t, peer.closed.Load())
+			assert.True(t, peer.graceful.Load(), "closing must not depend on the canceled session context")
+		})
+	}
+}
+
+func TestAudioCancelDuringHelperStartupSendsNothing(t *testing.T) {
+	for _, mode := range []string{"voice", "talk"} {
+		t.Run(mode, func(t *testing.T) {
+			peer := &testAudioPeer{events: make(chan audiohost.Event)}
+			starting, proceed := make(chan struct{}), make(chan struct{})
+			start := func(ctx context.Context) (audioPeer, error) {
+				close(starting)
+				<-proceed // The handshake completes just after the user cancels.
+				return peer.start(ctx)
+			}
+			var runner any = &testDictationClient{caps: transcriptiontypes.Capabilities{
+				Enabled: true, Available: true, MaxAudioBytes: 48, MaxDurationSeconds: 5, MimeTypes: []string{"audio/wav"},
+			}}
+			if mode == "talk" {
+				runner = testRealtimeAudioClient{}
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			result := make(chan error, 1)
+			go func() {
+				_, err := runTUIAudio(ctx, mode, runner, chat.ChatRequest{ConversationID: "conv"}, nil, func(tuiAudioMsg) {}, start)
+				result <- err
+			}()
+			select {
+			case <-starting:
+			case <-time.After(time.Second):
+				t.Fatal("helper startup did not begin")
+			}
+			cancel()
+			close(proceed)
+			select {
+			case err := <-result:
+				require.ErrorIs(t, err, context.Canceled)
+			case <-time.After(time.Second):
+				t.Fatal("audio did not stop promptly")
+			}
+			assert.Empty(t, peer.sent, "a canceled start must not open the microphone or allocate a call")
+			assert.True(t, peer.closed.Load())
+			assert.ErrorIs(t, peer.ctx.Err(), context.Canceled, "cancellation during startup aborts the handshake")
+		})
+	}
+}
+
 func TestRealtimeAudioConnectionDeadlineStartsAfterSlowOffer(t *testing.T) {
 	previousOffer, previousConnect := realtimeOfferTimeout, realtimeConnectTimeout
 	t.Cleanup(func() { realtimeOfferTimeout, realtimeConnectTimeout = previousOffer, previousConnect })
@@ -558,6 +666,7 @@ func TestRealtimeAudioClosesLateAllocationAfterCancel(t *testing.T) {
 		t.Fatal("audio did not stop promptly")
 	}
 	assert.True(t, peer.closed.Load())
+	assert.True(t, peer.graceful.Load(), "cancellation closes the helper gracefully")
 	close(release)
 	select {
 	case id := <-ended:

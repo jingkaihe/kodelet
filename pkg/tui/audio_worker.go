@@ -33,6 +33,29 @@ type realtimeAudioClient interface {
 
 func startAudioPeer(ctx context.Context) (audioPeer, error) { return audiohost.Start(ctx) }
 
+// startSessionPeer keeps the helper alive when ctx is canceled after startup,
+// so the caller's Close can release devices gracefully instead of the helper
+// being killed. Canceling ctx during the handshake still aborts startup without
+// sending any command. Call release after Close.
+func startSessionPeer(ctx context.Context, start func(context.Context) (audioPeer, error)) (audioPeer, context.CancelFunc, error) {
+	helper, kill := context.WithCancel(context.WithoutCancel(ctx))
+	abortStartup := context.AfterFunc(ctx, kill)
+	peer, err := start(helper)
+	if !abortStartup() {
+		// Canceled during startup: the helper is already being stopped.
+		if err == nil {
+			_ = peer.Close()
+		}
+		kill()
+		return nil, nil, ctx.Err()
+	}
+	if err != nil {
+		kill()
+		return nil, nil, err
+	}
+	return peer, kill, nil
+}
+
 func runTUIAudio(ctx context.Context, mode string, runner any, request chat.ChatRequest, controls <-chan audiohost.Command, emit func(tuiAudioMsg), start func(context.Context) (audioPeer, error)) (string, error) {
 	if mode == "voice" {
 		client, ok := runner.(dictationClient)
@@ -61,10 +84,11 @@ func runDictation(ctx context.Context, client dictationClient, controls <-chan a
 	if !slices.Contains(caps.MimeTypes, "audio/wav") || caps.MaxAudioBytes <= 44 || caps.MaxDurationSeconds <= 0 {
 		return "", errors.New("the server does not advertise usable WAV recording limits")
 	}
-	peer, err := start(ctx)
+	peer, release, err := startSessionPeer(ctx, start)
 	if err != nil {
 		return "", err
 	}
+	defer release()
 	defer peer.Close()
 	maxBytes := min(caps.MaxAudioBytes, transcriptiontypes.MaxAudioBytes) - 44
 	maxSeconds := min(caps.MaxDurationSeconds, transcriptiontypes.MaxDurationSeconds)
@@ -176,10 +200,11 @@ func runRealtimeAudio(ctx context.Context, client realtimeAudioClient, request c
 	if !caps.Enabled || !caps.Available {
 		return errors.New("realtime voice unavailable: " + caps.Reason)
 	}
-	peer, err := start(ctx)
+	peer, release, err := startSessionPeer(ctx, start)
 	if err != nil {
 		return err
 	}
+	defer release()
 	if err := peer.Send(audiohost.Command{Type: "createOffer"}); err != nil {
 		_ = peer.Close()
 		return err
