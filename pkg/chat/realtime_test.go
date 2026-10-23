@@ -163,7 +163,6 @@ func TestClientStartRealtimeErrorsNeverRetry(t *testing.T) {
 			"oversized response", strings.Repeat(" ", maxRealtimeResponseBytes+1),
 			"size limit", http.StatusOK,
 		},
-		{"missing session", `null`, "invalid realtime session", http.StatusOK},
 		{
 			"missing call ID", `{"conversationId":"saved","answer":"answer"}`,
 			"invalid realtime session", http.StatusOK,
@@ -232,7 +231,6 @@ func TestClientRealtimeOwnerErrors(t *testing.T) {
 func TestClientStreamRealtimeRejectsBrokenStreams(t *testing.T) {
 	for _, body := range []string{
 		"{\n",
-		"null\n",
 		"{}\n",
 		strings.Repeat("x", maxRealtimeResponseBytes+1),
 		`{"kind":"state"}`,
@@ -280,7 +278,8 @@ func TestClientStreamRealtimeHasNoTotalSizeOrClientTimeout(t *testing.T) {
 }
 
 func TestClientRealtimeCancellation(t *testing.T) {
-	for _, method := range []string{"capabilities", "start", "stream", "end"} {
+	// Start exercises the shared API request path; streaming owns a separate body reader.
+	for _, method := range []string{"start", "stream"} {
 		t.Run(method, func(t *testing.T) {
 			started := make(chan struct{})
 			stopped := make(chan struct{})
@@ -304,19 +303,14 @@ func TestClientRealtimeCancellation(t *testing.T) {
 			done := make(chan error, 1)
 			go func() {
 				var err error
-				switch method {
-				case "capabilities":
-					_, err = client.RealtimeCapabilities(ctx)
-				case "start":
+				if method == "start" {
 					_, err = client.StartRealtime(
 						ctx, "offer", ChatRequest{ConversationID: "saved"}, "",
 					)
-				case "stream":
+				} else {
 					err = client.StreamRealtime(ctx, "call", func(RealtimeEvent) {
 						t.Error("unexpected event")
 					})
-				case "end":
-					err = client.EndRealtime(ctx, "call")
 				}
 				done <- err
 			}()

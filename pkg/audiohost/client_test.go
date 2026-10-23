@@ -12,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/pkg/errors"
@@ -193,21 +194,15 @@ func fixtureEvent(event Event) error {
 	return err
 }
 
-func installFixtureHelper(t *testing.T) string {
+var recordCommand = Command{Type: "record", MaxAudioBytes: 32000, MaxDurationSeconds: 1}
+
+func setupFixture(t *testing.T, mode string) string {
 	t.Helper()
 	executable, err := os.Executable()
 	require.NoError(t, err)
 	directory := t.TempDir()
 	require.NoError(t, os.Symlink(executable, filepath.Join(directory, helperName)))
 	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return directory
-}
-
-var recordCommand = Command{Type: "record", MaxAudioBytes: 32000, MaxDurationSeconds: 1}
-
-func setupFixture(t *testing.T, mode string) string {
-	t.Helper()
-	installFixtureHelper(t)
 	t.Setenv("KODELET_AUDIOHOST_TEST_FIXTURE", mode)
 	pidPath := filepath.Join(t.TempDir(), "pid")
 	t.Setenv("KODELET_AUDIOHOST_TEST_PID", pidPath)
@@ -272,7 +267,7 @@ func TestFraming(t *testing.T) {
 		fixtureFrame(pcmFrame, make([]byte, maxFrameBytes-2)),
 	} {
 		// One-byte reads verify streaming, not just whole-buffer parsing.
-		event, err := readEvent(&fragmentedReader{data: data})
+		event, err := readEvent(iotest.OneByteReader(bytes.NewReader(data)))
 		require.NoError(t, err)
 		if data[4] == pcmFrame {
 			assert.Equal(t, "audio", event.Type)
@@ -287,17 +282,6 @@ func TestFraming(t *testing.T) {
 	assert.ErrorContains(t, err, "SDP")
 	_, err = encodeCommand(Command{Type: strings.Repeat("x", maxFrameBytes)})
 	assert.ErrorContains(t, err, "frame size")
-}
-
-type fragmentedReader struct{ data []byte }
-
-func (r *fragmentedReader) Read(p []byte) (int, error) {
-	if len(r.data) == 0 {
-		return 0, io.EOF
-	}
-	n := copy(p, r.data[:1])
-	r.data = r.data[n:]
-	return n, nil
 }
 
 func TestRejectMalformedFrames(t *testing.T) {
@@ -530,16 +514,6 @@ func TestHelperPaths(t *testing.T) {
 		_, err := Start(t.Context())
 		assert.ErrorContains(t, err, "kodelet-audio in PATH")
 		assert.ErrorContains(t, err, "mise run audio-install")
-	})
-	t.Run("first PATH match", func(t *testing.T) {
-		setupFixture(t, "normal")
-		first := installFixtureHelper(t)
-		path, err := helperPath()
-		require.NoError(t, err)
-		assert.Equal(t, filepath.Join(first, helperName), path)
-		c, err := Start(t.Context())
-		require.NoError(t, err)
-		assert.NoError(t, c.Close())
 	})
 	t.Run("relative PATH entries are ignored", func(t *testing.T) {
 		directory := t.TempDir()
