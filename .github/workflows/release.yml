@@ -61,6 +61,16 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install cmake pkgconf opus gstreamer
 
+      - name: Setup Rust toolchain
+        run: |
+          rust_version="$(mise tasks info audio-build --json | jq -r '.tools.rust')"
+          mise use --global "rust@$rust_version"
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: audio -> target
+
       - name: Lint audio helper
         run: mise run audio-lint
 
