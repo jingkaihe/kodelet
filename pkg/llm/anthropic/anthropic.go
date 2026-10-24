@@ -675,11 +675,13 @@ func (t *Thread) processMessageExchange(
 	}
 	// Compact the actual request, not a separately reconstructed primary-model
 	// turn: weak models, disabled tools, and prompt hooks must agree on both calls.
-	if t.ShouldAutoCompact(t.CompactRatioOrDefault(opt.CompactRatio)) {
-		previousMarkerID := t.CompactionMarkerID()
-		if err := t.compactContext(ctx, messageParams); err != nil {
-			return "", false, errors.Wrap(err, "failed to compact Anthropic context")
-		}
+	// A failed compaction keeps the history and the turn, as for other providers;
+	// aborting would fail every later turn while the context stays over the ratio.
+	previousMarkerID := t.CompactionMarkerID()
+	t.TryAutoCompact(ctx, t.CompactRatioOrDefault(opt.CompactRatio), func(ctx context.Context) error {
+		return t.compactContext(ctx, messageParams)
+	})
+	if t.CompactionMarkerID() != previousMarkerID {
 		messageParams.Messages = t.messages
 		if opt.PromptCache {
 			applyAnthropicPromptCachePolicy(&messageParams)

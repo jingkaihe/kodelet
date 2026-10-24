@@ -412,6 +412,42 @@ func TestNativeCompactionHistoryChangeSkipsFallback(t *testing.T) {
 	assert.Nil(t, thread.GetCompactionHistory())
 }
 
+func TestAutoCompactionFailureContinuesTurn(t *testing.T) {
+	// Native compaction and its summary fallback both fail; the turn still answers
+	// from the uncompacted history instead of failing every later turn.
+	thread, requests := newNativeCompactionTestThread(t,
+		nativeCompactionTestCapabilities,
+		compactionTestStream(nativeCompactionTestBlock, "max_tokens", nativeCompactionTestUsage),
+		compactionTestStream(`{"type":"text","text":"   "}`, "end_turn", `{"input_tokens":15,"output_tokens":3}`),
+		compactionTestStream(
+			`{"type":"text","text":"continued answer"}`, "end_turn", `{"input_tokens":15,"output_tokens":3}`,
+		),
+	)
+	thread.SetEnvironment(&agentenv.UtilityEnvironment{})
+	original, err := json.Marshal(thread.messages)
+	require.NoError(t, err)
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	output, err := thread.SendMessage(t.Context(), "new request", handler, llmtypes.MessageOpt{
+		NoToolUse:       true,
+		CompactRatio:    0.8,
+		DisableUsageLog: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "continued answer", output)
+	require.Len(t, requests, 4)
+	for range 3 {
+		<-requests
+	}
+	normal := <-requests
+	assert.NotContains(t, normal.params, "compaction")
+	assert.Contains(t, string(normal.params["messages"]), "original question")
+	require.Len(t, thread.messages, 5, "history, the admitted user message and the answer")
+	before, err := json.Marshal(thread.messages[:3])
+	require.NoError(t, err)
+	assert.JSONEq(t, string(original), string(before))
+	assert.Nil(t, thread.GetCompactionHistory())
+}
+
 func TestNativeCompactionSummaryFallback(t *testing.T) {
 	for _, mode := range []string{
 		"unsupported capability", "unsupported summarize", "discovery failure", "copilot",
