@@ -200,8 +200,6 @@ describe('TerminalPage', () => {
     expect(terminal).toHaveAttribute('data-runner-id', 'runner-1');
     expect(terminal).toHaveAttribute('data-target-kind', 'runner');
     expect(terminal).toHaveAttribute('data-cwd-label', '/runner/project');
-    expect(document.documentElement).toHaveClass('terminal-popout-active');
-    expect(document.body).toHaveClass('terminal-popout-active');
     const target: WorkspaceTarget = {
       kind: 'runner',
       runnerId: 'runner-1',
@@ -209,7 +207,12 @@ describe('TerminalPage', () => {
       cwd: '/runner/project',
     };
     expect(mockTerminalModal.mock.lastCall?.[0].target).toEqual(target);
-    expect(readTerminalPopOutRecordForTarget(target)).toEqual(expect.objectContaining({ target }));
+    // Ownership is claimed in a passive effect that can run after the modal is visible.
+    await waitFor(() =>
+      expect(readTerminalPopOutRecordForTarget(target)).toEqual(expect.objectContaining({ target }))
+    );
+    expect(document.documentElement).toHaveClass('terminal-popout-active');
+    expect(document.body).toHaveClass('terminal-popout-active');
     expect(new URLSearchParams(window.location.search).get('cwd')).toBe(target.cwd);
     expect(window.name).toBe(getTerminalPopOutWindowName(target));
     rerender(<TerminalPage />);
@@ -257,22 +260,15 @@ describe('TerminalPage', () => {
     expect(terminal).toHaveAttribute('data-target-kind', 'runner');
     expect(terminal).toHaveAttribute('data-runner-id', 'runner-remote');
     expect(terminal).toHaveAttribute('data-conversation-id', 'conv-remote');
-    expect(
-      readTerminalPopOutRecordForTarget({
-        kind: 'runner',
-        runnerId: 'runner-remote',
-        conversationId: 'conv-remote',
-        cwd: '/runner/remote-project',
-      })
-    ).toEqual(
-      expect.objectContaining({
-        target: {
-          kind: 'runner',
-          runnerId: 'runner-remote',
-          conversationId: 'conv-remote',
-          cwd: '/runner/remote-project',
-        },
-      })
+    const target: WorkspaceTarget = {
+      kind: 'runner',
+      runnerId: 'runner-remote',
+      conversationId: 'conv-remote',
+      cwd: '/runner/remote-project',
+    };
+    // Ownership is claimed in a passive effect that can run after the modal is visible.
+    await waitFor(() =>
+      expect(readTerminalPopOutRecordForTarget(target)).toEqual(expect.objectContaining({ target }))
     );
 
     unmount();
@@ -389,8 +385,12 @@ describe('TerminalPage', () => {
       conversationId: 'conv-123',
       cwd: '/runner/project',
     };
+    await waitFor(() =>
+      expect(readTerminalPopOutRecordForTarget(target)).toEqual(
+        expect.objectContaining({ state: 'active' })
+      )
+    );
     const record = readTerminalPopOutRecordForTarget(target);
-    expect(record).toEqual(expect.objectContaining({ state: 'active' }));
 
     const pageHide = new Event('pagehide');
     Object.defineProperty(pageHide, 'persisted', { value: true });
