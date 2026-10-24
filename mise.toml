@@ -58,7 +58,7 @@ run = ["go generate ./pkg/webui"]
 
 # Native audio builds separately; GitHub Actions supplies the release artifacts.
 [tasks.audio-build]
-description = "Build the experimental local audio helper (requires native audio libraries)"
+description = "Build the local audio helper (requires native audio libraries)"
 tools = { rust = "1.99.1" }
 run = '''
 set -eu
@@ -76,7 +76,7 @@ install -m 755 audio/target/release/kodelet-audio bin/kodelet-audio
 '''
 
 [tasks.audio-install]
-description = "Build the experimental helper into ./bin and install it into ~/.local/bin"
+description = "Build the audio helper into ./bin and install it into ~/.local/bin"
 depends = ["audio-build"]
 run = '''
 set -eu
@@ -90,7 +90,7 @@ if [ "$(uname -s)" = Darwin ]; then
   codesign --verify --strict "$staged"
 fi
 mv -f "$staged" "$destination/kodelet-audio"
-echo "Installed experimental helper: $destination/kodelet-audio"
+echo "Installed audio helper: $destination/kodelet-audio"
 case ":$PATH:" in
   *":$destination:"*) ;;
   *) echo "Add $destination to PATH so Kodelet can find kodelet-audio" >&2 ;;
@@ -103,7 +103,7 @@ tools = { rust = "1.99.1" }
 run = 'cargo test --manifest-path audio/Cargo.toml --locked'
 
 [tasks.audio-lint]
-description = "Check Rust formatting and lint the experimental audio helper"
+description = "Check Rust formatting and lint the audio helper"
 tools = { rust = "1.99.1" }
 run = [
   "rustup component add rustfmt clippy",

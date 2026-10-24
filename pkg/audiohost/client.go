@@ -89,7 +89,7 @@ func Start(ctx context.Context) (*Client, error) {
 		stdin.Close()
 		stdout.Close()
 		return nil, errors.Wrap(err,
-			"start audio helper (build and install the experimental helper first)")
+			"start audio helper (build and install the helper first)")
 	}
 	go c.run(ctx)
 	if err := c.write(Command{Type: "hello", Protocol: protocolVersion}); err != nil {

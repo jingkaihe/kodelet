@@ -28,10 +28,7 @@ const COMMANDS_FELL_BEHIND: &str =
 fn main() {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args == ["--version"] {
-        println!(
-            "kodelet-audio {} (experimental; protocol 1)",
-            env!("CARGO_PKG_VERSION")
-        );
+        println!("kodelet-audio {} (protocol 1)", env!("CARGO_PKG_VERSION"));
         return;
     }
     if !args.is_empty() {

@@ -1,4 +1,4 @@
-// Package audiohost supervises the experimental local audio helper without native dependencies.
+// Package audiohost supervises the local audio helper without native dependencies.
 package audiohost
 
 import (

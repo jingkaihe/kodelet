@@ -9,7 +9,7 @@ Use this reference when changing Kodelet itself. Repository-wide conventions liv
 - `pkg/llm/`, `pkg/tools/`, `pkg/browser/`, `pkg/artifacts/`: provider threads, tool execution, runner-owned browsers, and persisted images.
 - `pkg/fragments/`, `pkg/skills/`, `pkg/plugins/`: recipes, skills, and plugins.
 - `pkg/webui/`: HTTP handler and embedded React/TypeScript SPA; frontend source is in `frontend/`.
-- `audio/`: experimental Rust microphone/WebRTC helper; `pkg/audiohost/` is its pure-Go IPC client, used by `pkg/tui/`.
+- `audio/`: Rust microphone/WebRTC helper; `pkg/audiohost/` is its pure-Go IPC client, used by `pkg/tui/`.
 - `skills/kodelet/`, `recipes/`, `docs/`: built-in guidance, examples, prompt templates, and documentation.
 
 Toolchain versions live in `mise.toml`; dependencies live in `go.mod` and `pkg/webui/frontend/package.json` rather than being repeated here.
@@ -22,7 +22,7 @@ Run commands from the repository root:
 | --- | --- |
 | `mise run build` | Build the CLI with regenerated, embedded frontend assets. |
 | `mise run build-dev` | Build the CLI without regenerating the frontend. |
-| `mise run audio-build` | Build the experimental native helper into `bin/kodelet-audio`; requires platform libraries listed in `audio/README.md`. |
+| `mise run audio-build` | Build the native helper into `bin/kodelet-audio`; requires platform libraries listed in `audio/README.md`. |
 | `mise run audio-install` | Also install that helper into `~/.local/bin`, ad-hoc signed on macOS; Kodelet runs the first `kodelet-audio` on `PATH`. |
 | `mise run audio-test` / `audio-lint` | Run native tests without hardware/providers, and Rust formatting/Clippy checks. |
 | `mise run code-generation` | Generate the embedded code-mode runtime and the frontend (`go generate ./pkg/codemode ./pkg/webui`). Run it on a fresh checkout before plain `go build` or `go test`. |

@@ -1,6 +1,6 @@
-# Experimental native audio helper
+# Native audio helper
 
-Local microphone capture and realtime audio for Kodelet's experimental TUI voice support. The helper is built separately and published as an optional companion binary in GitHub releases. Supports macOS and Linux on amd64/arm64.
+Local microphone capture and realtime audio for Kodelet's TUI voice support. The helper is built separately and published as an optional companion binary in GitHub releases. Supports macOS and Linux on amd64/arm64.
 
 ## Release binaries
 
