@@ -6,6 +6,8 @@ Added native Anthropic context compaction for supported models, falling back to 
 
 Stopped publishing the Intel macOS (`darwin-amd64`) `kodelet-audio` release binary; build it from source on Intel Macs. See [audio helper setup and platform requirements](audio/README.md).
 
+Updated the TypeScript SDK's Zod dependency to 4.6.7 and transitive `body-parser` and `fast-uri` dependencies to 2.4.0 and 3.1.9, resolving Dependabot security alerts.
+
 ## 0.8.11-beta
 
 Added TUI microphone dictation through `/voice` or `Ctrl+Alt+V`, with a microphone meter and transcription previews after 2.5 seconds of silence. Enter inserts the result at the original cursor without sending a message; Esc leaves the draft unchanged. Partial transcripts require explicit acceptance when recording limits or upload failures prevent a complete result.
