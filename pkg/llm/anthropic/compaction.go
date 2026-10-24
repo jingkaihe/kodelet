@@ -39,6 +39,8 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	return t.compactContext(ctx, params)
 }
 
+var errCompactionHistoryChanged = errors.New("conversation history changed during Anthropic compaction")
+
 func (t *Thread) compactContext(ctx context.Context, params anthropic.MessageNewParams) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -50,9 +52,7 @@ func (t *Thread) compactContext(ctx context.Context, params anthropic.MessageNew
 		if err == nil &&
 			model.Capabilities.Compaction.Supported &&
 			model.Capabilities.Compaction.Summarize.Supported {
-			// Once support is established, preserve failures rather than hiding a
-			// broken signed-block replay or an incomplete stream with a new summary.
-			return t.compactContextNative(ctx, params)
+			return t.compactContextNativeWithFallback(ctx, params)
 		}
 		if err != nil {
 			if ctx.Err() != nil {
@@ -64,6 +64,28 @@ func (t *Thread) compactContext(ctx context.Context, params anthropic.MessageNew
 		}
 	}
 	return base.CompactContextWithSummary(ctx, t.runUtilityPrompt, t.SwapContext)
+}
+
+// A failed native compaction (including the documented null-content block) falls
+// back to a summary. A cancelled turn or a history that moved on must not.
+func (t *Thread) compactContextNativeWithFallback(ctx context.Context, params anthropic.MessageNewParams) error {
+	nativeErr := t.compactContextNative(ctx, params)
+	if nativeErr == nil {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if errors.Is(nativeErr, errCompactionHistoryChanged) {
+		return nativeErr
+	}
+	logger.G(ctx).WithError(nativeErr).Warn(
+		"Anthropic native compaction failed, falling back to summary compaction",
+	)
+	if err := base.CompactContextWithSummary(ctx, t.runUtilityPrompt, t.SwapContext); err != nil {
+		return errors.Wrapf(err, "failed to compact context (native compaction error: %v)", nativeErr)
+	}
+	return nil
 }
 
 func (t *Thread) compactContextNative(ctx context.Context, params anthropic.MessageNewParams) (err error) {
@@ -166,7 +188,7 @@ func (t *Thread) compactContextNative(ctx context.Context, params anthropic.Mess
 		return errors.Wrap(err, "failed to archive context")
 	}
 	if !bytes.Equal(history, current) {
-		return errors.New("conversation history changed during Anthropic compaction")
+		return errCompactionHistoryChanged
 	}
 	if err := t.ArchiveCompactionLocked(history, 1, "api", ""); err != nil {
 		return err

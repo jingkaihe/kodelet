@@ -328,7 +328,7 @@ func TestNativeCompactionDeserializeStringContent(t *testing.T) {
 	assert.Equal(t, "continue", messages[1].Content[0].OfText.Text)
 }
 
-func TestNativeCompactionFailureStopsTurn(t *testing.T) {
+func TestNativeCompactionFailureFallsBackToSummary(t *testing.T) {
 	valid := compactionTestStream(nativeCompactionTestBlock, "compaction", nativeCompactionTestUsage)
 	for _, tc := range []struct {
 		name   string
@@ -343,33 +343,73 @@ func TestNativeCompactionFailureStopsTurn(t *testing.T) {
 			stream: strings.ReplaceAll(valid, `"signature":"signed-checkpoint"`, `"signature":""`),
 		},
 		{
+			name:   "null content",
+			stream: strings.ReplaceAll(valid, `"content":"  Preserve`, `"content":null,"was":"  Preserve`),
+		},
+		{
 			name:   "wrong stop reason",
 			stream: strings.ReplaceAll(valid, `"stop_reason":"compaction"`, `"stop_reason":"max_tokens"`),
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			// Exactly two requests: discovery and compaction, with no answer or fallback.
-			thread, _ := newNativeCompactionTestThread(t, nativeCompactionTestCapabilities, tc.stream)
+			thread, requests := newNativeCompactionTestThread(t,
+				nativeCompactionTestCapabilities,
+				tc.stream,
+				compactionTestStream(
+					`{"type":"text","text":"fallback summary"}`, "end_turn", `{"input_tokens":15,"output_tokens":3}`,
+				),
+				compactionTestStream(
+					`{"type":"text","text":"continued answer"}`, "end_turn", `{"input_tokens":15,"output_tokens":3}`,
+				),
+			)
 			thread.SetEnvironment(&agentenv.UtilityEnvironment{})
-			original, err := json.Marshal(thread.messages)
-			require.NoError(t, err)
 			handler := &llmtypes.StringCollectorHandler{Silent: true}
-			_, err = thread.SendMessage(t.Context(), "new request", handler, llmtypes.MessageOpt{
+			output, err := thread.SendMessage(t.Context(), "new request", handler, llmtypes.MessageOpt{
 				NoToolUse:       true,
 				CompactRatio:    0.8,
 				DisableUsageLog: true,
 			})
-			require.ErrorContains(t, err, "compaction")
-			require.Len(t, thread.messages, 4, "preserve history and the admitted user message")
-			after, err := json.Marshal(thread.messages[:3])
 			require.NoError(t, err)
-			assert.JSONEq(t, string(original), string(after))
-			assert.Nil(t, thread.GetCompactionHistory())
-			assert.Empty(t, handler.CollectedText())
-			assert.Equal(t, 180000, thread.GetUsage().CurrentContextWindow)
-			assert.Equal(t, 120000, thread.GetUsage().InputTokens, "failed compaction is still billed")
+			assert.Equal(t, "continued answer", output)
+			require.Len(t, requests, 4)
+			assert.Equal(t, "/v1/models/claude-sonnet-4-6", (<-requests).path)
+			assert.Contains(t, (<-requests).params, "compaction")
+			summary := <-requests
+			assert.NotContains(t, summary.params, "compaction")
+			assert.Contains(t, string(summary.params["messages"]), "new request")
+			normal := <-requests
+			assert.NotContains(t, string(normal.params["messages"]), "original question")
+			assert.Contains(t, string(normal.params["messages"]), "fallback summary")
+			history := thread.GetCompactionHistory()
+			require.NotNil(t, history)
+			require.Len(t, history.Segments, 1)
+			assert.Equal(t, "summary", history.Segments[0].Marker.Method)
+			assert.False(t, hasCompactionBlock(thread.messages))
+			assert.GreaterOrEqual(t, thread.GetUsage().InputTokens, 120000, "failed compaction is still billed")
 		})
 	}
+}
+
+func TestNativeCompactionHistoryChangeSkipsFallback(t *testing.T) {
+	thread, requests := newNativeCompactionTestThread(t,
+		nativeCompactionTestCapabilities,
+		compactionTestStream(nativeCompactionTestBlock, "compaction", nativeCompactionTestUsage),
+	)
+	params, err := thread.messageParams(
+		thread.Config.Model, thread.Config.MaxTokens, "system", llmtypes.MessageOpt{NoToolUse: true},
+	)
+	require.NoError(t, err)
+	thread.AddUserMessage(t.Context(), "arrived during compaction")
+	before, err := json.Marshal(thread.messages)
+	require.NoError(t, err)
+
+	err = thread.compactContext(t.Context(), params)
+	require.ErrorIs(t, err, errCompactionHistoryChanged)
+	require.Len(t, requests, 2, "discovery and native compaction only, without a summary fallback")
+	after, err := json.Marshal(thread.messages)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(before), string(after))
+	assert.Nil(t, thread.GetCompactionHistory())
 }
 
 func TestNativeCompactionSummaryFallback(t *testing.T) {
