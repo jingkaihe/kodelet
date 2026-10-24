@@ -316,6 +316,24 @@ func TestNativeCompactionLifecycle(t *testing.T) {
 	assert.Len(t, resumed.GetCompactionHistory().Segments, 2)
 }
 
+func TestNativeCompactionManualOutsideRunSkipsAgentInit(t *testing.T) {
+	thread, requests := newNativeCompactionTestThread(t,
+		nativeCompactionTestCapabilities,
+		compactionTestStream(nativeCompactionTestBlock, "compaction", nativeCompactionTestUsage),
+	)
+	// The environment is attached but closed, as between runs.
+	thread.SetEnvironment(&nativeCompactionTestEnvironment{})
+	thread.SetMetadataValue("allowed_tools", []string{"test_tool"})
+
+	require.NoError(t, thread.CompactContext(t.Context()))
+	require.Len(t, requests, 2)
+	<-requests
+	compact := <-requests
+	assert.NotContains(t, string(compact.params["system"]), "Keep this system instruction.")
+	assert.Equal(t, []string{"test_tool"}, thread.GetMetadata()["allowed_tools"],
+		"agent.init state from the last run is not reset outside a run")
+}
+
 func TestNativeCompactionDeserializeStringContent(t *testing.T) {
 	raw := `[{"role":"assistant","content":[` + nativeCompactionTestBlock + `]},
 		{"role":"user","content":"continue"}]`

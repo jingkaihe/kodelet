@@ -30,9 +30,15 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	}
 	model := t.Config.Model
 	contexts := base.EnvironmentContexts(t)
-	systemPrompt, err := base.ProcessSystemPrompt(ctx, t, sysprompt.SystemPrompt(model, t.Config, contexts))
-	if err != nil {
-		return err
+	systemPrompt := sysprompt.SystemPrompt(model, t.Config, contexts)
+	// agent.init belongs to an active run. Between runs, dispatching it would run
+	// extension handlers and reset the last run's allowed-tool state.
+	if environment := base.EnvironmentForThread(t); environment != nil && environment.IsOpen() {
+		var err error
+		systemPrompt, err = base.ProcessSystemPrompt(ctx, t, systemPrompt)
+		if err != nil {
+			return err
+		}
 	}
 	params, err := t.messageParams(model, t.Config.MaxTokens, systemPrompt, llmtypes.MessageOpt{})
 	if err != nil {
