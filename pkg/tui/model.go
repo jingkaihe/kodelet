@@ -58,6 +58,14 @@ func Run(ctx context.Context, config Config) error {
 	finalModel, err := program.Run()
 	initialModel.cancel()
 	final, isModel := finalModel.(model)
+	if isModel && final.audio != nil {
+		// Helper close (about three seconds) and call cleanup (five) run concurrently.
+		final.audio.cancel()
+		select {
+		case <-final.audio.done:
+		case <-time.After(6 * time.Second):
+		}
+	}
 	if isModel && final.closeInitializedRunner != nil {
 		final.closeInitializedRunner()
 	}

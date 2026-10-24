@@ -119,6 +119,27 @@ type chatEntry struct {
 	title   string
 	content string
 	blocks  []assistantBlock
+
+	// Voice updates replace one utterance without sharing the coding reply.
+	realtimeID     string
+	realtimeAnchor int    // Server-owned coding-message position for this utterance.
+	realtimeSeq    uint64 // Arrival order of a live caption; zero when loaded from history.
+	codingSpan     *codingSpan
+}
+
+// codingSpan is the inclusive range of saved coding-message positions that one
+// entry renders. Consecutive saved assistant messages share one entry, as live
+// streaming does, so captions can still be positioned without splitting replies.
+type codingSpan struct{ first, last int }
+
+func extendCodingSpan(span *codingSpan, anchor *int) *codingSpan {
+	if anchor == nil {
+		return span
+	}
+	if span == nil {
+		return &codingSpan{first: *anchor, last: *anchor}
+	}
+	return &codingSpan{first: min(span.first, *anchor), last: max(span.last, *anchor)}
 }
 
 type historySearchState struct {
@@ -181,6 +202,7 @@ type conversationState struct {
 	resourcesLoading     bool
 	resourceReload       bool
 	discoveryID          uint64
+	realtimeCaptionSeq   uint64 // Counts live captions received for this conversation.
 	readinessStartedAt   time.Time
 	readyDuration        time.Duration
 
@@ -260,6 +282,7 @@ type transcriptElapsedClock struct {
 
 type model struct {
 	*conversationState
+	audio *tuiAudioSession
 
 	initialize             func(context.Context) (Config, error)
 	startupPending         bool
@@ -383,7 +406,9 @@ type conversationHistoryRefreshMsg struct {
 	runID   int
 	turn    int
 	attempt int
-	history initialHistoryMsg
+	// captionSeq is the last live caption received before the request.
+	captionSeq uint64
+	history    initialHistoryMsg
 }
 
 type initialHistoryMsg struct {

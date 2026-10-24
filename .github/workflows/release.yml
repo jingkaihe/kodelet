@@ -1,13 +1,101 @@
-name: Release
+name: Release and audio CI
 
 on:
+  pull_request:
+    branches: [main]
   push:
+    branches: [main]
     tags:
       - 'v*'
 
 jobs:
+  audio-targets:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: targets
+        name: Read release platforms from GoReleaser
+        run: |
+          ruby -ryaml -rjson -e '
+            config = YAML.load_file(".goreleaser.yaml")
+            build = config.fetch("builds").find { |entry| entry["id"] == "kodelet" }
+            matrix = build.slice("goos", "goarch")
+            puts "matrix=#{JSON.generate(matrix)}"
+          ' >> "$GITHUB_OUTPUT"
+
+  audio:
+    name: Test and build audio / ${{ matrix.goos }}-${{ matrix.goarch }}
+    needs: audio-targets
+    # Runner selection only; supported platforms come from GoReleaser.
+    runs-on: >-
+      ${{ matrix.goos == 'linux'
+          && (matrix.goarch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04')
+          || (matrix.goarch == 'arm64' && 'macos-15' || 'macos-15-intel') }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      matrix: ${{ fromJSON(needs.audio-targets.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup mise
+        uses: jdx/mise-action@v2
+        with:
+          install: false
+
+      - name: Install Linux audio dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake pkg-config libasound2-dev libopus-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+
+      - name: Install macOS audio dependencies
+        if: runner.os == 'macOS'
+        run: brew install cmake pkgconf opus gstreamer
+
+      - name: Setup Rust toolchain
+        run: |
+          rust_version="$(mise tasks info audio-build --json | jq -r '.tools.rust')"
+          mise use --global "rust@$rust_version"
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: audio -> target
+
+      - name: Lint audio helper
+        run: mise run audio-lint
+
+      - name: Test audio without devices or providers
+        run: mise run audio-test
+
+      - name: Build audio binary
+        env:
+          AUDIO_TARGET: ${{ matrix.goos }}-${{ matrix.goarch }}
+        run: |
+          mise run audio-build
+          bin/kodelet-audio --version
+          mv bin/kodelet-audio "bin/kodelet-audio-$AUDIO_TARGET"
+
+      - name: Upload audio binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: kodelet-audio-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: bin/kodelet-audio-${{ matrix.goos }}-${{ matrix.goarch }}
+          if-no-files-found: error
+
   release:
     name: Create Release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: audio
     runs-on: kodelet-runner
     permissions:
       contents: write
@@ -25,6 +113,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Download native audio binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: kodelet-audio-*
+          path: .build/audio
+          merge-multiple: true
+
       - name: Create GitHub Release
         run: mise run github-release
         env:
@@ -32,6 +127,7 @@ jobs:
 
   npm-release:
     name: Publish TypeScript SDK to npm
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: read

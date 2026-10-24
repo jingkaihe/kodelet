@@ -110,6 +110,14 @@ type configuredChatRunner struct {
 	environmentProfile string
 }
 
+// LoadConversation supplies the TUI with the Web UI's display transcript.
+func (r *configuredChatRunner) LoadConversation(
+	ctx context.Context,
+	conversationID string,
+) (chatpkg.ConversationHistory, error) {
+	return r.LoadConversationTranscript(ctx, conversationID)
+}
+
 func (r *configuredChatRunner) discoveryTarget(ctx context.Context, target chatpkg.WorkspaceTarget) (chatpkg.WorkspaceTarget, error) {
 	target.Options = r.options.Restrictions()
 	if target.ConversationID == "" {
@@ -194,46 +202,98 @@ func (r *configuredChatRunner) AppendMessageHistory(ctx context.Context, target 
 	return r.Client.AppendMessageHistory(ctx, target, entry)
 }
 
-func (r *configuredChatRunner) Run(ctx context.Context, request chatpkg.ChatRequest, sink chatpkg.ChatEventSink) (string, error) {
+func (r *configuredChatRunner) executionOptions(
+	selected *llmtypes.ExecutionOptions,
+) *llmtypes.ExecutionOptions {
 	// The TUI only sends the model it selected; every other option comes from the CLI.
 	options := r.options.Clone()
-	if request.Options != nil && request.Options.Model != nil {
+	if selected != nil && selected.Model != nil {
 		if options == nil {
 			options = &llmtypes.ExecutionOptions{}
 		}
-		options.Model = new(*request.Options.Model)
+		options.Model = new(*selected.Model)
 	}
-	request.Options = options
+	return options
+}
+
+// StartRealtime keeps voice delegates subject to the same CLI options and saved
+// affinity as typed turns, including when voice creates the conversation.
+func (r *configuredChatRunner) StartRealtime(
+	ctx context.Context,
+	offer string,
+	request chatpkg.ChatRequest,
+	voice string,
+) (chatpkg.RealtimeSession, error) {
+	request.ConversationID = strings.TrimSpace(request.ConversationID)
+	if request.ConversationID == "" {
+		return chatpkg.RealtimeSession{}, errors.New("conversation ID is required")
+	}
+	request, err := r.prepareRequest(ctx, request)
+	if err != nil {
+		return chatpkg.RealtimeSession{}, err
+	}
+	session, err := r.Client.StartRealtime(ctx, offer, request, voice)
+	// Report the resolved workspace even on failure: the server may already
+	// have saved a voice-first conversation with it.
+	session.CWD = request.CWD
+	return session, err
+}
+
+func (r *configuredChatRunner) Run(
+	ctx context.Context,
+	request chatpkg.ChatRequest,
+	sink chatpkg.ChatEventSink,
+) (string, error) {
+	request, err := r.prepareRequest(ctx, request)
+	if err != nil {
+		return request.ConversationID, err
+	}
+	id, err := r.Client.Run(ctx, request, sink)
+	if err != nil {
+		return id, errors.Wrapf(
+			err,
+			"chat failed or the connection was interrupted; before sending the message "+
+				"again, check 'kodelet conversation turn %s %s'",
+			request.ConversationID,
+			request.TurnID,
+		)
+	}
+	return id, nil
+}
+
+func (r *configuredChatRunner) prepareRequest(
+	ctx context.Context,
+	request chatpkg.ChatRequest,
+) (chatpkg.ChatRequest, error) {
+	request.Options = r.executionOptions(request.Options)
 	var history chatpkg.ConversationHistory
 	var err error
 	if request.ConversationID != "" {
-		history, err = r.LoadConversation(ctx, request.ConversationID)
+		// Affinity uses the strict history endpoint. The display transcript omits
+		// runners whose lookup fails, which must not look like a missing runner.
+		history, err = r.Client.LoadConversation(ctx, request.ConversationID)
 		var responseErr *chatpkg.ControlPlaneHTTPError
 		if err != nil && (!errors.As(err, &responseErr) || responseErr.StatusCode != http.StatusNotFound) {
-			return request.ConversationID, err
+			return request, err
 		}
 	}
 	if history.ID != "" {
 		if err := validateDaemonChatAffinity(history, request, r.explicitRunnerID); err != nil {
-			return request.ConversationID, err
+			return request, err
 		}
 		request.RunnerID, request.CWD, request.EnvironmentProfile = history.RunnerID, history.CWD, history.EnvironmentProfile
 	} else {
 		target, err := r.discoveryTarget(ctx, chatpkg.WorkspaceTarget{CWD: request.CWD, Profile: request.Profile, EnvironmentProfile: request.EnvironmentProfile})
 		if err != nil {
-			return request.ConversationID, err
+			return request, err
 		}
 		discovery, err := r.Client.DiscoverWorkspace(ctx, target)
 		if err != nil {
-			return request.ConversationID, err
+			return request, err
 		}
 		request.RunnerID, request.CWD, request.EnvironmentProfile = target.RunnerID, discovery.CWD, discovery.EnvironmentProfile
 	}
-	id, err := r.Client.Run(ctx, request, sink)
-	if err != nil {
-		return id, errors.Wrapf(err, "chat failed or the connection was interrupted; before sending the message again, check 'kodelet conversation turn %s %s'", request.ConversationID, request.TurnID)
-	}
-	return id, nil
+	return request, nil
 }
 
 func validateDaemonChatAffinity(history chatpkg.ConversationHistory, request chatpkg.ChatRequest, explicitRunnerID string) error {

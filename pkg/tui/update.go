@@ -21,7 +21,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
-	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
 
@@ -67,6 +66,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.stopWelcomeSpin()
 	}
 	_, extensionSurfaceFocused := m.focusedExtensionSurfaceKey()
+	if cmd, handled := m.handleAudioInput(msg); handled {
+		return m, cmd
+	}
 	if key, ok := msg.(tea.KeyPressMsg); ok && m.activeUIPrompt == nil && m.conversationPicker == nil && !m.modelPickerOpen && !m.infoDialogOpen() && m.historySearch == nil && !extensionSurfaceFocused && isTextareaNewlineKey(key.String()) {
 		return m, m.insertTextareaNewline()
 	}
@@ -74,6 +76,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case tuiAudioMsg:
+		cmd := m.updateAudio(msg)
+		return m, tea.Batch(cmd, waitForMsg(m.runCh))
+	case tuiAudioTick:
+		if m.audio == msg.session {
+			return m, audioTick(msg.session)
+		}
+		return m, nil
 	case initializedMsg:
 		if !m.startupPending || m.ctx.Err() != nil {
 			if msg.closeRunner != nil {
@@ -416,7 +426,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if state == nil || state.streamRunID != msg.runID || state.streamTurn != msg.turn || (state.running && (!state.streamTurnUncertain || state.streamConnectedActive)) {
 			return m, nil
 		}
-		return m, refreshConversationHistoryFromSourceAttempt(m.ctx, state.key, state.conversationID, msg.runID, msg.turn, msg.attempt, m.conversationSource)
+		return m, refreshConversationHistoryFromSourceAttempt(
+			m.ctx,
+			state.key,
+			state.conversationID,
+			msg.runID,
+			msg.turn,
+			msg.attempt,
+			state.realtimeCaptionSeq,
+			m.conversationSource,
+		)
 
 	case conversationStreamReconnectMsg:
 		state := m.stateForKey(msg.conversationKey)
@@ -475,7 +494,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "ready"
 		}
 		m.clearActiveAssistantEntry()
-		m.entries = history.entries
+		m.entries = mergeAudioTranscript(history.entries, m.entries, msg.captionSeq)
 		m.usage = history.usage
 		if parentID := strings.TrimSpace(history.parentConversationID); parentID != "" {
 			m.parentConversationID = parentID
@@ -1693,7 +1712,16 @@ func (m *model) finishObservedConversationRun(state *conversationState, runID in
 		return tea.Batch(promptFocusCmd, m.startConversationRunPreservingComposer(state, queuedFollowUp)), false
 	}
 	if event.Kind == "done" || event.Kind == "error" {
-		return tea.Batch(promptFocusCmd, refreshConversationHistoryFromSource(m.ctx, state.key, state.conversationID, runID, turn, m.conversationSource)), false
+		refresh := refreshConversationHistoryFromSource(
+			m.ctx,
+			state.key,
+			state.conversationID,
+			runID,
+			turn,
+			state.realtimeCaptionSeq,
+			m.conversationSource,
+		)
+		return tea.Batch(promptFocusCmd, refresh), false
 	}
 	return promptFocusCmd, false
 }
@@ -1708,7 +1736,8 @@ func (m *model) resize() {
 	settingsPickerHeight := m.reasoningPickerHeight() + m.modelPickerHeight()
 	extensionWidgetHeight := m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer) + m.extensionWidgetsHeight(extensions.UIWidgetPlacementBelowComposer)
 	footerHeight := 0
-	viewportHeight := m.height - inputOuterHeight - historySearchHeight - slashCommandHeight - settingsPickerHeight - extensionWidgetHeight - footerHeight
+	viewportHeight := m.height - inputOuterHeight - historySearchHeight - slashCommandHeight -
+		settingsPickerHeight - extensionWidgetHeight - footerHeight - m.audioHeight()
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}
@@ -1878,24 +1907,8 @@ func (m *model) startConversationRunWithComposer(state *conversationState, messa
 	uiDone := m.ctx.Done()
 	uiBroker := newTUIUIBrokerForConversation(runCh, runID, conversationKey)
 	runCtx = extensions.ContextWithUIInputBroker(runCtx, uiBroker)
-	req := chat.ChatRequest{
-		Message:        message,
-		ConversationID: conversationID,
-		TurnID:         turnID,
-		Profile:        profileForRequest(state.profile),
-		CWD:            state.requestedCWD,
-	}
-	if !state.conversationWasResumed {
-		// The ID is allocated before the first request. Keep resending the frozen
-		// draft model on retries and follow-ups so a CLI --model cannot replace it.
-		if selected := strings.TrimSpace(state.selectedModel); selected != "" {
-			req.Options = &llmtypes.ExecutionOptions{Model: &selected}
-		}
-		req.ReasoningEffort = state.reasoningEffort
-		if m.remote {
-			req.EnvironmentProfile = m.environmentProfile
-		}
-	}
+	req := m.conversationRequest(state)
+	req.Message, req.TurnID = message, turnID
 
 	return func() tea.Msg {
 		if persistMessageHistory != nil {

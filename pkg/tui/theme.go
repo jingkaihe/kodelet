@@ -138,6 +138,17 @@ func tuiBuiltInSlashCommands() []slashcommands.Command {
 			Description: "Show Kodelet client and server version details",
 			Placeholder: "/about",
 		},
+		{
+			Name:        "voice",
+			Description: "Dictate into draft",
+			Placeholder: "/voice",
+		},
+		{
+			Name:        "talk",
+			Description: "Start a voice call",
+			Hint:        "stop|mute (optional)",
+			Placeholder: "/talk [stop|mute]",
+		},
 	}
 }
 
@@ -155,6 +166,8 @@ func (m *model) handleLocalSlashCommand(message string) (tea.Cmd, bool) {
 	}
 
 	switch command {
+	case "voice", "talk":
+		return m.handleAudioCommand(command, args), true
 	case "model":
 		m.textarea.Reset()
 		m.dismissSlashCommandSuggestions()

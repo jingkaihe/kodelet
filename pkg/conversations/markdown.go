@@ -15,6 +15,10 @@ import (
 
 // StreamableMessage represents a normalized entry from a persisted conversation.
 type StreamableMessage struct {
+	// Display identities and coding-message positions from the Web transcript.
+	ID     string `json:"id,omitempty"`
+	Anchor *int   `json:"anchor,omitempty"`
+
 	ResourceReloadID string                     `json:"resourceReloadId,omitempty"`
 	Compaction       *llmtypes.CompactionMarker `json:"compaction,omitempty"`
 	Kind             string                     `json:"kind"`                 // "text", "tool-use", "tool-result", "thinking"

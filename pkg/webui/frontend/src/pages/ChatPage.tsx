@@ -230,15 +230,21 @@ const ChatPage: React.FC = () => {
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const pendingCaret = useRef<number | null>(null);
   const dictationOwner = useRef('');
-  const realtimeCaptions = useRef(new Map<string, RealtimeEvent>());
+  // Live captions by ID, with the order in which they arrived.
+  const realtimeCaptions = useRef(new Map<string, { event: RealtimeEvent; seq: number }>());
+  const realtimeCaptionSeq = useRef(0);
   const conversationRunVersion = useRef(0);
   const realtimeTurn = useRef<{ conversationId: string; turnId?: string } | null>(null);
-  const projectConversation = useCallback((saved: Conversation) => {
+  // The server saves each caption before streaming it, so a GET requested after
+  // a caption arrived has that text or newer. Reapply only this target's captions
+  // received after the request (captionSeq), which may have raced it; the saved
+  // history replaces the rest, and persistence and ordering stay server-owned.
+  const projectConversation = useCallback((saved: Conversation, captionSeq: number) => {
     let projected = conversationToChatMessages(saved);
-    // A GET can race a newer caption on the live stream. Reapply only this
-    // target's stable-ID updates; persistence and history ordering stay server-owned.
-    for (const event of realtimeCaptions.current.values()) {
-      if (event.conversationId === saved.id) projected = applyRealtimeTranscript(projected, event);
+    for (const { event, seq } of realtimeCaptions.current.values()) {
+      if (seq > captionSeq && event.conversationId === saved.id) {
+        projected = applyRealtimeTranscript(projected, event);
+      }
     }
     return projected;
   }, []);
@@ -362,6 +368,7 @@ const ChatPage: React.FC = () => {
   const reconcileCompletedConversation = useCallback(
     async (id: string, isCurrent: () => boolean) => {
       try {
+        const captionSeq = realtimeCaptionSeq.current;
         const data = await apiService.getConversation(id);
         if (!isCurrent()) return;
         if (data.isRunning) {
@@ -372,7 +379,7 @@ const ChatPage: React.FC = () => {
         }
         const normalized = normalizeConversation(data);
         setConversation(normalized);
-        setMessages(projectConversation(normalized));
+        setMessages(projectConversation(normalized, captionSeq));
         setConversationRunning(id, Boolean(normalized.isRunning));
         void refreshConversations();
       } catch (error) {
@@ -764,13 +771,14 @@ const ChatPage: React.FC = () => {
     setConversationLoading(true);
     setConversationError(null);
 
+    const captionSeq = realtimeCaptionSeq.current;
     void apiService
       .getConversation(conversationId)
       .then((data) => {
         const normalizedConversation = normalizeConversation(data);
         setActiveConversationId(normalizedConversation.id);
         setConversation(normalizedConversation);
-        setMessages(projectConversation(normalizedConversation));
+        setMessages(projectConversation(normalizedConversation, captionSeq));
       })
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : 'Failed to load conversation';
@@ -1631,12 +1639,13 @@ const ChatPage: React.FC = () => {
       ) {
         conversationPathOverrideRef.current = null;
         try {
+          const captionSeq = realtimeCaptionSeq.current;
           const latestConversation = normalizeConversation(
             await apiService.getConversation(streamedConversationId)
           );
           if (viewedConversationIdRef.current === streamedConversationId) {
             setConversation(latestConversation);
-            setMessages(projectConversation(latestConversation));
+            setMessages(projectConversation(latestConversation, captionSeq));
           }
         } catch {
           // The streamed conversation is already authoritative enough to continue. A later
@@ -1912,6 +1921,7 @@ const ChatPage: React.FC = () => {
     isCaptureBusy: dictation.isBusy,
     onStarted: async (id, signal) => {
       if (conversationId) return;
+      const captionSeq = realtimeCaptionSeq.current;
       const saved = normalizeConversation(await apiService.getConversation(id, signal));
       if (signal.aborted) return;
       if (draftWorkspaceRef.current?.conversationId === id) {
@@ -1919,7 +1929,7 @@ const ChatPage: React.FC = () => {
       }
       setActiveConversationId(id);
       setConversation(saved);
-      setMessages(projectConversation(saved));
+      setMessages(projectConversation(saved, captionSeq));
       setConversationError(null);
       setConversations((current) => upsertConversationSummary(current, saved));
       updatePathForStartedConversation(id);
@@ -1928,14 +1938,18 @@ const ChatPage: React.FC = () => {
       const viewedId = viewedConversationIdRef.current;
       if (event.conversationId && event.conversationId !== viewedId) return;
       if (event.kind === 'transcript') {
-        if (event.id)
+        if (event.id) {
+          const previous = realtimeCaptions.current.get(event.id);
+          realtimeCaptionSeq.current += 1;
           realtimeCaptions.current.set(event.id, {
-            ...event,
-            anchor: realtimeCaptions.current.has(event.id)
-              ? realtimeCaptions.current.get(event.id)?.anchor
-              : event.anchor,
-            conversationId: viewedId || undefined,
+            event: {
+              ...event,
+              anchor: previous ? previous.event.anchor : event.anchor,
+              conversationId: viewedId || undefined,
+            },
+            seq: realtimeCaptionSeq.current,
           });
+        }
         setMessages((current) => applyRealtimeTranscript(current, event));
       } else if (event.kind === 'agent-started' && event.conversationId) {
         if (

@@ -1,5 +1,17 @@
 # Kodelet
 
+## 0.8.11-beta
+
+Added TUI microphone dictation through `/voice` or `Ctrl+Alt+V`, with a microphone meter and transcription previews after 2.5 seconds of silence. Enter inserts the result at the original cursor without sending a message; Esc leaves the draft unchanged. Partial transcripts require explicit acceptance when recording limits or upload failures prevent a complete result.
+
+Added TUI live voice conversations through `/talk` or `Ctrl+Alt+R`, with spoken replies and saved captions alongside agent output. Spoken requests can start or steer work using the conversation's profile and workspace. Use `/talk mute` or `Ctrl+Alt+M` to toggle the microphone, and `/talk stop` or `Ctrl+Alt+R` to end the call.
+
+Added native `kodelet-audio` companion builds and CI checks for Linux and macOS on amd64 and arm64, with release binaries and SHA-256 checksums published through GitHub Actions and GoReleaser. TUI audio requires this optional helper on `PATH`, system Opus and GStreamer libraries, and the existing transcription or realtime configuration. See [audio helper setup and platform requirements](audio/README.md).
+
+Fixed stale live captions overriding newer saved transcripts in the Web UI while preserving captions that arrive during a history refresh.
+
+Updated the TypeScript SDK's transitive `ip-address` dependency to 10.7.4.
+
 ## 0.8.10-beta
 
 Fixed frontend dependency audit vulnerabilities by updating Vitest and its UI and coverage packages to 4.1.12 and refreshing transitive dependencies.

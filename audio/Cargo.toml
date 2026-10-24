@@ -1,0 +1,27 @@
+[package]
+name = "kodelet-audio"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "MIT"
+
+[dependencies]
+# Unify the binding's dynamic feature; its macOS default is otherwise static.
+audiopus_sys = { version = "=0.2.2", features = ["dynamic"] }
+cpal = "=0.16.0"
+crossbeam-queue = "0.3"
+gstreamer = { version = "0.24", features = ["v1_20"] }
+gstreamer-app = { version = "0.24", features = ["v1_20"] }
+opus = "=0.3.1"
+rubato = "=0.16.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sonora = { version = "=0.2.0", default-features = false }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+webrtc = "=0.17.2"
+# Keep consent checks independent of media traffic (avoids 30-second call drops).
+webrtc-ice = "=0.17.2"
+
+[profile.release]
+strip = true
+lto = "thin"

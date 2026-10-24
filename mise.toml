@@ -56,6 +56,61 @@ description = "Generate embedded runtime and frontend assets"
 depends = ["codemode-generation"]
 run = ["go generate ./pkg/webui"]
 
+# Native audio builds separately; GitHub Actions supplies the release artifacts.
+[tasks.audio-build]
+description = "Build the local audio helper (requires native audio libraries)"
+tools = { rust = "1.99.1" }
+run = '''
+set -eu
+case "$(uname -s)/$(uname -m)" in
+  Darwin/arm64|Darwin/x86_64|Linux/aarch64|Linux/x86_64) ;;
+  *) echo "kodelet-audio supports native macOS/Linux builds on amd64/arm64 only" >&2; exit 1 ;;
+esac
+if ! command -v pkg-config >/dev/null || ! pkg-config --atleast-version=1.20 gstreamer-app-1.0; then
+  echo "Install pkg-config and GStreamer development libraries first; see audio/README.md" >&2
+  exit 1
+fi
+CARGO_TARGET_DIR="$PWD/audio/target" cargo build --manifest-path audio/Cargo.toml --locked --release
+mkdir -p bin
+install -m 755 audio/target/release/kodelet-audio bin/kodelet-audio
+'''
+
+[tasks.audio-install]
+description = "Build the audio helper into ./bin and install it into ~/.local/bin"
+depends = ["audio-build"]
+run = '''
+set -eu
+destination="$HOME/.local/bin"
+mkdir -p "$destination"
+staged=$(mktemp "$destination/.kodelet-audio.XXXXXX")
+trap 'rm -f "$staged"' EXIT
+install -m 755 bin/kodelet-audio "$staged"
+if [ "$(uname -s)" = Darwin ]; then
+  codesign --force --sign - --identifier com.kodelet.audio "$staged"
+  codesign --verify --strict "$staged"
+fi
+mv -f "$staged" "$destination/kodelet-audio"
+echo "Installed audio helper: $destination/kodelet-audio"
+case ":$PATH:" in
+  *":$destination:"*) ;;
+  *) echo "Add $destination to PATH so Kodelet can find kodelet-audio" >&2 ;;
+esac
+'''
+
+[tasks.audio-test]
+description = "Test the native audio helper without opening microphones or contacting providers"
+tools = { rust = "1.99.1" }
+run = 'cargo test --manifest-path audio/Cargo.toml --locked'
+
+[tasks.audio-lint]
+description = "Check Rust formatting and lint the audio helper"
+tools = { rust = "1.99.1" }
+run = [
+  "rustup component add rustfmt clippy",
+  "cargo fmt --manifest-path audio/Cargo.toml --check",
+  "cargo clippy --manifest-path audio/Cargo.toml --locked --all-targets -- -D warnings",
+]
+
 [tasks.codemode-generation]
 description = "Generate the embedded QuickJS runtime from its locked npm dependency"
 run = ["go generate ./pkg/codemode"]

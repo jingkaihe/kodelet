@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.kodelet.audio</string>
+    <key>CFBundleName</key>
+    <string>Kodelet audio</string>
+    <key>CFBundleVersion</key>
+    <string>0.1.0</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Kodelet uses the microphone for dictation and realtime voice conversations.</string>
+</dict>
+</plist>

@@ -800,7 +800,11 @@ func TestRealtimeSessionFailuresAndCancellation(t *testing.T) {
 			case "cancel":
 				f.cancel()
 			case "large frame":
-				f.send(t, strings.Repeat("x", realtimeMaxFrame+1))
+				// The client may reset the socket before the oversized write completes.
+				_ = f.socket.WriteMessage(
+					websocket.TextMessage,
+					[]byte(strings.Repeat("x", realtimeMaxFrame+1)),
+				)
 			case "invalid handoff":
 				f.send(t, `{"type":"response.function_call_arguments.done","name":"delegate_to_agent","call_id":"h1","arguments":"{}"}`)
 			case "provider error":

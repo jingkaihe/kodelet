@@ -190,6 +190,9 @@ func (m model) View() tea.View {
 		if widgetsAbove != "" {
 			parts = append(parts, widgetsAbove)
 		}
+		if audio := m.renderAudio(); audio != "" {
+			parts = append(parts, audio)
+		}
 		parts = append(parts, input)
 		if widgetsBelow != "" {
 			parts = append(parts, widgetsBelow)
@@ -298,6 +301,11 @@ func (m model) renderShortcutsDialog() string {
 		{shortcut: "Ctrl+C", description: ctrlCDescription},
 	}
 	overridden := make(map[string]struct{}, len(m.extensionShortcuts))
+	baseRows = append(baseRows,
+		shortcutHelpRow{shortcut: "Ctrl+Alt+V", description: "Dictate into draft"},
+		shortcutHelpRow{shortcut: "Ctrl+Alt+R", description: "Start/end voice call"},
+		shortcutHelpRow{shortcut: "Ctrl+Alt+M", description: "Mute/unmute voice call"},
+	)
 	for _, shortcut := range m.extensionShortcuts {
 		overridden[shortcut.Key] = struct{}{}
 	}

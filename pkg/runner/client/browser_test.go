@@ -225,7 +225,9 @@ func TestWorkspaceDraftLeaseExpiryAndOwnerHeartbeat(t *testing.T) {
 }
 
 func TestBrowserRunnerLifecycleAndRelaySurviveRequestCompletion(t *testing.T) {
-	workspace := t.TempDir()
+	// The service reports canonical paths; macOS temp directories are symlinks.
+	workspace, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
 	scope := browser.Scope{ConversationID: "conversation", CWD: workspace}
 	remote := make(chan *websocket.Conn, 1)
 	relayDone := make(chan struct{})
@@ -359,7 +361,8 @@ func TestBrowserRunnerDispatchAndValidation(t *testing.T) {
 func TestBrowserRunnerToolAndUIShareOnlyConversationSessionAcrossRuns(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
-	workspace := t.TempDir()
+	workspace, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
 	service := newRegisteredTestService(t, workspace, ServiceOptions{
 		Browser: browser.Config{Executable: fakeBrowserExecutable(t)},
 		ConfigLoader: func(string) (llmtypes.Config, error) {

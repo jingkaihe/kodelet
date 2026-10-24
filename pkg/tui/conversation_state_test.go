@@ -699,11 +699,14 @@ func TestConversationHistoryRefreshAttemptHasDeadline(t *testing.T) {
 		1,
 		1,
 		0,
+		7,
 		runner,
 	)().(conversationHistoryRefreshMsg)
 
 	require.True(t, ok)
 	assert.True(t, msg.history.loaded)
+	assert.Equal(t, uint64(7), msg.captionSeq,
+		"the refresh supersedes captions received before it")
 	assert.WithinDuration(t, startedAt.Add(conversationHistoryRefreshTimeout), deadline, time.Second)
 }
 
