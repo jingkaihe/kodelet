@@ -30,6 +30,5 @@ Use `mise` tasks. For code changes, run the relevant lint and tests:
 
 ## Read as needed
 
-- [Development reference](skills/kodelet/references/development.md): code layout, build tasks, architecture, and opt-in tests.
 - [Kodelet skill](skills/kodelet/SKILL.md): CLI usage, configuration, recipes, skills, extensions, and SDK references.
 - [Manual](docs/MANUAL.md): full user-facing documentation.
