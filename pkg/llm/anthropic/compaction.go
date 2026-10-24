@@ -124,10 +124,7 @@ func (t *Thread) compactContextNative(ctx context.Context, params anthropic.Mess
 	var message anthropic.BetaMessage
 	defer func() {
 		// A disconnected stream can still report billable usage before it ends.
-		total, usageErr := t.recordCompactionUsage(message, model)
-		if err == nil {
-			err = usageErr
-		}
+		total := t.recordCompactionUsage(ctx, message, model)
 		span.SetAttributes(
 			attribute.String("gen_ai.response.id", message.ID),
 			attribute.String("gen_ai.response.model", message.Model),
@@ -204,28 +201,34 @@ func (t *Thread) compactContextNative(ctx context.Context, params anthropic.Mess
 
 // Top-level usage excludes compaction iterations. Count those in addition to the
 // ordinary usage, but never use compaction billing tokens as the new context size.
+// Usage is recorded after the context swap, so an undecodable record is logged and
+// skipped rather than turning an installed compaction into a failed one.
 func (t *Thread) recordCompactionUsage(
+	ctx context.Context,
 	message anthropic.BetaMessage,
 	model anthropic.Model,
-) (anthropic.Usage, error) {
+) anthropic.Usage {
 	var total anthropic.Usage
 	if message.RawJSON() == "" {
-		return total, nil
+		return total
 	}
+	var usageRecords []anthropic.Usage
 	var response struct {
 		Usage anthropic.Usage `json:"usage"`
 	}
 	if err := json.Unmarshal([]byte(message.RawJSON()), &response); err != nil {
-		return total, errors.Wrap(err, "failed to decode compaction response usage")
+		logger.G(ctx).WithError(err).Warn("failed to decode Anthropic compaction response usage")
+	} else {
+		usageRecords = append(usageRecords, response.Usage)
 	}
-	usageRecords := []anthropic.Usage{response.Usage}
 	for _, iteration := range message.Usage.Iterations {
 		if iteration.Type != "compaction" {
 			continue
 		}
 		var usage anthropic.Usage
 		if err := json.Unmarshal([]byte(iteration.RawJSON()), &usage); err != nil {
-			return total, errors.Wrap(err, "failed to decode compaction iteration usage")
+			logger.G(ctx).WithError(err).Warn("failed to decode Anthropic compaction iteration usage")
+			continue
 		}
 		usageRecords = append(usageRecords, usage)
 	}
@@ -236,7 +239,7 @@ func (t *Thread) recordCompactionUsage(
 		total.CacheReadInputTokens += usage.CacheReadInputTokens
 		total.CacheCreationInputTokens += usage.CacheCreationInputTokens
 	}
-	return total, nil
+	return total
 }
 
 // The stable SDK does not model compaction. Keep the signed block opaque instead
