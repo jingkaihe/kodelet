@@ -42,6 +42,8 @@ type Thread struct {
 	messages        []anthropic.MessageParam
 	useSubscription bool // Whether using Anthropic subscription vs API key
 	useCopilot      bool // Whether using GitHub Copilot Anthropic-compatible API
+
+	compactionSupport nativeCompactionSupport // Per-model native compaction capability
 }
 
 // Provider returns the provider name for this thread

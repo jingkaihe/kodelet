@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -45,25 +47,82 @@ func (t *Thread) compactContext(ctx context.Context, params anthropic.MessageNew
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !t.useCopilot {
-		model, err := t.client.Beta.Models.Get(ctx, params.Model, anthropic.BetaModelGetParams{
-			Betas: []anthropic.AnthropicBeta{anthropic.AnthropicBetaCompact2026_09_04},
-		}, option.WithMaxRetries(t.Config.Retry.Attempts))
-		if err == nil &&
-			model.Capabilities.Compaction.Supported &&
-			model.Capabilities.Compaction.Summarize.Supported {
-			return t.compactContextNativeWithFallback(ctx, params)
+	supported, err := t.supportsNativeCompaction(ctx, params.Model)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
-		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			logger.G(ctx).WithError(err).Warn(
-				"Anthropic native compaction unavailable, falling back to summary compaction",
-			)
-		}
+		logger.G(ctx).WithError(err).Warn(
+			"Anthropic native compaction unavailable, falling back to summary compaction",
+		)
+	}
+	if supported {
+		return t.compactContextNativeWithFallback(ctx, params)
 	}
 	return base.CompactContextWithSummary(ctx, t.runUtilityPrompt, t.SwapContext)
+}
+
+// nativeCompactionSupport caches capability answers per model for the thread's
+// lifetime. The zero value is ready to use.
+type nativeCompactionSupport struct {
+	mu     sync.Mutex
+	models map[anthropic.Model]bool
+}
+
+func (c *nativeCompactionSupport) lookup(model anthropic.Model) (supported, ok bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	supported, ok = c.models[model]
+	return supported, ok
+}
+
+func (c *nativeCompactionSupport) store(model anthropic.Model, supported bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.models == nil {
+		c.models = make(map[anthropic.Model]bool)
+	}
+	c.models[model] = supported
+}
+
+// supportsNativeCompaction reports whether model advertises summarize compaction.
+// Answers, including an endpoint that rejects discovery outright, are cached;
+// transient discovery failures are retried by the next compaction.
+func (t *Thread) supportsNativeCompaction(ctx context.Context, model anthropic.Model) (bool, error) {
+	if t.useCopilot {
+		return false, nil
+	}
+	if supported, ok := t.compactionSupport.lookup(model); ok {
+		return supported, nil
+	}
+	info, err := t.client.Beta.Models.Get(ctx, model, anthropic.BetaModelGetParams{
+		Betas: []anthropic.AnthropicBeta{anthropic.AnthropicBetaCompact2026_09_04},
+	}, option.WithMaxRetries(t.Config.Retry.Attempts))
+	if err != nil {
+		var apiErr *anthropic.Error
+		if errors.As(err, &apiErr) && isDefinitiveDiscoveryFailure(apiErr.StatusCode) {
+			t.compactionSupport.store(model, false)
+		}
+		return false, err
+	}
+	supported := info.Capabilities.Compaction.Supported &&
+		info.Capabilities.Compaction.Summarize.Supported
+	t.compactionSupport.store(model, supported)
+	return supported, nil
+}
+
+// An endpoint that rejects discovery will keep doing so for the session, unlike
+// throttling, timeouts, credential refreshes, and server errors.
+func isDefinitiveDiscoveryFailure(statusCode int) bool {
+	switch statusCode {
+	case http.StatusBadRequest,
+		http.StatusForbidden,
+		http.StatusNotFound,
+		http.StatusMethodNotAllowed,
+		http.StatusUnprocessableEntity:
+		return true
+	}
+	return false
 }
 
 // A failed native compaction (including the documented null-content block) falls

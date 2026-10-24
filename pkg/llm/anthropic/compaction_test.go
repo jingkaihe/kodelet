@@ -448,6 +448,53 @@ func TestAutoCompactionFailureContinuesTurn(t *testing.T) {
 	assert.Nil(t, thread.GetCompactionHistory())
 }
 
+func TestNativeCompactionCapabilityCached(t *testing.T) {
+	summary := compactionTestStream(
+		`{"type":"text","text":"fallback summary"}`, "end_turn", `{"input_tokens":15,"output_tokens":3}`,
+	)
+	native := compactionTestStream(nativeCompactionTestBlock, "compaction", nativeCompactionTestUsage)
+	for _, tc := range []struct {
+		name    string
+		replies []string
+		paths   []string
+	}{
+		{
+			name:    "supported",
+			replies: []string{nativeCompactionTestCapabilities, native, native},
+			paths:   []string{"/v1/models/claude-sonnet-4-6", "/v1/messages", "/v1/messages"},
+		},
+		{
+			name:    "discovery not found",
+			replies: []string{"", summary, summary},
+			paths:   []string{"/v1/models/claude-sonnet-4-6", "/v1/messages", "/v1/messages"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			thread, requests := newNativeCompactionTestThread(t, tc.replies...)
+			require.NoError(t, thread.CompactContext(t.Context()))
+			thread.AddUserMessage(t.Context(), "more work")
+			require.NoError(t, thread.CompactContext(t.Context()))
+			require.Len(t, requests, len(tc.paths))
+			for _, path := range tc.paths {
+				assert.Equal(t, path, (<-requests).path)
+			}
+			assert.Len(t, thread.GetCompactionHistory().Segments, 2)
+		})
+	}
+}
+
+func TestNativeCompactionDiscoveryFailureCaching(t *testing.T) {
+	for status, cached := range map[int]bool{
+		http.StatusNotFound:            true,
+		http.StatusBadRequest:          true,
+		http.StatusTooManyRequests:     false,
+		http.StatusUnauthorized:        false,
+		http.StatusInternalServerError: false,
+	} {
+		assert.Equal(t, cached, isDefinitiveDiscoveryFailure(status), "status %d", status)
+	}
+}
+
 func TestNativeCompactionSummaryFallback(t *testing.T) {
 	for _, mode := range []string{
 		"unsupported capability", "unsupported summarize", "discovery failure", "copilot",
