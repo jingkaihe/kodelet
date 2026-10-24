@@ -401,13 +401,6 @@ OUTER:
 				return "", errors.Wrap(err, "failed to dispatch turn start")
 			}
 
-			// Check if auto-compact should be triggered before each exchange
-			previousMarkerID := t.CompactionMarkerID()
-			t.TryAutoCompact(ctx, t.CompactRatioOrDefault(opt.CompactRatio), t.CompactContext)
-			if !opt.NoSaveConversation {
-				t.PublishCompaction(ctx, t, handler, previousMarkerID, false)
-			}
-
 			// Regenerate the system prompt from the current environment snapshot.
 			contexts := base.EnvironmentContexts(t)
 			systemPrompt, err := base.ProcessSystemPrompt(ctx, t, sysprompt.SystemPrompt(model, t.Config, contexts))
@@ -619,18 +612,14 @@ func (t *Thread) executeToolsParallel(
 	return results, nil
 }
 
-// processMessageExchange handles a single message exchange with the LLM, including
-// preparing message parameters, making the API call, and processing the response
-func (t *Thread) processMessageExchange(
-	ctx context.Context,
-	handler llmtypes.MessageHandler,
+// messageParams keeps normal turns and native compaction on the same system, tool,
+// and thinking configuration. Compaction must not consume pending steering input.
+func (t *Thread) messageParams(
 	model anthropic.Model,
 	maxTokens int,
 	systemPrompt string,
 	opt llmtypes.MessageOpt,
-) (string, bool, error) {
-	var finalOutput string
-
+) (anthropic.MessageNewParams, error) {
 	systemPromptBlocks := []anthropic.TextBlockParam{}
 	if t.useSubscription {
 		systemPromptBlocks = append(systemPromptBlocks, auth.AnthropicSystemPrompt()...)
@@ -638,11 +627,11 @@ func (t *Thread) processMessageExchange(
 	systemPromptBlocks = append(systemPromptBlocks, anthropic.TextBlockParam{Text: systemPrompt})
 
 	if err := t.validateThinkingConfigForModel(model); err != nil {
-		return "", false, err
+		return anthropic.MessageNewParams{}, err
 	}
 	requestTools, err := t.requestTools(opt)
 	if err != nil {
-		return "", false, err
+		return anthropic.MessageNewParams{}, err
 	}
 
 	// Prepare message parameters
@@ -660,11 +649,44 @@ func (t *Thread) processMessageExchange(
 		messageParams.OutputConfig = outputConfig
 	}
 
+	return messageParams, nil
+}
+
+// processMessageExchange handles a single message exchange with the LLM, including
+// preparing message parameters, making the API call, and processing the response
+func (t *Thread) processMessageExchange(
+	ctx context.Context,
+	handler llmtypes.MessageHandler,
+	model anthropic.Model,
+	maxTokens int,
+	systemPrompt string,
+	opt llmtypes.MessageOpt,
+) (string, bool, error) {
+	var finalOutput string
+	messageParams, err := t.messageParams(model, maxTokens, systemPrompt, opt)
+	if err != nil {
+		return "", false, err
+	}
 	if err := t.processPendingSteer(ctx, &messageParams, handler); err != nil {
 		return "", false, errors.Wrap(err, "failed to process pending steer")
 	}
 	if opt.PromptCache {
 		applyAnthropicPromptCachePolicy(&messageParams)
+	}
+	// Compact the actual request, not a separately reconstructed primary-model
+	// turn: weak models, disabled tools, and prompt hooks must agree on both calls.
+	if t.ShouldAutoCompact(t.CompactRatioOrDefault(opt.CompactRatio)) {
+		previousMarkerID := t.CompactionMarkerID()
+		if err := t.compactContext(ctx, messageParams); err != nil {
+			return "", false, errors.Wrap(err, "failed to compact Anthropic context")
+		}
+		messageParams.Messages = t.messages
+		if opt.PromptCache {
+			applyAnthropicPromptCachePolicy(&messageParams)
+		}
+		if !opt.NoSaveConversation {
+			t.PublishCompaction(ctx, t, handler, previousMarkerID, false)
+		}
 	}
 
 	// Add a tracing event for API call start
@@ -1162,6 +1184,11 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 	if requiresInterleavedThinkingBeta(params) {
 		requestOpts = append(requestOpts, option.WithHeaderAdd("anthropic-beta", "interleaved-thinking-2025-05-14"))
 	}
+	if hasCompactionBlock(params.Messages) {
+		requestOpts = append(requestOpts,
+			option.WithHeaderAdd("anthropic-beta", anthropic.AnthropicBetaCompact2026_09_04),
+		)
+	}
 	if t.useCopilot {
 		requestOpts = append(requestOpts, auth.CopilotAnthropicRequestOptions(opt)...)
 	}
@@ -1320,17 +1347,21 @@ func (t *Thread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
 }
 
 func (t *Thread) updateUsage(response *anthropic.Message, model anthropic.Model) {
+	t.recordUsage(response.Usage, model, true)
+}
+
+func (t *Thread) recordUsage(usage anthropic.Usage, model anthropic.Model, updateContext bool) {
 	t.Mu.Lock()
 	defer t.Mu.Unlock()
 	// Track usage statistics
-	t.Usage.InputTokens += int(response.Usage.InputTokens)
-	t.Usage.OutputTokens += int(response.Usage.OutputTokens)
-	t.Usage.CacheCreationInputTokens += int(response.Usage.CacheCreationInputTokens)
-	t.Usage.CacheReadInputTokens += int(response.Usage.CacheReadInputTokens)
+	t.Usage.InputTokens += int(usage.InputTokens)
+	t.Usage.OutputTokens += int(usage.OutputTokens)
+	t.Usage.CacheCreationInputTokens += int(usage.CacheCreationInputTokens)
+	t.Usage.CacheReadInputTokens += int(usage.CacheReadInputTokens)
 
 	// Calculate costs based on model pricing
 	pricing := getModelPricing(model)
-	promptTokens := response.Usage.InputTokens + response.Usage.CacheCreationInputTokens + response.Usage.CacheReadInputTokens
+	promptTokens := usage.InputTokens + usage.CacheCreationInputTokens + usage.CacheReadInputTokens
 	if strings.Contains(strings.ToLower(model), "claude-haiku-5-5") && promptTokens > 100_000 {
 		// Haiku 5.5's long-context tier applies to every token category.
 		pricing.Input *= 5
@@ -1341,13 +1372,15 @@ func (t *Thread) updateUsage(response *anthropic.Message, model anthropic.Model)
 	}
 
 	// Calculate individual costs and show usage regardless of subscription.
-	t.Usage.InputCost += float64(response.Usage.InputTokens) * pricing.Input
-	t.Usage.OutputCost += float64(response.Usage.OutputTokens) * pricing.Output
-	t.Usage.CacheCreationCost += cacheCreationCost(response.Usage, pricing)
-	t.Usage.CacheReadCost += float64(response.Usage.CacheReadInputTokens) * pricing.PromptCachingRead
+	t.Usage.InputCost += float64(usage.InputTokens) * pricing.Input
+	t.Usage.OutputCost += float64(usage.OutputTokens) * pricing.Output
+	t.Usage.CacheCreationCost += cacheCreationCost(usage, pricing)
+	t.Usage.CacheReadCost += float64(usage.CacheReadInputTokens) * pricing.PromptCachingRead
 
-	t.Usage.CurrentContextWindow = int(response.Usage.InputTokens) + int(response.Usage.OutputTokens) + int(response.Usage.CacheCreationInputTokens) + int(response.Usage.CacheReadInputTokens)
-	t.Usage.MaxContextWindow = pricing.ContextWindow
+	if updateContext {
+		t.Usage.CurrentContextWindow = int(promptTokens + usage.OutputTokens)
+		t.Usage.MaxContextWindow = pricing.ContextWindow
+	}
 }
 
 func cacheCreationCost(usage anthropic.Usage, pricing ModelPricing) float64 {
@@ -1413,14 +1446,6 @@ func (t *Thread) SwapContext(_ context.Context, summary string) error {
 	t.FinalizeSwapContextLocked(summary)
 
 	return nil
-}
-
-// CompactContext performs comprehensive context compacting by creating a detailed summary
-func (t *Thread) CompactContext(ctx context.Context) error {
-	if len(t.messages) == 0 {
-		return nil
-	}
-	return base.CompactContextWithSummary(ctx, t.runUtilityPrompt, t.SwapContext)
 }
 
 // GetMessages returns the current messages in the thread

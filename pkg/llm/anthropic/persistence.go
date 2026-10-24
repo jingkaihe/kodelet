@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
@@ -255,6 +256,33 @@ func DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
 	var messages []anthropic.MessageParam
 	if err := json.Unmarshal(b, &messages); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal conversation messages")
+	}
+	// The stable SDK's union does not know the beta compaction block. Restore it
+	// from raw JSON so signed content (including unknown fields) survives resume.
+	var rawMessages []struct {
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(b, &rawMessages); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal raw conversation blocks")
+	}
+	for i, message := range rawMessages {
+		var blocks []json.RawMessage
+		if json.Unmarshal(message.Content, &blocks) != nil {
+			// String-form content is already normalized by the SDK.
+			continue
+		}
+		content := make([]anthropic.ContentBlockParamUnion, len(blocks))
+		for j, raw := range blocks {
+			var header struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(raw, &header) == nil && header.Type == "compaction" {
+				content[j] = param.Override[anthropic.ContentBlockParamUnion](raw)
+			} else if err := json.Unmarshal(raw, &content[j]); err != nil {
+				return nil, errors.Wrap(err, "failed to unmarshal conversation block")
+			}
+		}
+		messages[i].Content = content
 	}
 
 	return messages, nil
