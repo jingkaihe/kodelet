@@ -1,4 +1,4 @@
-package audiohost
+package audio
 
 import (
 	"bytes"
@@ -23,7 +23,7 @@ import (
 // The test executable doubles as the helper through a kodelet-audio symlink in
 // PATH, without test-only process arguments or production hooks.
 func TestMain(m *testing.M) {
-	if mode := os.Getenv("KODELET_AUDIOHOST_TEST_FIXTURE"); mode != "" {
+	if mode := os.Getenv("KODELET_AUDIO_TEST_FIXTURE"); mode != "" {
 		if err := fixture(mode); err != nil {
 			_, _ = io.WriteString(os.Stderr, err.Error())
 			os.Exit(42)
@@ -34,7 +34,7 @@ func TestMain(m *testing.M) {
 }
 
 func fixture(mode string) error {
-	if path := os.Getenv("KODELET_AUDIOHOST_TEST_PID"); path != "" {
+	if path := os.Getenv("KODELET_AUDIO_TEST_PID"); path != "" {
 		if err := os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
 			return err
 		}
@@ -67,7 +67,7 @@ func fixture(mode string) error {
 		// Send an offer after the parent has admitted createOffer, without
 		// reading any stdin, to exercise a blocked large answer write.
 		for {
-			if _, err := os.Stat(os.Getenv("KODELET_AUDIOHOST_TEST_TRIGGER")); err == nil {
+			if _, err := os.Stat(os.Getenv("KODELET_AUDIO_TEST_TRIGGER")); err == nil {
 				break
 			}
 			time.Sleep(time.Millisecond)
@@ -203,9 +203,9 @@ func setupFixture(t *testing.T, mode string) string {
 	directory := t.TempDir()
 	require.NoError(t, os.Symlink(executable, filepath.Join(directory, helperName)))
 	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("KODELET_AUDIOHOST_TEST_FIXTURE", mode)
+	t.Setenv("KODELET_AUDIO_TEST_FIXTURE", mode)
 	pidPath := filepath.Join(t.TempDir(), "pid")
-	t.Setenv("KODELET_AUDIOHOST_TEST_PID", pidPath)
+	t.Setenv("KODELET_AUDIO_TEST_PID", pidPath)
 	// Avoid the race detector's default one-second sleep delaying every child exit.
 	t.Setenv("GORACE", os.Getenv("GORACE")+" atexit_sleep_ms=0")
 	return pidPath
@@ -486,7 +486,7 @@ func TestCloseIsConcurrentAndBounded(t *testing.T) {
 
 func TestCloseInterruptsBlockedSend(t *testing.T) {
 	trigger := filepath.Join(t.TempDir(), "offer")
-	t.Setenv("KODELET_AUDIOHOST_TEST_TRIGGER", trigger)
+	t.Setenv("KODELET_AUDIO_TEST_TRIGGER", trigger)
 	c := startFixture(t, "no-read")
 	require.NoError(t, c.Send(Command{Type: "createOffer"}))
 	require.NoError(t, os.WriteFile(trigger, nil, 0o600))

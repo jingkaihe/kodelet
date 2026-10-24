@@ -9,7 +9,7 @@ Use this reference when changing Kodelet itself. Repository-wide conventions liv
 - `pkg/llm/`, `pkg/tools/`, `pkg/browser/`, `pkg/artifacts/`: provider threads, tool execution, runner-owned browsers, and persisted images.
 - `pkg/fragments/`, `pkg/skills/`, `pkg/plugins/`: recipes, skills, and plugins.
 - `pkg/webui/`: HTTP handler and embedded React/TypeScript SPA; frontend source is in `frontend/`.
-- `audio/`: Rust microphone/WebRTC helper; `pkg/audiohost/` is its pure-Go IPC client, used by `pkg/tui/`.
+- `audio/`: Rust microphone/WebRTC helper; `pkg/audio/` is its pure-Go IPC client, used by `pkg/tui/`.
 - `skills/kodelet/`, `recipes/`, `docs/`: built-in guidance, examples, prompt templates, and documentation.
 
 Toolchain versions live in `mise.toml`; dependencies live in `go.mod` and `pkg/webui/frontend/package.json` rather than being repeated here.

@@ -8,15 +8,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/audiohost"
+	"github.com/jingkaihe/kodelet/pkg/audio"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	transcriptiontypes "github.com/jingkaihe/kodelet/pkg/types/transcription"
 	"github.com/pkg/errors"
 )
 
 type audioPeer interface {
-	Send(audiohost.Command) error
-	Events() <-chan audiohost.Event
+	Send(audio.Command) error
+	Events() <-chan audio.Event
 	Close() error
 }
 
@@ -34,7 +34,7 @@ type realtimeAudioClient interface {
 	EndRealtime(context.Context, string) error
 }
 
-func startAudioPeer(ctx context.Context) (audioPeer, error) { return audiohost.Start(ctx) }
+func startAudioPeer(ctx context.Context) (audioPeer, error) { return audio.Start(ctx) }
 
 // Worker deadlines; tests shorten them.
 var (
@@ -92,7 +92,7 @@ func runTUIAudio(
 	mode string,
 	runner any,
 	request chat.ChatRequest,
-	controls <-chan audiohost.Command,
+	controls <-chan audio.Command,
 	emit func(tuiAudioMsg),
 	start func(context.Context) (audioPeer, error),
 ) (string, error) {
@@ -113,7 +113,7 @@ func runTUIAudio(
 func runDictation(
 	ctx context.Context,
 	client dictationClient,
-	controls <-chan audiohost.Command,
+	controls <-chan audio.Command,
 	emit func(tuiAudioMsg),
 	start func(context.Context) (audioPeer, error),
 ) (string, error) {
@@ -142,7 +142,7 @@ func runDictation(
 	defer peer.Close()
 	maxBytes := min(caps.MaxAudioBytes, transcriptiontypes.MaxAudioBytes) - 44
 	maxSeconds := min(caps.MaxDurationSeconds, transcriptiontypes.MaxDurationSeconds)
-	if err := peer.Send(audiohost.Command{
+	if err := peer.Send(audio.Command{
 		Type: "record", MaxAudioBytes: maxBytes, MaxDurationSeconds: maxSeconds,
 	}); err != nil {
 		return "", err
@@ -214,7 +214,7 @@ func runDictation(
 			}
 			if !recorded {
 				emit(tuiAudioMsg{
-					event: audiohost.Event{Type: "preview"},
+					event: audio.Event{Type: "preview"},
 					text:  result.text,
 					err:   result.err,
 				})
@@ -225,7 +225,7 @@ func runDictation(
 				return transcript, errors.New("audio recording timed out")
 			}
 			finishing = true
-			if err := peer.Send(audiohost.Command{Type: "finish"}); err != nil {
+			if err := peer.Send(audio.Command{Type: "finish"}); err != nil {
 				return transcript, err
 			}
 			deadline.Reset(10 * time.Second)
@@ -281,7 +281,7 @@ func runDictation(
 				if len(pcm) == 0 {
 					return "", errors.New("no audio was recorded")
 				}
-				emit(tuiAudioMsg{event: audiohost.Event{Type: "transcribing"}})
+				emit(tuiAudioMsg{event: audio.Event{Type: "transcribing"}})
 				if processed < len(pcm) {
 					detector.push(pcm[processed:]) // Include even a tiny final syllable.
 				}
@@ -377,7 +377,7 @@ func runRealtimeAudio(
 	ctx context.Context,
 	client realtimeAudioClient,
 	request chat.ChatRequest,
-	controls <-chan audiohost.Command,
+	controls <-chan audio.Command,
 	emit func(tuiAudioMsg),
 	start func(context.Context) (audioPeer, error),
 ) (err error) {
@@ -404,7 +404,7 @@ func runRealtimeAudio(
 		return err
 	}
 	defer release()
-	if err := peer.Send(audiohost.Command{Type: "createOffer"}); err != nil {
+	if err := peer.Send(audio.Command{Type: "createOffer"}); err != nil {
 		_ = peer.Close()
 		return err
 	}
@@ -477,7 +477,7 @@ func runRealtimeAudio(
 				case <-ctx.Done():
 				}
 			}(callID)
-			if err := peer.Send(audiohost.Command{
+			if err := peer.Send(audio.Command{
 				Type: "answer", SDP: result.session.Answer,
 			}); err != nil {
 				return err

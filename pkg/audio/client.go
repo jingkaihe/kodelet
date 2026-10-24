@@ -1,4 +1,4 @@
-package audiohost
+package audio
 
 import (
 	"context"

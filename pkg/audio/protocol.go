@@ -1,5 +1,5 @@
-// Package audiohost supervises the local audio helper without native dependencies.
-package audiohost
+// Package audio supervises the local audio helper without native dependencies.
+package audio
 
 import (
 	"encoding/binary"

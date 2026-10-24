@@ -8,7 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/jingkaihe/kodelet/pkg/audiohost"
+	"github.com/jingkaihe/kodelet/pkg/audio"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/pkg/errors"
 )
@@ -16,7 +16,7 @@ import (
 // The worker owns media and network I/O. Only Update mutates presentation fields.
 type tuiAudioSession struct {
 	cancel   context.CancelFunc
-	controls chan audiohost.Command
+	controls chan audio.Command
 	done     chan struct{}
 	key      string
 	mode     string
@@ -34,7 +34,7 @@ type tuiAudioSession struct {
 
 type tuiAudioMsg struct {
 	session           *tuiAudioSession
-	event             audiohost.Event
+	event             audio.Event
 	caption           *chat.RealtimeEvent
 	text              string
 	cwd               string // The workspace the server validated or saved.
@@ -122,7 +122,7 @@ func (m *model) handleAudioInput(msg tea.Msg) (tea.Cmd, bool) {
 			if key.String() == "enter" && m.audio.phase == "recording" {
 				m.audio.finishRequested = true
 				m.audio.phase = "transcribing"
-				return m.sendAudioControl(audiohost.Command{Type: "finish"}), true
+				return m.sendAudioControl(audio.Command{Type: "finish"}), true
 			}
 			if key.String() == "ctrl+l" {
 				m.cancelAudio()
@@ -177,7 +177,7 @@ func (m *model) startAudio(mode string) tea.Cmd {
 	}
 	ctx, cancel := context.WithCancel(contextWithTUIConversation(m.ctx, m.key))
 	session := &tuiAudioSession{
-		cancel: cancel, controls: make(chan audiohost.Command, 8), done: make(chan struct{}),
+		cancel: cancel, controls: make(chan audio.Command, 8), done: make(chan struct{}),
 		key: m.key, mode: mode, draft: m.textarea.Value(), started: time.Now(), phase: "starting",
 		createsConversation: createsConversation,
 	}
@@ -220,7 +220,7 @@ func (m *model) cancelAudio() {
 	}
 }
 
-func (m *model) sendAudioControl(command audiohost.Command) tea.Cmd {
+func (m *model) sendAudioControl(command audio.Command) tea.Cmd {
 	if m.audio == nil {
 		return nil
 	}
@@ -239,7 +239,7 @@ func (m *model) muteAudio() tea.Cmd {
 	}
 	// Show requested mute immediately; a failed control terminates the call.
 	m.audio.muted = !m.audio.muted
-	return m.sendAudioControl(audiohost.Command{Type: "mute", Muted: m.audio.muted})
+	return m.sendAudioControl(audio.Command{Type: "mute", Muted: m.audio.muted})
 }
 
 func (m *model) updateAudio(msg tuiAudioMsg) tea.Cmd {

@@ -10,7 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	xansi "github.com/charmbracelet/x/ansi"
-	"github.com/jingkaihe/kodelet/pkg/audiohost"
+	"github.com/jingkaihe/kodelet/pkg/audio"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
@@ -66,7 +66,7 @@ func TestAudioCompactStatus(t *testing.T) {
 			}
 			m.updateAudio(tuiAudioMsg{
 				session: m.audio,
-				event:   audiohost.Event{Type: "level", Level: 0.5},
+				event:   audio.Event{Type: "level", Level: 0.5},
 			})
 
 			view := m.renderAudio()
@@ -170,7 +170,7 @@ func TestAudioDictationPreviewPreservesDraftUntilFinish(t *testing.T) {
 		draft:    m.textarea.Value(),
 		phase:    "recording",
 		started:  time.Now(),
-		controls: make(chan audiohost.Command, 1),
+		controls: make(chan audio.Command, 1),
 	}
 	m.audio = session
 	m.resize()
@@ -178,7 +178,7 @@ func TestAudioDictationPreviewPreservesDraftUntilFinish(t *testing.T) {
 	preview := func(text string) {
 		m.updateAudio(tuiAudioMsg{
 			session: session,
-			event:   audiohost.Event{Type: "preview"},
+			event:   audio.Event{Type: "preview"},
 			text:    text,
 		})
 	}
@@ -193,7 +193,7 @@ func TestAudioDictationPreviewPreservesDraftUntilFinish(t *testing.T) {
 
 	m.updateAudio(tuiAudioMsg{
 		session: session,
-		event:   audiohost.Event{Type: "preview"},
+		event:   audio.Event{Type: "preview"},
 		err:     errors.New("upload failed"),
 	})
 	assert.Equal(t, "corrected words", session.preview, "a failed upload keeps the preview")
@@ -264,7 +264,7 @@ func TestAudioRecordingKeysAndCallMute(t *testing.T) {
 	defer cancel()
 	m.audio = &tuiAudioSession{
 		cancel: cancel, mode: "voice", phase: "recording",
-		controls: make(chan audiohost.Command, 1),
+		controls: make(chan audio.Command, 1),
 	}
 	_, handled := m.handleAudioInput(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	assert.True(t, handled, "recording freezes the draft")
@@ -278,7 +278,7 @@ func TestAudioRecordingKeysAndCallMute(t *testing.T) {
 	m.audio.mode, m.audio.phase = "talk", "connected"
 	m.muteAudio()
 	assert.True(t, m.audio.muted)
-	assert.Equal(t, audiohost.Command{Type: "mute", Muted: true}, <-m.audio.controls)
+	assert.Equal(t, audio.Command{Type: "mute", Muted: true}, <-m.audio.controls)
 	_, handled = m.handleAudioInput(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.True(t, handled)
 	assert.ErrorIs(t, ctx.Err(), context.Canceled)
@@ -641,8 +641,8 @@ func TestAudioTalkCreatesConversationWithDraftSettingsAndResolvedWorkspace(t *te
 }
 
 func TestRealtimeAudioReportsResolvedWorkspaceWhenSetupFails(t *testing.T) {
-	peer := &testAudioPeer{events: make(chan audiohost.Event, 1)}
-	peer.events <- audiohost.Event{Type: "offer", SDP: "offer"}
+	peer := &testAudioPeer{events: make(chan audio.Event, 1)}
+	peer.events <- audio.Event{Type: "offer", SDP: "offer"}
 	client := testRealtimeAudioClient{
 		start: func(context.Context) (chat.RealtimeSession, error) {
 			// The server can save a voice-first conversation before negotiation fails.
@@ -665,8 +665,8 @@ func TestRealtimeAudioReportsResolvedWorkspaceWhenSetupFails(t *testing.T) {
 }
 
 type testAudioPeer struct {
-	events chan audiohost.Event
-	sent   []audiohost.Command
+	events chan audio.Event
+	sent   []audio.Command
 	closed atomic.Bool
 	// The helper context must still be live at the first Close for the helper
 	// to shut down gracefully rather than being killed.
@@ -674,11 +674,11 @@ type testAudioPeer struct {
 	ctx      context.Context
 }
 
-func (p *testAudioPeer) Send(command audiohost.Command) error {
+func (p *testAudioPeer) Send(command audio.Command) error {
 	p.sent = append(p.sent, command)
 	return nil
 }
-func (p *testAudioPeer) Events() <-chan audiohost.Event { return p.events }
+func (p *testAudioPeer) Events() <-chan audio.Event { return p.events }
 
 func (p *testAudioPeer) Close() error {
 	if !p.closed.Swap(true) {
@@ -733,7 +733,7 @@ func TestDictationWorkerWAVAndRecordingLimits(t *testing.T) {
 		"success", "limit", "empty", "malformed PCM", "disabled", "helper error", "EOF",
 	} {
 		t.Run(test, func(t *testing.T) {
-			peer := &testAudioPeer{events: make(chan audiohost.Event, 4)}
+			peer := &testAudioPeer{events: make(chan audio.Event, 4)}
 			client := &testDictationClient{caps: transcriptiontypes.Capabilities{
 				Enabled: true, Available: true, MaxAudioBytes: 48, MaxDurationSeconds: 5,
 				MimeTypes: []string{"audio/wav"},
@@ -752,14 +752,14 @@ func TestDictationWorkerWAVAndRecordingLimits(t *testing.T) {
 			case "disabled":
 				client.caps.Enabled = false
 			case "helper error":
-				peer.events <- audiohost.Event{Type: "error", Message: "device unavailable"}
+				peer.events <- audio.Event{Type: "error", Message: "device unavailable"}
 			case "EOF":
 				close(peer.events)
 			}
 			if test != "EOF" {
-				peer.events <- audiohost.Event{Type: "recording"}
-				peer.events <- audiohost.Event{Type: "audio", Audio: pcm}
-				peer.events <- audiohost.Event{Type: "recorded"}
+				peer.events <- audio.Event{Type: "recording"}
+				peer.events <- audio.Event{Type: "audio", Audio: pcm}
+				peer.events <- audio.Event{Type: "recorded"}
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
@@ -827,10 +827,10 @@ func (c testRealtimeAudioClient) EndRealtime(ctx context.Context, id string) err
 }
 
 func TestRealtimeAudioContinuesAcrossAgentRunsAndCleansUp(t *testing.T) {
-	peer := &testAudioPeer{events: make(chan audiohost.Event, 3)}
-	peer.events <- audiohost.Event{Type: "offer", SDP: "offer"}
-	peer.events <- audiohost.Event{Type: "connected"}
-	peer.events <- audiohost.Event{Type: "level", Level: 0.5}
+	peer := &testAudioPeer{events: make(chan audio.Event, 3)}
+	peer.events <- audio.Event{Type: "offer", SDP: "offer"}
+	peer.events <- audio.Event{Type: "connected"}
+	peer.events <- audio.Event{Type: "level", Level: 0.5}
 	closed := false
 	client := testRealtimeAudioClient{
 		start: func(context.Context) (chat.RealtimeSession, error) {
@@ -874,7 +874,7 @@ func TestRealtimeAudioContinuesAcrossAgentRunsAndCleansUp(t *testing.T) {
 			}
 			if msg.conversationReady {
 				conversationReady = true
-				assert.Equal(t, []audiohost.Command{{Type: "createOffer"}}, peer.sent,
+				assert.Equal(t, []audio.Command{{Type: "createOffer"}}, peer.sent,
 					"attach the conversation before opening devices")
 			}
 			if msg.caption != nil && msg.caption.Kind == "transcript" {
@@ -894,7 +894,7 @@ func TestRealtimeAudioContinuesAcrossAgentRunsAndCleansUp(t *testing.T) {
 	assert.True(t, closed, "cleanup waits for the call to end")
 	assert.Equal(t, []string{"hello", "next request"}, captions,
 		"agent completion must not end the call")
-	assert.Equal(t, []audiohost.Command{
+	assert.Equal(t, []audio.Command{
 		{Type: "createOffer"},
 		{Type: "answer", SDP: "answer"},
 	}, peer.sent)
@@ -903,7 +903,7 @@ func TestRealtimeAudioContinuesAcrossAgentRunsAndCleansUp(t *testing.T) {
 func TestAudioCancelClosesHelperGracefully(t *testing.T) {
 	for _, mode := range []string{"voice", "talk"} {
 		t.Run(mode, func(t *testing.T) {
-			peer := &testAudioPeer{events: make(chan audiohost.Event, 2)}
+			peer := &testAudioPeer{events: make(chan audio.Event, 2)}
 			active := "recording"
 			var runner any = &testDictationClient{caps: transcriptiontypes.Capabilities{
 				Enabled: true, Available: true, MaxAudioBytes: 48, MaxDurationSeconds: 5,
@@ -923,9 +923,9 @@ func TestAudioCancelClosesHelperGracefully(t *testing.T) {
 					},
 					end: func(context.Context, string) error { return nil },
 				}
-				peer.events <- audiohost.Event{Type: "offer", SDP: "offer"}
+				peer.events <- audio.Event{Type: "offer", SDP: "offer"}
 			}
-			peer.events <- audiohost.Event{Type: active}
+			peer.events <- audio.Event{Type: active}
 			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 			defer cancel()
 			emit := func(msg tuiAudioMsg) {
@@ -975,25 +975,25 @@ func TestRealtimeAudioConnectionDeadlineStartsAfterSlowOffer(t *testing.T) {
 		name         string
 		offerTimeout time.Duration
 		err          string
-		sent         []audiohost.Command
+		sent         []audio.Command
 	}{
 		{
 			name: "slow first offer", offerTimeout: 5 * time.Second,
 			err:  "voice call connection timed out",
-			sent: []audiohost.Command{{Type: "createOffer"}, {Type: "answer", SDP: "answer"}},
+			sent: []audio.Command{{Type: "createOffer"}, {Type: "answer", SDP: "answer"}},
 		},
 		{
 			name: "no offer", offerTimeout: 100 * time.Millisecond,
 			err:  "did not prepare the voice call in time",
-			sent: []audiohost.Command{{Type: "createOffer"}},
+			sent: []audio.Command{{Type: "createOffer"}},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			realtimeOfferTimeout, realtimeConnectTimeout = test.offerTimeout, 250*time.Millisecond
-			peer := &testAudioPeer{events: make(chan audiohost.Event, 1)}
+			peer := &testAudioPeer{events: make(chan audio.Event, 1)}
 			// A cold GStreamer scan delays the offer beyond the connection deadline.
 			offer := time.AfterFunc(400*time.Millisecond, func() {
-				peer.events <- audiohost.Event{Type: "offer", SDP: "offer"}
+				peer.events <- audio.Event{Type: "offer", SDP: "offer"}
 			})
 			t.Cleanup(func() { offer.Stop() })
 			client := testRealtimeAudioClient{
@@ -1043,17 +1043,17 @@ func TestAudioWorkerTimeoutsExplainWhichDeadlineExpired(t *testing.T) {
 		MimeTypes: []string{"audio/wav"},
 	}
 	dictate := func(ctx context.Context, client *testDictationClient) error {
-		peer := &testAudioPeer{events: make(chan audiohost.Event, 3)}
-		peer.events <- audiohost.Event{Type: "recording"}
-		peer.events <- audiohost.Event{Type: "audio", Audio: []byte{1, 2}}
-		peer.events <- audiohost.Event{Type: "recorded"}
+		peer := &testAudioPeer{events: make(chan audio.Event, 3)}
+		peer.events <- audio.Event{Type: "recording"}
+		peer.events <- audio.Event{Type: "audio", Audio: []byte{1, 2}}
+		peer.events <- audio.Event{Type: "recorded"}
 		_, err := runDictation(ctx, client, nil, func(tuiAudioMsg) {}, peer.start)
 		return err
 	}
 	call := func(ctx context.Context, discover func(context.Context) error) error {
-		peer := &testAudioPeer{events: make(chan audiohost.Event, 2)}
-		peer.events <- audiohost.Event{Type: "offer", SDP: "offer"}
-		peer.events <- audiohost.Event{Type: "connected"}
+		peer := &testAudioPeer{events: make(chan audio.Event, 2)}
+		peer.events <- audio.Event{Type: "offer", SDP: "offer"}
+		peer.events <- audio.Event{Type: "connected"}
 		client := testRealtimeAudioClient{
 			discover: discover,
 			start: func(context.Context) (chat.RealtimeSession, error) {
@@ -1111,8 +1111,8 @@ func TestAudioWorkerTimeoutsExplainWhichDeadlineExpired(t *testing.T) {
 func TestRealtimeAudioClosesLateAllocationAfterCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	peer := &testAudioPeer{events: make(chan audiohost.Event, 1)}
-	peer.events <- audiohost.Event{Type: "offer", SDP: "offer"}
+	peer := &testAudioPeer{events: make(chan audio.Event, 1)}
+	peer.events <- audio.Event{Type: "offer", SDP: "offer"}
 	allocated, release, ended := make(chan struct{}), make(chan struct{}), make(chan string, 1)
 	client := testRealtimeAudioClient{
 		start: func(ctx context.Context) (chat.RealtimeSession, error) {
@@ -1194,10 +1194,10 @@ func TestDictationContinuousSnapshotsReplaceAndDeduplicate(t *testing.T) {
 	for _, chunkBytes := range []int{222, 640, 19998} {
 		// A snapshot boundary is determined by sample counts, not IPC frames.
 		phrase := dictationTestPhrase()
-		peer := &testAudioPeer{events: make(chan audiohost.Event, len(phrase)/chunkBytes+4)}
-		peer.events <- audiohost.Event{Type: "recording"}
+		peer := &testAudioPeer{events: make(chan audio.Event, len(phrase)/chunkBytes+4)}
+		peer.events <- audio.Event{Type: "recording"}
 		for offset := 0; offset < len(phrase); offset += chunkBytes {
-			peer.events <- audiohost.Event{
+			peer.events <- audio.Event{
 				Type:  "audio",
 				Audio: phrase[offset:min(offset+chunkBytes, len(phrase))],
 			}
@@ -1220,13 +1220,13 @@ func TestDictationContinuousSnapshotsReplaceAndDeduplicate(t *testing.T) {
 				assert.NoError(t, msg.err)
 				previews = append(previews, msg.text)
 				if len(previews) == 1 {
-					peer.events <- audiohost.Event{Type: "audio", Audio: phrase}
+					peer.events <- audio.Event{Type: "audio", Audio: phrase}
 				} else {
-					peer.events <- audiohost.Event{
+					peer.events <- audio.Event{
 						Type:  "audio",
 						Audio: dictationTestPCM(500, 0),
 					}
-					peer.events <- audiohost.Event{Type: "recorded"}
+					peer.events <- audio.Event{Type: "recorded"}
 				}
 			}
 		}
@@ -1250,13 +1250,13 @@ type finishingDictationPeer struct {
 	tail []byte
 }
 
-func (p *finishingDictationPeer) Send(command audiohost.Command) error {
+func (p *finishingDictationPeer) Send(command audio.Command) error {
 	if err := p.testAudioPeer.Send(command); err != nil {
 		return err
 	}
 	if command.Type == "finish" {
-		p.events <- audiohost.Event{Type: "audio", Audio: p.tail}
-		p.events <- audiohost.Event{Type: "recorded"}
+		p.events <- audio.Event{Type: "audio", Audio: p.tail}
+		p.events <- audio.Event{Type: "recorded"}
 	}
 	return nil
 }
@@ -1268,18 +1268,18 @@ func (p *finishingDictationPeer) start(ctx context.Context) (audioPeer, error) {
 
 func TestDictationDrainsCaptureAndCoalescesPendingUploads(t *testing.T) {
 	peer := &finishingDictationPeer{
-		testAudioPeer: &testAudioPeer{events: make(chan audiohost.Event, 8)},
+		testAudioPeer: &testAudioPeer{events: make(chan audio.Event, 8)},
 		tail:          dictationTestPCM(5, 6000),
 	}
 	phrase := dictationTestPhrase()
-	peer.events <- audiohost.Event{Type: "recording"}
+	peer.events <- audio.Event{Type: "recording"}
 	var pcm []byte
 	for range 3 {
-		peer.events <- audiohost.Event{Type: "audio", Audio: phrase}
+		peer.events <- audio.Event{Type: "audio", Audio: phrase}
 		pcm = append(pcm, phrase...)
 	}
-	peer.events <- audiohost.Event{Type: "level", Level: 0.75}
-	controls := make(chan audiohost.Command, 1)
+	peer.events <- audio.Event{Type: "level", Level: 0.75}
+	controls := make(chan audio.Command, 1)
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var uploads [][]byte
@@ -1312,7 +1312,7 @@ func TestDictationDrainsCaptureAndCoalescesPendingUploads(t *testing.T) {
 			}
 			assert.Len(t, uploads, 1)
 			assert.False(t, peer.closed.Load())
-			controls <- audiohost.Command{Type: "finish"}
+			controls <- audio.Command{Type: "finish"}
 		case "transcribing":
 			assert.True(t, peer.closed.Load())
 			close(release)
@@ -1332,12 +1332,12 @@ func TestDictationDrainsCaptureAndCoalescesPendingUploads(t *testing.T) {
 }
 
 func TestDictationCancelAbortsUploadAndDropsPendingSnapshot(t *testing.T) {
-	peer := &testAudioPeer{events: make(chan audiohost.Event, 4)}
+	peer := &testAudioPeer{events: make(chan audio.Event, 4)}
 	phrase := dictationTestPhrase()
-	peer.events <- audiohost.Event{Type: "recording"}
-	peer.events <- audiohost.Event{Type: "audio", Audio: phrase}
-	peer.events <- audiohost.Event{Type: "audio", Audio: phrase}
-	peer.events <- audiohost.Event{Type: "level"}
+	peer.events <- audio.Event{Type: "recording"}
+	peer.events <- audio.Event{Type: "audio", Audio: phrase}
+	peer.events <- audio.Event{Type: "audio", Audio: phrase}
+	peer.events <- audio.Event{Type: "level"}
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	started := make(chan struct{})
@@ -1374,10 +1374,10 @@ func TestDictationCancelAbortsUploadAndDropsPendingSnapshot(t *testing.T) {
 }
 
 func TestDictationRecoversFromInterimUploadFailure(t *testing.T) {
-	peer := &testAudioPeer{events: make(chan audiohost.Event, 3)}
+	peer := &testAudioPeer{events: make(chan audio.Event, 3)}
 	phrase := dictationTestPhrase()
-	peer.events <- audiohost.Event{Type: "recording"}
-	peer.events <- audiohost.Event{Type: "audio", Audio: phrase}
+	peer.events <- audio.Event{Type: "recording"}
+	peer.events <- audio.Event{Type: "audio", Audio: phrase}
 	wantErr := errors.New("temporary transcription failure")
 	calls := 0
 	client := continuousDictationClient(func(_ context.Context, audio []byte) (string, error) {
@@ -1398,9 +1398,9 @@ func TestDictationRecoversFromInterimUploadFailure(t *testing.T) {
 		}
 		previews = append(previews, msg)
 		if len(previews) < 3 {
-			peer.events <- audiohost.Event{Type: "audio", Audio: phrase}
+			peer.events <- audio.Event{Type: "audio", Audio: phrase}
 		} else {
-			peer.events <- audiohost.Event{Type: "recorded"}
+			peer.events <- audio.Event{Type: "recorded"}
 		}
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
@@ -1451,11 +1451,11 @@ func TestDictationFinishRetriesFailedSnapshotAndPreservesPartialText(t *testing.
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			peer := &testAudioPeer{events: make(chan audiohost.Event, 3)}
+			peer := &testAudioPeer{events: make(chan audio.Event, 3)}
 			phrase := dictationTestPhrase()
 			pcm := slices.Clone(phrase)
-			peer.events <- audiohost.Event{Type: "recording"}
-			peer.events <- audiohost.Event{Type: "audio", Audio: phrase}
+			peer.events <- audio.Event{Type: "recording"}
+			peer.events <- audio.Event{Type: "audio", Audio: phrase}
 			var uploads [][]byte
 			client := continuousDictationClient(func(
 				_ context.Context,
@@ -1477,14 +1477,14 @@ func TestDictationFinishRetriesFailedSnapshotAndPreservesPartialText(t *testing.
 				}
 				if msg.err == nil {
 					pcm = append(pcm, phrase...)
-					peer.events <- audiohost.Event{Type: "audio", Audio: phrase}
+					peer.events <- audio.Event{Type: "audio", Audio: phrase}
 					return
 				}
 				assert.ErrorIs(t, msg.err, failed.err)
 				tail := dictationTestPCM(500, 0)
 				pcm = append(pcm, tail...)
-				peer.events <- audiohost.Event{Type: "audio", Audio: tail}
-				peer.events <- audiohost.Event{Type: "recorded"}
+				peer.events <- audio.Event{Type: "audio", Audio: tail}
+				peer.events <- audio.Event{Type: "recorded"}
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 			defer cancel()
