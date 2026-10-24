@@ -328,6 +328,18 @@ func TestNativeCompactionDeserializeStringContent(t *testing.T) {
 	assert.Equal(t, "continue", messages[1].Content[0].OfText.Text)
 }
 
+func TestNativeCompactionDeserializeWithoutCompaction(t *testing.T) {
+	raw := `[{"role":"user","content":[{"type":"text","text":"question"}]},
+		{"role":"assistant","content":[{"type":"text","text":"answer"}]}]`
+	messages, err := DeserializeMessages([]byte(raw))
+	require.NoError(t, err)
+	require.Len(t, messages, 2)
+	assert.False(t, hasCompactionBlock(messages))
+	require.Len(t, messages[1].Content, 1)
+	require.NotNil(t, messages[1].Content[0].OfText)
+	assert.Equal(t, "answer", messages[1].Content[0].OfText.Text)
+}
+
 func TestNativeCompactionFailureFallsBackToSummary(t *testing.T) {
 	valid := compactionTestStream(nativeCompactionTestBlock, "compaction", nativeCompactionTestUsage)
 	for _, tc := range []struct {

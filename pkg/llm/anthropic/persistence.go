@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -259,6 +260,10 @@ func DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
 	}
 	// The stable SDK's union does not know the beta compaction block. Restore it
 	// from raw JSON so signed content (including unknown fields) survives resume.
+	// Most histories have none, so skip the second per-block decode for them.
+	if !bytes.Contains(b, []byte(`"compaction"`)) {
+		return messages, nil
+	}
 	var rawMessages []struct {
 		Content json.RawMessage `json:"content"`
 	}
