@@ -1,12 +1,12 @@
 # Native audio helper
 
-Local microphone capture and realtime audio for Kodelet's TUI voice support. The helper is built separately and published as an optional companion binary in GitHub releases. Supports macOS and Linux on amd64/arm64.
+Local microphone capture and realtime audio for Kodelet's TUI voice support. The helper is built separately and published as an optional companion binary in GitHub releases. Supports macOS and Linux on amd64/arm64; Intel macOS must be built from source.
 
 ## Release binaries
 
-The release workflow reads the supported platforms from `.goreleaser.yaml` and runs `mise run audio-build` on native runners. GoReleaser publishes `kodelet-audio-{linux,darwin}-{amd64,arm64}` alongside `checksums.txt`. Verify the matching asset's SHA-256, then install it as `kodelet-audio` on your `PATH`; the existing Kodelet installer does not install this optional helper.
+The release workflow reads the supported platforms from `.goreleaser.yaml` and runs `mise run audio-build` on native runners, excluding Intel macOS. GoReleaser publishes `kodelet-audio-linux-{amd64,arm64}` and `kodelet-audio-darwin-arm64` alongside `checksums.txt`. Verify the matching asset's SHA-256, then install it as `kodelet-audio` on your `PATH`; the existing Kodelet installer does not install this optional helper.
 
-These binaries require the system libraries below; they are not self-contained bundles. Linux builds target Ubuntu 24.04. macOS builds use macOS 15 and Homebrew's standard prefix (`/usr/local` on Intel, `/opt/homebrew` on Apple Silicon), without Developer ID signing or notarization. Build from source for older systems or custom library locations.
+These binaries require the system libraries below; they are not self-contained bundles. Linux builds target Ubuntu 24.04. macOS builds target Apple Silicon on macOS 15 and Homebrew's standard prefix (`/opt/homebrew`), without Developer ID signing or notarization. Build from source for older systems or custom library locations.
 
 ## Prerequisites
 
