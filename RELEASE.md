@@ -1,8 +1,10 @@
 # Kodelet
 
-## 0.8.13-beta
+## 0.8.14-beta
 
 Added native context compaction for Copilot Responses API models, with summary fallback.
+
+Replaced the Web UI's `date-fns` dependency with native date formatting.
 
 ## 0.8.12-beta
 
