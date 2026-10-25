@@ -112,9 +112,10 @@ func (t *Thread) compactContextWithSummary(ctx context.Context) error {
 	)
 }
 
-// CompactContext compacts the conversation history. Native OpenAI and Codex use
-// Remote Compaction V2 through the streaming Responses endpoint; other compatible
-// providers use the in-harness summary compactor instead.
+// CompactContext compacts the conversation history. OpenAI, Codex, and Copilot
+// use Remote Compaction V2 through the streaming Responses endpoint, falling back
+// to in-harness summary compaction if unsupported. Other compatible providers
+// use the summary compactor directly.
 func (t *Thread) CompactContext(ctx context.Context) error {
 	t.operationMu.Lock()
 	defer t.operationMu.Unlock()

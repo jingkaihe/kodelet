@@ -326,7 +326,7 @@ func TestCompactContextRemoteV2SummaryFallbackAdvancesCodexWindowOnce(t *testing
 }
 
 func TestCompactContextOpenAICompatiblePlatformsUseSummaryCompaction(t *testing.T) {
-	for _, platform := range []string{"copilot", "fireworks"} {
+	for _, platform := range []string{"fireworks", "custom"} {
 		t.Run(platform, func(t *testing.T) {
 			thread := &Thread{
 				Thread: base.NewThread(
@@ -411,7 +411,7 @@ func TestSupportsRemoteCompactionV2(t *testing.T) {
 		{
 			name:     "copilot",
 			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "copilot"}},
-			expected: false,
+			expected: true,
 		},
 		{
 			name:     "custom compatible platform",

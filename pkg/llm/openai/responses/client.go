@@ -322,7 +322,7 @@ func supportsResponsesWebSocket(config llmtypes.Config) bool {
 
 func supportsRemoteCompactionV2(config llmtypes.Config) bool {
 	platform := resolvePlatformName(config)
-	return platform == "openai" || platform == "codex"
+	return platform == "openai" || platform == "codex" || platform == "copilot"
 }
 
 func getPlatformBaseURL(platform string) string {
