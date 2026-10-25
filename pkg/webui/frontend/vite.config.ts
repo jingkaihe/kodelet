@@ -64,11 +64,6 @@ export default defineConfig({
               test: /node_modules[\\/]marked[\\/]/,
               priority: 20,
             },
-            {
-              name: 'utils-vendor',
-              test: /node_modules[\\/]date-fns[\\/]/,
-              priority: 20,
-            },
           ],
         },
       },

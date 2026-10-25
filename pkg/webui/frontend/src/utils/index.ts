@@ -1,6 +1,5 @@
 // Utility functions for Kodelet Web UI
 
-import { format } from 'date-fns';
 import type { Runner, Usage } from '../types';
 
 export const formatCompactRelativeTime = (dateString: string | null | undefined): string => {
@@ -21,7 +20,7 @@ export const formatCompactRelativeTime = (dateString: string | null | undefined)
   if (diffMs < day) return `${Math.floor(diffMs / hour)}h ago`;
   if (diffMs < 7 * day) return `${Math.floor(diffMs / day)}d ago`;
 
-  return format(date, 'MMM d');
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(date);
 };
 
 // Cost formatting utility

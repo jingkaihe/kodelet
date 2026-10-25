@@ -46,6 +46,15 @@ describe('formatCompactRelativeTime', () => {
     expect(formatCompactRelativeTime('2023-01-08T12:00:00Z')).toBe('2d ago');
     expect(formatCompactRelativeTime('2022-12-20T12:00:00Z')).toBe('Dec 20');
   });
+
+  it.each([
+    ['2022-01-02T00:30:00', 'Jan 2'],
+    ['2022-09-09T23:30:00', 'Sep 9'],
+    ['2022-12-20T00:30:00', 'Dec 20'],
+  ])('formats older dates using English months and local, unpadded days (%s)', (localDate, expected) => {
+    vi.setSystemTime(new Date('2023-01-10T12:00:00Z'));
+    expect(formatCompactRelativeTime(new Date(localDate).toISOString())).toBe(expected);
+  });
 });
 
 describe('formatCost', () => {
