@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.8.13-beta
+
+Added native context compaction for Copilot Responses API models, with summary fallback.
+
 ## 0.8.12-beta
 
 Added native Anthropic context compaction for supported models, falling back to summary compaction otherwise.
