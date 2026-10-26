@@ -104,7 +104,7 @@ export default defineConfig({
   // Path resolution
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, 'src'),
+      '@': path.resolve(import.meta.dirname, 'src'),
     },
   },
 });
