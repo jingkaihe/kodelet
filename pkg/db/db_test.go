@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,53 @@ func TestOpen(t *testing.T) {
 	defer db.Close()
 
 	require.NoError(t, VerifyConfiguration(db))
+}
+
+func TestOpenCanceledQueryReleasesWALSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "snapshot.db")
+	reader, err := Open(t.Context(), path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, reader.Close()) })
+	_, err = reader.ExecContext(t.Context(), `
+		CREATE TABLE snapshot_probe (value INTEGER);
+		INSERT INTO snapshot_probe VALUES (1);
+	`)
+	require.NoError(t, err)
+	writer, err := Open(t.Context(), path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, writer.Close()) })
+
+	// Widen the cancellation window during parameter binding. Older drivers
+	// could return context.Canceled but lose an unfinalized read statement,
+	// pinning a WAL snapshot even after a subsequent transaction rolls back.
+	argument := strings.Repeat("x", 32<<20)
+	canceled := 0
+	for range 5 {
+		ctx, cancel := context.WithCancel(t.Context())
+		finished := make(chan struct{})
+		time.AfterFunc(100*time.Microsecond, func() {
+			cancel()
+			close(finished)
+		})
+		var value int
+		err = reader.GetContext(ctx, &value, "SELECT value FROM snapshot_probe WHERE length(?) > 0", argument)
+		<-finished
+		if err != nil {
+			require.ErrorIs(t, err, context.Canceled)
+			canceled++
+		}
+
+		// A separate store advances the WAL. A leaked read would now cause
+		// SQLITE_BUSY_SNAPSHOT on the first write of every new transaction.
+		_, err = writer.ExecContext(t.Context(), "UPDATE snapshot_probe SET value = value + 1")
+		require.NoError(t, err)
+		tx, err := reader.BeginTxx(t.Context(), nil)
+		require.NoError(t, err)
+		_, err = tx.ExecContext(t.Context(), "DELETE FROM snapshot_probe WHERE value < 0")
+		assert.NoError(t, err, "cancellation must not poison the pooled connection")
+		require.NoError(t, tx.Rollback())
+	}
+	require.Positive(t, canceled, "exercise cancellation during a query")
 }
 
 func TestOpen_CreatesDirectory(t *testing.T) {
