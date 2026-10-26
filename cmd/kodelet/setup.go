@@ -35,7 +35,7 @@ profiles:
         max_tokens: 64000
         model: claude-opus-5-5
         provider: anthropic
-        reasoning_effort: max
+        reasoning_effort: xhigh
         allowed_reasoning_efforts:
             - low
             - medium

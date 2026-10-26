@@ -39,6 +39,8 @@ func TestRecommendedSetupConfigYAML_SeparatesModelProfilesFromRunnerDefaults(t *
 			require.NoError(t, err)
 			assert.Equal(t, "claude-opus-5-5", anthropicConfig.Model)
 			if name == "setup" {
+				assert.Equal(t, "xhigh", config.ReasoningEffort)
+				assert.Equal(t, "xhigh", anthropicConfig.ReasoningEffort)
 				assert.False(t, viper.IsSet("aliases"))
 				assert.Equal(t, "claude-haiku-5-5", anthropicConfig.WeakModel)
 				assert.Equal(t, "openai", config.Profile)
