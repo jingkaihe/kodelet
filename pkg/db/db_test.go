@@ -37,8 +37,7 @@ func TestOpenConfiguresReplacementConnection(t *testing.T) {
 	`)
 	require.NoError(t, err)
 
-	// Simulate the driver rejecting an unusable connection. The next operation
-	// must open a replacement without calling Open or Configure again.
+	// Discard the pooled connection so the next query opens a replacement.
 	connection, err := database.Conn(t.Context())
 	require.NoError(t, err)
 	require.ErrorIs(t, connection.Raw(func(any) error { return driver.ErrBadConn }), driver.ErrBadConn)
@@ -74,7 +73,8 @@ func TestOpenEscapesDatabasePath(t *testing.T) {
 			name = "absolute"
 		}
 		t.Run(name, func(t *testing.T) {
-			path := filepath.Join("nested", "storage ?#%&+.db")
+			const filename = "storage ?#%&+.db"
+			path := filepath.Join(name, "nested", filename)
 			if absolute {
 				var err error
 				path, err = filepath.Abs(path)
@@ -83,9 +83,15 @@ func TestOpenEscapesDatabasePath(t *testing.T) {
 			database, err := Open(t.Context(), path)
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, database.Close()) })
+			require.NoError(t, VerifyConfiguration(database))
+
 			_, err = os.Stat(path)
 			require.NoError(t, err, "URI metacharacters must remain part of the filename")
-			require.NoError(t, VerifyConfiguration(database))
+			entries, err := os.ReadDir(filepath.Dir(path))
+			require.NoError(t, err)
+			for _, entry := range entries {
+				assert.True(t, strings.HasPrefix(entry.Name(), filename), "unexpected database file %q", entry.Name())
+			}
 		})
 	}
 }
@@ -104,12 +110,13 @@ func TestOpenCanceledQueryReleasesWALSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, writer.Close()) })
 
-	// Widen the cancellation window during parameter binding. Older drivers
-	// could return context.Canceled but lose an unfinalized read statement,
-	// pinning a WAL snapshot even after a subsequent transaction rolls back.
+	// A large argument widens the window for cancelling mid-query.
 	argument := strings.Repeat("x", 32<<20)
 	canceled := 0
 	for range 5 {
+		// sql.Conn skips database/sql's context check, so cancellation reaches the driver.
+		connection, err := reader.Connx(t.Context())
+		require.NoError(t, err)
 		ctx, cancel := context.WithCancel(t.Context())
 		finished := make(chan struct{})
 		time.AfterFunc(100*time.Microsecond, func() {
@@ -117,15 +124,15 @@ func TestOpenCanceledQueryReleasesWALSnapshot(t *testing.T) {
 			close(finished)
 		})
 		var value int
-		err = reader.GetContext(ctx, &value, "SELECT value FROM snapshot_probe WHERE length(?) > 0", argument)
+		err = connection.GetContext(ctx, &value, "SELECT value FROM snapshot_probe WHERE length(?) > 0", argument)
 		<-finished
 		if err != nil {
 			require.ErrorIs(t, err, context.Canceled)
 			canceled++
 		}
+		require.NoError(t, connection.Close())
 
-		// A separate store advances the WAL. A leaked read would now cause
-		// SQLITE_BUSY_SNAPSHOT on the first write of every new transaction.
+		// After the WAL advances, a leaked read makes this write fail with SQLITE_BUSY_SNAPSHOT.
 		_, err = writer.ExecContext(t.Context(), "UPDATE snapshot_probe SET value = value + 1")
 		require.NoError(t, err)
 		tx, err := reader.BeginTxx(t.Context(), nil)
@@ -568,14 +575,14 @@ func TestVerifyConfigurationReportsPragmaMismatches(t *testing.T) {
 	assert.Contains(t, err.Error(), "expected NORMAL synchronous mode")
 }
 
-func TestConfigureAndVerifyConfigurationReturnClosedDatabaseErrors(t *testing.T) {
+func TestConfigurePoolAndVerifyConfigurationReturnClosedDatabaseErrors(t *testing.T) {
 	database, err := Open(context.Background(), filepath.Join(t.TempDir(), "closed.db"))
 	require.NoError(t, err)
 	require.NoError(t, database.Close())
 
-	err = Configure(context.Background(), database)
+	err = configurePool(context.Background(), database)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to execute pragma")
+	assert.Contains(t, err.Error(), "failed to query journal mode")
 
 	err = VerifyConfiguration(database)
 	require.Error(t, err)
