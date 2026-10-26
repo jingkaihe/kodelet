@@ -1,5 +1,17 @@
 # Kodelet
 
+## 0.8.15-beta
+
+Added a "Paste code" button to Web UI sign-in and runner enrollment forms, with validation and clear errors when clipboard access is blocked or the copied text is not an approval code. Pasting checks the code but does not automatically approve the request.
+
+Fixed canceled SQLite queries leaving stale WAL snapshots that could cause subsequent writes to fail with `SQLITE_BUSY_SNAPSHOT`, by updating `modernc.org/sqlite` to v1.40.1.
+
+Preserved SQLite settings, including busy timeouts and foreign-key enforcement, when the connection pool replaces a connection.
+
+Changed `kodelet setup` to use `xhigh` rather than `max` reasoning effort for the generated Anthropic profile.
+
+Fixed Web UI Vite configuration to resolve source paths using `import.meta.dirname` instead of the CommonJS-only `__dirname`.
+
 ## 0.8.14-beta
 
 Added native context compaction for Copilot Responses API models, with summary fallback.
