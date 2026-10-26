@@ -28,7 +28,6 @@ interface ChatWorkspacePanelProps {
   workspaceTargetKey: string;
   browserTarget: BrowserTarget;
   browserTargetKey: string;
-  cwdLabel: string;
   gitDiff: GitDiffResponse | null;
   gitDiffError: string | null;
   gitDiffLoading: boolean;
@@ -63,7 +62,6 @@ const ChatWorkspacePanel = ({
   workspaceTargetKey,
   browserTarget,
   browserTargetKey,
-  cwdLabel,
   gitDiff,
   gitDiffError,
   gitDiffLoading,
@@ -165,13 +163,7 @@ const ChatWorkspacePanel = ({
               }
             >
               {workspacePanelView === 'terminal' ? (
-                <TerminalModal
-                  key={workspaceTargetKey}
-                  cwdLabel={cwdLabel}
-                  open
-                  onClose={onToggle}
-                  target={workspaceTarget}
-                />
+                <TerminalModal key={workspaceTargetKey} open target={workspaceTarget} />
               ) : workspacePanelView === 'browser' ? (
                 <BrowserPanel key={browserTargetKey} target={browserTarget} />
               ) : (

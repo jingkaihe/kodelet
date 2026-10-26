@@ -12,11 +12,7 @@ import type { TerminalReadyEvent, WorkspaceTarget } from './types';
 const mockGetConversation = vi.fn();
 const mockTerminalModal =
   vi.fn<
-    (props: {
-      cwdLabel: string;
-      target: WorkspaceTarget;
-      onReady?: (event: TerminalReadyEvent) => void;
-    }) => void
+    (props: { target: WorkspaceTarget; onReady?: (event: TerminalReadyEvent) => void }) => void
   >();
 
 vi.mock('./services/api', () => ({
@@ -44,11 +40,10 @@ vi.mock('./pages/SignedOutPage', () => ({
 vi.mock('./components/workspace/TerminalModal', () => ({
   default: (props: Parameters<typeof mockTerminalModal>[0]) => {
     mockTerminalModal(props);
-    const { cwdLabel, target } = props;
+    const { target } = props;
     return (
       <div
         data-conversation-id={target.kind === 'runner' ? target.conversationId : undefined}
-        data-cwd-label={cwdLabel}
         data-runner-id={target.kind === 'runner' ? target.runnerId : undefined}
         data-target-kind={target.kind}
         data-testid="terminal-modal"
@@ -199,7 +194,6 @@ describe('TerminalPage', () => {
     expect(terminal).toHaveAttribute('data-conversation-id', 'conv-123');
     expect(terminal).toHaveAttribute('data-runner-id', 'runner-1');
     expect(terminal).toHaveAttribute('data-target-kind', 'runner');
-    expect(terminal).toHaveAttribute('data-cwd-label', '/runner/project');
     const target: WorkspaceTarget = {
       kind: 'runner',
       runnerId: 'runner-1',
@@ -282,7 +276,7 @@ describe('TerminalPage', () => {
       '/terminal?runnerId=runner-1&conversationId=draft-id&cwd=..%2Fproject'
     );
     const { rerender, unmount } = render(<TerminalPage />);
-    const terminal = await screen.findByTestId('terminal-modal');
+    await screen.findByTestId('terminal-modal');
     const requestTarget = mockTerminalModal.mock.lastCall?.[0].target;
     expect(requestTarget).toEqual({
       kind: 'runner',
@@ -309,7 +303,6 @@ describe('TerminalPage', () => {
     };
     const firstRecord = readTerminalPopOutRecordForTarget(target);
     expect(firstRecord).toEqual(expect.objectContaining({ target, state: 'active' }));
-    expect(terminal).toHaveAttribute('data-cwd-label', '/runner/project');
     expect(new URLSearchParams(window.location.search).get('cwd')).toBe('/runner/project');
     expect(window.name).toBe(getTerminalPopOutWindowName(target));
     rerender(<TerminalPage />);

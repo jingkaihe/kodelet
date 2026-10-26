@@ -489,7 +489,6 @@
 
 .workspace-terminal-tab-select {
   flex: 1 1 auto;
-  justify-content: center;
 }
 
 .workspace-terminal-tab-select span {
@@ -883,11 +882,9 @@
     z-index: 60;
     width: min(92%, 34rem);
     height: 100%;
-    border: 0;
     border-left: 1px solid var(--sidebar-stroke-strong);
     border-radius: 0;
     background: var(--sidebar-surface-opaque);
-    box-shadow: none;
   }
 
   .workspace-tools-dock {

@@ -15,7 +15,6 @@ const meta = {
     gitDiff: sampleGitDiff,
     loading: false,
     open: true,
-    onClose: fn(),
     onRefresh: fn(),
   },
 } satisfies Meta<typeof GitDiffModal>;

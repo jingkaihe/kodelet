@@ -41,7 +41,6 @@ describe('GitDiffModal', () => {
           has_diff: true,
         }}
         loading={false}
-        onClose={vi.fn()}
         onRefresh={vi.fn()}
         open
       />
@@ -330,7 +329,6 @@ describe('GitDiffModal', () => {
           has_diff: true,
         }}
         loading={false}
-        onClose={vi.fn()}
         onRefresh={vi.fn()}
         open
       />
@@ -381,7 +379,6 @@ describe('GitDiffModal', () => {
           has_diff: true,
         }}
         loading={false}
-        onClose={vi.fn()}
         onRefresh={vi.fn()}
         open
       />
@@ -418,7 +415,6 @@ describe('GitDiffModal', () => {
           has_diff: true,
         }}
         loading={false}
-        onClose={vi.fn()}
         onRefresh={onRefresh}
         open
       />

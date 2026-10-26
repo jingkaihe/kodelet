@@ -62,7 +62,6 @@ const NewChatSelect = ({
 
 interface NewChatContextDialogProps {
   availableProfiles: ChatProfileOption[];
-  cwdInputRef?: React.Ref<HTMLInputElement>;
   returnFocusRef?: React.RefObject<HTMLElement | null>;
   cwdQuery: string;
   cwdSuggestionIndex: number;
@@ -96,7 +95,6 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
   (
     {
       availableProfiles,
-      cwdInputRef,
       returnFocusRef,
       cwdQuery,
       cwdSuggestionIndex,
@@ -444,7 +442,6 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                           onFocus={onCwdInputFocus}
                           onKeyDown={onCwdInputKeyDown}
                           placeholder={selectedRunner.workspace.path}
-                          ref={cwdInputRef}
                           role="combobox"
                           spellCheck={false}
                           type="text"

@@ -1119,8 +1119,6 @@
   }
 
   .new-chat-context-dialog {
-    width: calc(100% - 1rem);
-    max-height: calc(100% - 1rem);
     border-radius: 0.25rem;
   }
 

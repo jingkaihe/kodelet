@@ -33,10 +33,8 @@ import {
 } from './terminalPopOut';
 
 interface TerminalModalProps {
-  cwdLabel: string;
   target: WorkspaceTarget;
   open: boolean;
-  onClose: () => void;
   allowPopOut?: boolean;
   onReady?: (event: TerminalReadyEvent) => void;
   onStopped?: (reason: string) => void;
@@ -266,10 +264,8 @@ const drainTerminalResponses = (terminal: Terminal, onResponse: (data: string) =
 };
 
 const TerminalSession: React.FC<TerminalModalProps & TerminalTabSessionProps> = ({
-  cwdLabel,
   target,
   open,
-  onClose,
   allowPopOut = true,
   onReady,
   onStopped,
@@ -1133,11 +1129,9 @@ const TerminalSession: React.FC<TerminalModalProps & TerminalTabSessionProps> = 
     <TerminalModalFrame
       tabBar={tabBar(popOutActive)}
       currentStatus={popOutActive ? '' : currentStatus}
-      cwdLabel={cwdLabel}
       popOutActive={popOutActive}
       statusVariant={popOutActive ? 'idle' : statusVariant}
       terminalHostRef={terminalHostRef}
-      onClose={onClose}
       onPopOut={popOutEligible || popOutActive ? handlePopOut : undefined}
       onTerminalInput={handleTerminalInput}
       onTerminalArrow={handleTerminalArrow}

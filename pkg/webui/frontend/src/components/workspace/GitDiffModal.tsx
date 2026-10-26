@@ -10,7 +10,6 @@ interface GitDiffModalProps {
   error: string | null;
   gitDiff: GitDiffResponse | null;
   loading: boolean;
-  onClose?: () => void;
   open: boolean;
   onRefresh: () => void;
 }

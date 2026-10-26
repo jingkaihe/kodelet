@@ -222,9 +222,7 @@ const TerminalPage = () => {
   return (
     <main className="terminal-popout-page" data-testid="terminal-popout-page">
       <TerminalModal
-        cwdLabel={ownershipTarget?.cwd || target.cwd || ''}
         open
-        onClose={() => window.close()}
         onStopped={setStoppedMessage}
         onReady={(event) => {
           if (target.kind === 'runner' && event.cwd.startsWith('/')) {

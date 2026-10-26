@@ -349,11 +349,6 @@ export interface BrowserSession {
   devTools: boolean;
 }
 
-export interface SteerConversationRequest {
-  message: string;
-  content?: ContentBlock[];
-}
-
 export interface SteerConversationResponse {
   success: boolean;
   conversation_id: string;

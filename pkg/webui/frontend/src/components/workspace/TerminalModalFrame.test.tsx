@@ -7,9 +7,7 @@ import TerminalModalFrame from './TerminalModalFrame';
 const renderFrame = (overrides: Partial<React.ComponentProps<typeof TerminalModalFrame>> = {}) => {
   const props: React.ComponentProps<typeof TerminalModalFrame> = {
     currentStatus: '',
-    cwdLabel: '/tmp/project',
     statusVariant: 'live',
-    onClose: vi.fn(),
     onTerminalInput: vi.fn(),
     onTerminalArrow: vi.fn(),
     ...overrides,

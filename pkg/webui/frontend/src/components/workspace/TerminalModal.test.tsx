@@ -231,7 +231,7 @@ describe('TerminalModal', () => {
     }) => {
       setTheme(id);
       createTerminalWebSocketMock.mockReturnValue(new MockWebSocket());
-      render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+      render(<TerminalModal open target={localTarget} />);
 
       await waitFor(() => expect(MockTerminal.instances).toHaveLength(1));
       const { options } = MockTerminal.instances[0];
@@ -262,7 +262,7 @@ describe('TerminalModal', () => {
         sockets.push(socket);
         return socket;
       });
-      render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={target} />);
+      render(<TerminalModal open target={target} />);
       await waitFor(() => expect(MockTerminal.instances).toHaveLength(1));
       // Explicit RGB that coincides with the initial default foreground must be replayed unchanged.
       const encoded = new TextEncoder().encode('\x1b[38;2;60;56;54mtruecolor\x1b[0m\r\n');
@@ -313,7 +313,7 @@ describe('TerminalModal', () => {
 
     it('rebuilds for resolved system and cross-window theme changes but not equivalent preferences', async () => {
       createTerminalWebSocketMock.mockImplementation(() => new MockWebSocket());
-      render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+      render(<TerminalModal open target={localTarget} />);
       await waitFor(() => expect(MockTerminal.instances).toHaveLength(1));
       act(() => setTheme('kodelet'));
       act(() => setTheme('system'));
@@ -355,20 +355,11 @@ describe('TerminalModal', () => {
     ])('does not reopen a terminal after %s and cleans up subscriptions on unmount', async (action) => {
       const removeListener = vi.spyOn(window, 'removeEventListener');
       createTerminalWebSocketMock.mockReturnValue(new MockWebSocket());
-      const { rerender, unmount } = render(
-        <TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />
-      );
+      const { rerender, unmount } = render(<TerminalModal open target={localTarget} />);
       await waitFor(() => expect(MockTerminal.instances).toHaveLength(1));
       const terminal = MockTerminal.instances[0];
       if (action === 'close') {
-        rerender(
-          <TerminalModal
-            cwdLabel="/tmp/project"
-            onClose={vi.fn()}
-            open={false}
-            target={localTarget}
-          />
-        );
+        rerender(<TerminalModal open={false} target={localTarget} />);
       } else {
         unmount();
       }
@@ -386,7 +377,7 @@ describe('TerminalModal', () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
 
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
 
     expect(screen.getByRole('status')).toHaveTextContent(/^Connecting$/);
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
@@ -434,17 +425,8 @@ describe('TerminalModal', () => {
     allowPopOut,
   }) => {
     const socket = new MockWebSocket();
-    const onClose = vi.fn();
     createTerminalWebSocketMock.mockReturnValue(socket);
-    render(
-      <TerminalModal
-        cwdLabel="/tmp/project"
-        onClose={onClose}
-        open
-        target={target}
-        allowPopOut={allowPopOut}
-      />
-    );
+    render(<TerminalModal open target={target} allowPopOut={allowPopOut} />);
 
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
     const terminal = MockTerminal.instances[0];
@@ -474,14 +456,13 @@ describe('TerminalModal', () => {
       expect(terminal.input).toHaveBeenCalledExactlyOnceWith(data, true);
       expect(socket.send).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ type: 'input', data }));
     }
-    expect(onClose).not.toHaveBeenCalled();
     expect(terminal.focus).not.toHaveBeenCalled();
   });
 
   it('encodes arrow buttons using the current application cursor mode', async () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
     const terminal = MockTerminal.instances[0];
     act(() => socket.emit('message', { data: JSON.stringify({ type: 'replay-complete' }) }));
@@ -507,7 +488,7 @@ describe('TerminalModal', () => {
   it('keeps keys disabled until replay output has finished rendering', async () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
     const interrupt = screen.getByRole('button', { name: /^Ctrl\+C/ });
     expect(interrupt).toBeDisabled();
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
@@ -533,7 +514,7 @@ describe('TerminalModal', () => {
   it.each(['close', 'error', 'exit'])('disables keys after terminal %s', async (event) => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
     act(() => socket.emit('message', { data: JSON.stringify({ type: 'replay-complete' }) }));
     const interrupt = screen.getByRole('button', { name: /^Ctrl\+C/ });
@@ -554,7 +535,7 @@ describe('TerminalModal', () => {
   it('does not send keys when the socket closes before the UI updates', async () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
     act(() => socket.emit('message', { data: JSON.stringify({ type: 'replay-complete' }) }));
 
@@ -567,7 +548,7 @@ describe('TerminalModal', () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
 
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
 
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
     const terminal = MockTerminal.instances[0];
@@ -594,7 +575,7 @@ describe('TerminalModal', () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
 
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
 
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
     const terminal = MockTerminal.instances[0];
@@ -614,8 +595,6 @@ describe('TerminalModal', () => {
 
     render(
       <TerminalModal
-        cwdLabel="/runner/project"
-        onClose={vi.fn()}
         open
         target={{ kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-123' }}
       />
@@ -676,8 +655,6 @@ describe('TerminalModal', () => {
 
     render(
       <TerminalModal
-        cwdLabel="/runner/project"
-        onClose={vi.fn()}
         open
         target={{
           kind: 'runner',
@@ -732,13 +709,11 @@ describe('TerminalModal', () => {
     createTerminalWebSocketMock
       .mockReturnValueOnce(firstSocket)
       .mockReturnValue(new MockWebSocket());
-    const { rerender } = render(
-      <TerminalModal cwdLabel={target.cwd} onClose={vi.fn()} open target={target} />
-    );
+    const { rerender } = render(<TerminalModal open target={target} />);
 
     await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledOnce());
     const firstTerminal = MockTerminal.instances[0];
-    rerender(<TerminalModal cwdLabel={cwd} onClose={vi.fn()} open target={nextTarget} />);
+    rerender(<TerminalModal open target={nextTarget} />);
 
     await act(async () => Promise.resolve());
     expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(connections);
@@ -791,15 +766,7 @@ describe('TerminalModal', () => {
       state: 'active',
       updatedAt: Date.now(),
     });
-    render(
-      <TerminalModal
-        cwdLabel={cwd}
-        onClose={vi.fn()}
-        onReady={onReady}
-        open
-        target={{ ...canonicalTarget, cwd }}
-      />
-    );
+    render(<TerminalModal onReady={onReady} open target={{ ...canonicalTarget, cwd }} />);
 
     await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledOnce());
     expect(screen.queryByText('Terminal is open in the pop-out')).not.toBeInTheDocument();
@@ -845,14 +812,7 @@ describe('TerminalModal', () => {
       updatedAt: Date.now(),
     });
 
-    render(
-      <TerminalModal
-        cwdLabel={cwd}
-        onClose={vi.fn()}
-        open
-        target={{ kind: 'runner', runnerId, conversationId, cwd }}
-      />
-    );
+    render(<TerminalModal open target={{ kind: 'runner', runnerId, conversationId, cwd }} />);
 
     if (shared) {
       expect(screen.getByText('Terminal is open in the pop-out')).toBeInTheDocument();
@@ -890,17 +850,13 @@ describe('TerminalModal', () => {
       .mockReturnValueOnce(firstWindow as unknown as Window)
       .mockReturnValueOnce(secondWindow as unknown as Window);
     createTerminalWebSocketMock.mockImplementation(() => new MockWebSocket());
-    const { rerender } = render(
-      <TerminalModal cwdLabel={firstTarget.cwd} onClose={vi.fn()} open target={firstTarget} />
-    );
+    const { rerender } = render(<TerminalModal open target={firstTarget} />);
     try {
       await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledOnce());
       fireEvent.click(screen.getByRole('button', { name: 'Open terminal in new window' }));
       expect(firstWindow.focus).toHaveBeenCalledOnce();
 
-      rerender(
-        <TerminalModal cwdLabel={secondTarget.cwd} onClose={vi.fn()} open target={secondTarget} />
-      );
+      rerender(<TerminalModal open target={secondTarget} />);
       await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(2));
       fireEvent.click(screen.getByRole('button', { name: 'Open terminal in new window' }));
       expect(secondWindow.focus).toHaveBeenCalledOnce();
@@ -908,9 +864,7 @@ describe('TerminalModal', () => {
       expect(openSpy.mock.calls[1][1]).toBe(getTerminalPopOutWindowName(secondTarget));
       expect(openSpy.mock.calls[0][1]).not.toBe(openSpy.mock.calls[1][1]);
 
-      rerender(
-        <TerminalModal cwdLabel={firstTarget.cwd} onClose={vi.fn()} open target={firstTarget} />
-      );
+      rerender(<TerminalModal open target={firstTarget} />);
       fireEvent.click(screen.getByRole('button', { name: 'Focus pop-out' }));
       expect(firstWindow.focus).toHaveBeenCalledTimes(2);
       expect(secondWindow.focus).toHaveBeenCalledOnce();
@@ -931,8 +885,6 @@ describe('TerminalModal', () => {
 
     render(
       <TerminalModal
-        cwdLabel="/runner/project"
-        onClose={vi.fn()}
         onStopped={onStopped}
         open
         target={{ kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-a' }}
@@ -989,7 +941,7 @@ describe('TerminalModal', () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
 
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
 
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
     const terminal = MockTerminal.instances[0];
@@ -1003,17 +955,15 @@ describe('TerminalModal', () => {
 
   it('does not dismiss the terminal when Escape is pressed outside its input', async () => {
     const socket = new MockWebSocket();
-    const onClose = vi.fn();
     createTerminalWebSocketMock.mockReturnValue(socket);
 
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={onClose} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
 
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
     for (const target of [screen.getByRole('button', { name: 'More keys' }), document.body]) {
       fireEvent.keyDown(target, { key: 'Escape', code: 'Escape' });
     }
 
-    expect(onClose).not.toHaveBeenCalled();
     expect(socket.close).not.toHaveBeenCalled();
   });
 
@@ -1022,10 +972,9 @@ describe('TerminalModal', () => {
       await vi.importActual<typeof import('ghostty-web')>('ghostty-web');
     const ghostty = await Ghostty.load();
     const socket = new MockWebSocket();
-    const onClose = vi.fn();
     createTerminalWebSocketMock.mockReturnValue(socket);
 
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={onClose} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
 
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
     const terminal = MockTerminal.instances[0];
@@ -1052,7 +1001,6 @@ describe('TerminalModal', () => {
         expect(socket.send).toHaveBeenCalledExactlyOnceWith(
           JSON.stringify({ type: 'input', data: '\x1b' })
         );
-        expect(onClose).not.toHaveBeenCalled();
         expect(socket.close).not.toHaveBeenCalled();
         expect(target).toHaveFocus();
       }
@@ -1070,9 +1018,7 @@ describe('TerminalModal', () => {
     const setupTouchTerminal = async (ready = true) => {
       const socket = new MockWebSocket();
       createTerminalWebSocketMock.mockReturnValue(socket);
-      const result = render(
-        <TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />
-      );
+      const result = render(<TerminalModal open target={localTarget} />);
       await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
       const terminal = MockTerminal.instances[0];
       terminal.wasmTerm.isAlternateScreen.mockReturnValue(false);
@@ -1223,14 +1169,7 @@ describe('TerminalModal', () => {
 
       fireEvent.touchStart(canvas, { touches: [point(100)] });
       const removeListener = vi.spyOn(host, 'removeEventListener');
-      rerender(
-        <TerminalModal
-          cwdLabel="/tmp/project"
-          onClose={vi.fn()}
-          open={false}
-          target={localTarget}
-        />
-      );
+      rerender(<TerminalModal open={false} target={localTarget} />);
       for (const event of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
         expect(removeListener).toHaveBeenCalledWith(event, expect.any(Function), true);
       }
@@ -1243,7 +1182,7 @@ describe('TerminalModal', () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
 
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
 
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
     const terminal = MockTerminal.instances[0];
@@ -1267,7 +1206,7 @@ describe('TerminalModal', () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
 
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
 
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
     const terminal = MockTerminal.instances[0];
@@ -1283,7 +1222,7 @@ describe('TerminalModal', () => {
       sockets.push(socket);
       return socket;
     });
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
     await waitFor(() => expect(sockets).toHaveLength(1));
     fireEvent.click(screen.getByRole('button', { name: 'New terminal tab' }));
     await waitFor(() => expect(sockets).toHaveLength(2));
@@ -1308,15 +1247,7 @@ describe('TerminalModal', () => {
     const socket = new MockWebSocket();
     const onReady = vi.fn();
     createTerminalWebSocketMock.mockReturnValue(socket);
-    render(
-      <TerminalModal
-        cwdLabel="/tmp/project"
-        onClose={vi.fn()}
-        onReady={onReady}
-        open
-        target={localTarget}
-      />
-    );
+    render(<TerminalModal onReady={onReady} open target={localTarget} />);
     await waitFor(() => expect(MockTerminal.instances).toHaveLength(1));
     const message = (payload: object) => {
       act(() => socket.emit('message', { data: JSON.stringify(payload) }));
@@ -1375,7 +1306,7 @@ describe('TerminalModal', () => {
   it('does not let shell prompt titles mask foreground programs before or after status updates', async () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
     await waitFor(() => expect(MockTerminal.instances).toHaveLength(1));
     const output = (title: string) => {
       const bytes = new TextEncoder().encode(`\x1b]0;${title}\x07`);
@@ -1412,7 +1343,7 @@ describe('TerminalModal', () => {
   it('follows shell directories and program OSC titles without overriding custom tab names', async () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
     await waitFor(() => expect(MockTerminal.instances).toHaveLength(1));
     expect(screen.getByRole('tab', { name: '/tmp/project' })).toBeInTheDocument();
     const output = (text: string) => {
@@ -1470,15 +1401,7 @@ describe('TerminalModal', () => {
     const socket = new MockWebSocket();
     const onStopped = vi.fn();
     createTerminalWebSocketMock.mockReturnValue(socket);
-    render(
-      <TerminalModal
-        cwdLabel="/tmp/project"
-        onClose={vi.fn()}
-        onStopped={onStopped}
-        open
-        target={localTarget}
-      />
-    );
+    render(<TerminalModal onStopped={onStopped} open target={localTarget} />);
     await waitFor(() => expect(MockTerminal.instances).toHaveLength(1));
     vi.useFakeTimers();
     try {
@@ -1507,7 +1430,7 @@ describe('TerminalModal', () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
 
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
 
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
 
@@ -1524,7 +1447,7 @@ describe('TerminalModal', () => {
     const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
     createTerminalWebSocketMock.mockReturnValue(socket);
 
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
 
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
     act(() => {
@@ -1557,7 +1480,7 @@ describe('TerminalModal', () => {
       .mockReturnValueOnce(firstSocket)
       .mockReturnValueOnce(restoredSocket);
 
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
 
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
     act(() => {
@@ -1614,7 +1537,7 @@ describe('TerminalModal', () => {
       }
     );
 
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
 
     expect(screen.getByTestId('terminal-host')).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByText('Terminal is open in the pop-out')).toBeInTheDocument();
@@ -1629,7 +1552,7 @@ describe('TerminalModal', () => {
       updatedAt: Date.now() - 60_000,
     };
     writeTerminalPopOutRecord(record);
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
 
     expect(createTerminalWebSocketMock).not.toHaveBeenCalled();
     expect(screen.getByTestId('terminal-host')).toHaveAttribute('aria-disabled', 'true');
@@ -1648,7 +1571,7 @@ describe('TerminalModal', () => {
     writeTerminalPopOutRecord(record);
     createTerminalWebSocketMock.mockReturnValue(socket);
 
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
 
     await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(1));
     expect(screen.getByTestId('terminal-host')).not.toHaveAttribute('aria-disabled');
@@ -1728,7 +1651,7 @@ describe('TerminalModal', () => {
     };
     writeTerminalPopOutRecord(record);
 
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
 
     expect(screen.getByText('Terminal is open in the pop-out')).toBeInTheDocument();
     act(() => {
@@ -1761,7 +1684,7 @@ describe('TerminalModal', () => {
       updatedAt: Date.now(),
     });
 
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
     act(() => {
       screen.getByRole('button', { name: 'Focus pop-out' }).click();
     });
@@ -1789,7 +1712,7 @@ describe('TerminalModal', () => {
       .mockReturnValueOnce(firstSocket)
       .mockReturnValueOnce(restoredSocket);
 
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    render(<TerminalModal open target={localTarget} />);
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
     act(() => {
       screen.getByRole('button', { name: 'Open terminal in new window' }).click();

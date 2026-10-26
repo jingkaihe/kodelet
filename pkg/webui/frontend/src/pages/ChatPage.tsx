@@ -2658,7 +2658,6 @@ const ChatPage: React.FC = () => {
             workspaceTargetKey={sessionTargetKey}
             browserTarget={browserTarget}
             browserTargetKey={sessionTargetKey}
-            cwdLabel={currentRunner?.workspace.path || ''}
             gitDiff={gitDiff}
             gitDiffError={gitDiffError}
             gitDiffLoading={gitDiffLoading}

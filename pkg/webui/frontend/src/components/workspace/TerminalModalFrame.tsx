@@ -37,12 +37,10 @@ const MORE_TERMINAL_KEYS: TerminalKey[] = [
 interface TerminalModalFrameProps {
   children?: React.ReactNode;
   tabBar?: React.ReactNode;
-  cwdLabel?: string;
   currentStatus?: string;
   popOutActive?: boolean;
   statusVariant?: TerminalStatusVariant;
   terminalHostRef?: React.Ref<HTMLDivElement>;
-  onClose?: () => void;
   onPopOut?: () => void;
   onTerminalInput?: (data: string) => void;
   onTerminalArrow?: (direction: TerminalArrowDirection) => void;

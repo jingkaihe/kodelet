@@ -27,9 +27,7 @@ const meta = {
   args: {
     children: terminalPreview,
     currentStatus: '',
-    cwdLabel: '/home/jingkaihe/workspace/kodelet',
     statusVariant: 'live',
-    onClose: fn(),
     onTerminalInput: fn(),
     onTerminalArrow: fn(),
   },
