@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { formatApprovalCode } from '../components/auth/AuthPageShell';
+import { ApprovalCodeForm, formatApprovalCode } from '../components/auth/AuthPageShell';
 import RunnerEnrollmentPage from './RunnerEnrollmentPage';
 import SignedOutPage from './SignedOutPage';
 import UserLoginPage from './UserLoginPage';
@@ -80,10 +80,11 @@ describe('authentication approval pages', () => {
     const signInCode = screen.getByLabelText('Sign-in code');
     await user.click(signInCode);
     await user.paste('abcd-efgh');
-    expect(signInCode).toHaveValue('ABCD-EFGH');
     expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
 
     expect(await screen.findByText('linux/amd64')).toBeInTheDocument();
+    expect(screen.getByText('ABCD-EFGH')).toBeInTheDocument();
+    expect(apiMocks.submitUserLoginDecision).toHaveBeenCalledTimes(1);
     expect(apiMocks.submitUserLoginDecision).toHaveBeenNthCalledWith(1, 'ABCD-EFGH', 'lookup');
 
     await user.click(screen.getByRole('button', { name: 'Approve sign-in' }));
@@ -92,6 +93,81 @@ describe('authentication approval pages', () => {
       await screen.findByText('Sign-in approved. You can return to the Kodelet client.')
     ).toBeInTheDocument();
     expect(apiMocks.submitUserLoginDecision).toHaveBeenNthCalledWith(2, 'ABCD-EFGH', 'approve');
+  });
+
+  it.each([
+    'blocked',
+    'invalid',
+  ])('handles %s clipboard content without submitting it', async (scenario) => {
+    const user = userEvent.setup();
+    const readClipboard = vi.spyOn(navigator.clipboard, 'readText');
+    if (scenario === 'blocked') {
+      readClipboard.mockRejectedValueOnce(
+        new DOMException('private browser details', 'NotAllowedError')
+      );
+    } else {
+      readClipboard.mockResolvedValueOnce('unrelated clipboard contents');
+    }
+    const onChange = vi.fn();
+    const onSubmit = vi.fn();
+    render(
+      <ApprovalCodeForm
+        id="test-code"
+        label="Sign-in code"
+        value=""
+        busy={false}
+        onChange={onChange}
+        onSubmit={onSubmit}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Paste code' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      scenario === 'blocked' ? 'Couldn’t read the clipboard.' : 'Copy the eight-character code'
+    );
+    expect(screen.getByRole('alert')).not.toHaveTextContent('private browser details');
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Paste code' })).toBeEnabled();
+  });
+
+  it('reads and normalizes the clipboard only on request, without overlapping reads', async () => {
+    const user = userEvent.setup();
+    let resolveClipboard!: (value: string) => void;
+    const readClipboard = vi.spyOn(navigator.clipboard, 'readText').mockReturnValue(
+      new Promise<string>((resolve) => {
+        resolveClipboard = resolve;
+      })
+    );
+    const onChange = vi.fn();
+    const onSubmit = vi.fn();
+    const props = {
+      id: 'test-code',
+      label: 'Sign-in code',
+      value: '',
+      busy: false,
+      onChange,
+      onSubmit,
+    };
+    const { rerender } = render(<ApprovalCodeForm {...props} />);
+    expect(readClipboard).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Paste code' }));
+    expect(screen.getByLabelText('Sign-in code')).toBeDisabled();
+    const pasting = screen.getByRole('button', { name: 'Pasting…' });
+    expect(pasting).toBeDisabled();
+    await user.click(pasting);
+    expect(readClipboard).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    resolveClipboard(' abcd-efgh ');
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledExactlyOnceWith('ABCD-EFGH'));
+    expect(onChange).toHaveBeenCalledExactlyOnceWith('ABCD-EFGH');
+
+    rerender(<ApprovalCodeForm {...props} value="ABCD-EFGH" busy />);
+    const paste = screen.getByRole('button', { name: 'Paste code' });
+    expect(paste).toBeDisabled();
+    await user.click(paste);
+    expect(readClipboard).toHaveBeenCalledTimes(1);
   });
 
   it('hides sign-in controls when the approval context is unavailable', async () => {

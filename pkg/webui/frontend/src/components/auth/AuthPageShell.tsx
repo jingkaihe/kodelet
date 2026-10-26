@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Info } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ClipboardPaste, Info } from 'lucide-react';
 import { type ClipboardEvent, type FormEvent, type ReactNode, useRef, useState } from 'react';
 import type { AuthPrincipal } from '../../types';
 import KodeletBrand from '../KodeletBrand';
@@ -134,10 +134,13 @@ export function ApprovalCodeForm({
 }: ApprovalCodeFormProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [focused, setFocused] = useState(false);
+  const [pasting, setPasting] = useState(false);
+  const [pasteError, setPasteError] = useState('');
   const compactValue = value.replace('-', '');
   const complete = compactValue.length === 8;
 
   const commitCode = (rawValue: string) => {
+    setPasteError('');
     const formatted = formatApprovalCode(rawValue);
     onChange(formatted);
     if (!busy && formatted !== value && formatted.replace('-', '').length === 8) {
@@ -147,7 +150,7 @@ export function ApprovalCodeForm({
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (complete && !busy) {
+    if (complete && !busy && !pasting) {
       onSubmit(value);
     }
   };
@@ -155,6 +158,31 @@ export function ApprovalCodeForm({
   const handlePaste = (event: ClipboardEvent<HTMLInputElement>) => {
     event.preventDefault();
     commitCode(event.clipboardData.getData('text'));
+  };
+
+  const pasteCode = async () => {
+    if (busy || pasting) {
+      return;
+    }
+    setPasteError('');
+    setPasting(true);
+    try {
+      // Keep this read inside the click gesture so Safari can request paste
+      // permission. Never read on page load or automatically approve a device.
+      const text = (await navigator.clipboard.readText()).trim();
+      const formatted = formatApprovalCode(text);
+      if (!/^[a-z2-9]{4}-?[a-z2-9]{4}$/i.test(text) || formatted.replace('-', '').length !== 8) {
+        setPasteError('Copy the eight-character code from your Kodelet client, then try again.');
+        return;
+      }
+      commitCode(formatted);
+    } catch {
+      setPasteError(
+        'Couldn’t read the clipboard. Allow paste access and try again, or enter the code manually.'
+      );
+    } finally {
+      setPasting(false);
+    }
   };
 
   const moveCaretToEnd = () => {
@@ -167,7 +195,7 @@ export function ApprovalCodeForm({
 
   return (
     <form className="auth-code-form" onSubmit={handleSubmit}>
-      <div className="auth-code-control" aria-busy={busy}>
+      <div className="auth-code-control" aria-busy={busy || pasting}>
         <input
           aria-label={label}
           autoCapitalize="characters"
@@ -176,7 +204,7 @@ export function ApprovalCodeForm({
           autoFocus
           className="auth-code-input"
           data-1p-ignore="true"
-          disabled={busy}
+          disabled={busy || pasting}
           id={id}
           inputMode="text"
           maxLength={32}
@@ -210,8 +238,18 @@ export function ApprovalCodeForm({
           })}
         </div>
       </div>
+      <button
+        className="auth-primary-button mt-2 self-end gap-2"
+        disabled={busy || pasting}
+        onClick={pasteCode}
+        type="button"
+      >
+        <ClipboardPaste aria-hidden="true" size={16} strokeWidth={1.9} />
+        {pasting ? 'Pasting…' : 'Paste code'}
+      </button>
+      {pasteError ? <AuthNotice tone="error">{pasteError}</AuthNotice> : null}
       {busy ? <output className="auth-code-status">Checking…</output> : null}
-      <button className="sr-only" disabled={!complete || busy} type="submit">
+      <button className="sr-only" disabled={!complete || busy || pasting} type="submit">
         Check code
       </button>
     </form>
