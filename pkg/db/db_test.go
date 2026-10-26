@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,71 @@ func TestOpen(t *testing.T) {
 	defer db.Close()
 
 	require.NoError(t, VerifyConfiguration(db))
+}
+
+func TestOpenConfiguresReplacementConnection(t *testing.T) {
+	database, err := Open(t.Context(), filepath.Join(t.TempDir(), "replacement.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, database.Close()) })
+	_, err = database.ExecContext(t.Context(), `
+		CREATE TABLE parents (id INTEGER PRIMARY KEY);
+		CREATE TABLE children (parent_id INTEGER REFERENCES parents(id) ON DELETE CASCADE);
+		INSERT INTO parents VALUES (1);
+		INSERT INTO children VALUES (1);
+	`)
+	require.NoError(t, err)
+
+	// Simulate the driver rejecting an unusable connection. The next operation
+	// must open a replacement without calling Open or Configure again.
+	connection, err := database.Conn(t.Context())
+	require.NoError(t, err)
+	require.ErrorIs(t, connection.Raw(func(any) error { return driver.ErrBadConn }), driver.ErrBadConn)
+	require.Zero(t, database.Stats().OpenConnections)
+
+	for pragma, expected := range map[string]string{
+		"journal_mode": "wal",
+		"synchronous":  "1",
+		"cache_size":   "1000",
+		"temp_store":   "2",
+		"busy_timeout": "5000",
+		"foreign_keys": "1",
+	} {
+		var actual string
+		require.NoError(t, database.GetContext(t.Context(), &actual, "PRAGMA "+pragma))
+		assert.Equal(t, expected, actual, pragma)
+	}
+
+	_, err = database.ExecContext(t.Context(), "INSERT INTO children VALUES (2)")
+	require.ErrorContains(t, err, "FOREIGN KEY constraint failed")
+	_, err = database.ExecContext(t.Context(), "DELETE FROM parents WHERE id = 1")
+	require.NoError(t, err)
+	var remaining int
+	require.NoError(t, database.GetContext(t.Context(), &remaining, "SELECT COUNT(*) FROM children"))
+	assert.Zero(t, remaining, "foreign-key cascades must survive connection replacement")
+}
+
+func TestOpenEscapesDatabasePath(t *testing.T) {
+	t.Chdir(t.TempDir())
+	for _, absolute := range []bool{false, true} {
+		name := "relative"
+		if absolute {
+			name = "absolute"
+		}
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join("nested", "storage ?#%&+.db")
+			if absolute {
+				var err error
+				path, err = filepath.Abs(path)
+				require.NoError(t, err)
+			}
+			database, err := Open(t.Context(), path)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, database.Close()) })
+			_, err = os.Stat(path)
+			require.NoError(t, err, "URI metacharacters must remain part of the filename")
+			require.NoError(t, VerifyConfiguration(database))
+		})
+	}
 }
 
 func TestOpenCanceledQueryReleasesWALSnapshot(t *testing.T) {

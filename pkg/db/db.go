@@ -3,6 +3,7 @@ package db
 
 import (
 	"context"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,15 @@ import (
 	// sqlite driver for database/sql registration
 	_ "modernc.org/sqlite"
 )
+
+var sqlitePragmas = []string{
+	"busy_timeout=5000",
+	"journal_mode=WAL",
+	"synchronous=NORMAL",
+	"cache_size=1000",
+	"temp_store=memory",
+	"foreign_keys=ON",
+}
 
 // DefaultDBPath returns the default path for the shared storage database.
 func DefaultDBPath() (string, error) {
@@ -33,7 +43,18 @@ func Open(ctx context.Context, dbPath string) (*sqlx.DB, error) {
 		return nil, errors.Wrap(err, "failed to create database directory")
 	}
 
-	db, err := sqlx.Open("sqlite", dbPath)
+	absolutePath, err := filepath.Abs(dbPath)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to resolve database path")
+	}
+	// The driver applies these pragmas to every physical connection, including
+	// replacements opened by database/sql after an interrupted connection is discarded.
+	dsn := url.URL{
+		Scheme:   "file",
+		Path:     absolutePath,
+		RawQuery: url.Values{"_pragma": sqlitePragmas}.Encode(),
+	}
+	db, err := sqlx.Open("sqlite", dsn.String())
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to open database")
 	}
@@ -51,19 +72,11 @@ func Open(ctx context.Context, dbPath string) (*sqlx.DB, error) {
 	return db, nil
 }
 
-// Configure sets up SQLite pragmas for optimal WAL mode performance.
+// Configure applies SQLite pragmas and verifies WAL mode on an existing pool.
+// Use Open to ensure replacement connections also receive these settings.
 func Configure(ctx context.Context, db *sqlx.DB) error {
-	pragmas := []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA synchronous=NORMAL",
-		"PRAGMA cache_size=1000",
-		"PRAGMA temp_store=memory",
-		"PRAGMA busy_timeout=5000",
-		"PRAGMA foreign_keys=ON",
-	}
-
-	for _, pragma := range pragmas {
-		if _, err := db.ExecContext(ctx, pragma); err != nil {
+	for _, pragma := range sqlitePragmas {
+		if _, err := db.ExecContext(ctx, "PRAGMA "+pragma); err != nil {
 			return errors.Wrapf(err, "failed to execute pragma: %s", pragma)
 		}
 	}
