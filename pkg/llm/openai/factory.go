@@ -11,19 +11,19 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
 )
 
 // NewThread creates a new OpenAI thread based on the configuration.
 // It dispatches between the Chat Completions API and the Responses API
 // based on api_mode.
 func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
+	if normalizeServiceTier(config) == llmtypes.OpenAIServiceTierFlex {
+		return nil, errors.New("openai.service_tier flex is not supported")
+	}
 	if config.Model == "" {
 		config.Model = openaipreset.DefaultModel
 	}
-	if err := validateModelServiceTier(config); err != nil {
-		return nil, err
-	}
-
 	log := logger.G(context.Background())
 	apiMode := resolveAPIMode(config)
 

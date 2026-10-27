@@ -80,7 +80,7 @@ func applyPromptCacheOptions(params *responses.ResponseNewParams, config llmtype
 
 func supportsPromptCacheOptions(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
-	return model == "gpt-6.1-sol" || model == "gpt-6-astra" ||
+	return model == "gpt-6.1-terra" || model == "gpt-6.1-sol" || model == "gpt-6-astra" ||
 		model == "gpt-6-sol" || model == "gpt-6-luna" ||
 		model == "gpt-5.6" || strings.HasPrefix(model, "gpt-5.6-")
 }
@@ -88,7 +88,7 @@ func supportsPromptCacheOptions(model string) bool {
 func openAIReasoningEffortForRequest(model string, effort shared.ReasoningEffort) shared.ReasoningEffort {
 	model = strings.ToLower(strings.TrimSpace(model))
 	normalized := shared.ReasoningEffort(strings.ToLower(strings.TrimSpace(string(effort))))
-	if (model == "gpt-6-astra" || model == "gpt-6.1-sol") && (normalized == shared.ReasoningEffortNone || normalized == shared.ReasoningEffortMinimal) {
+	if (model == "gpt-6-astra" || model == "gpt-6.1-sol" || model == "gpt-6.1-terra") && (normalized == shared.ReasoningEffortNone || normalized == shared.ReasoningEffortMinimal) {
 		return shared.ReasoningEffortLow
 	}
 	return normalized

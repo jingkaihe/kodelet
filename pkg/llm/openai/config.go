@@ -100,23 +100,9 @@ func resolveAPIMode(config llmtypes.Config) llmtypes.OpenAIAPIMode {
 
 func requiresResponsesAPI(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
-	return model == "gpt-6.1-sol" || isGPT6AstraModel(model) ||
+	return model == "gpt-6.1-terra" || model == "gpt-6.1-sol" || model == "gpt-6-astra" ||
 		model == "gpt-6-sol" || model == "gpt-6-luna" ||
 		model == "gpt-5.6" || strings.HasPrefix(model, "gpt-5.6-")
-}
-
-func isGPT6AstraModel(model string) bool {
-	return strings.EqualFold(strings.TrimSpace(model), "gpt-6-astra")
-}
-
-func validateModelServiceTier(config llmtypes.Config) error {
-	if normalizeServiceTier(config) != llmtypes.OpenAIServiceTierFlex {
-		return nil
-	}
-	if isGPT6AstraModel(config.Model) || isGPT6AstraModel(config.WeakModel) {
-		return fmt.Errorf("openai.service_tier flex is not supported for gpt-6-astra")
-	}
-	return nil
 }
 
 func openAIReasoningEffortForChatRequest(effort string) string {

@@ -14,6 +14,7 @@ import (
 // Define expected OpenAI platform defaults once to avoid duplication
 var (
 	expectedOpenAIReasoningModels = []string{
+		"gpt-6.1-terra",
 		"gpt-6.1-sol",
 		"gpt-6-astra",
 		"gpt-6-sol", "gpt-6-luna",
@@ -158,6 +159,7 @@ func TestLoadCodexPlatformDefaults(t *testing.T) {
 	require.NotNil(t, pricing)
 
 	expectedReasoning := []string{
+		"gpt-6.1-terra",
 		"gpt-6.1-sol",
 		"gpt-6-astra",
 		"gpt-6-sol",
@@ -562,6 +564,16 @@ func TestResolveAPIMode(t *testing.T) {
 			expected: llmtypes.OpenAIAPIModeChatCompletions,
 		},
 		{
+			name:     "gpt-6.1 Terra defaults to responses",
+			config:   llmtypes.Config{Model: "gpt-6.1-terra"},
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+		{
+			name:     "gpt-6.1 Terra normalizes casing and whitespace",
+			config:   llmtypes.Config{Model: " GPT-6.1-TERRA "},
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+		{
 			name:     "gpt-6.1 Sol defaults to responses",
 			config:   llmtypes.Config{Model: "gpt-6.1-sol"},
 			expected: llmtypes.OpenAIAPIModeResponses,
@@ -660,34 +672,6 @@ func TestNormalizeServiceTier(t *testing.T) {
 			assert.Equal(t, tt.expected, normalizeServiceTier(tt.config))
 		})
 	}
-}
-
-func TestValidateModelServiceTier(t *testing.T) {
-	assert.NoError(t, validateModelServiceTier(llmtypes.Config{
-		Model:  "gpt-6-astra",
-		OpenAI: &llmtypes.OpenAIConfig{ServiceTier: llmtypes.OpenAIServiceTierDefault},
-	}))
-	assert.NoError(t, validateModelServiceTier(llmtypes.Config{
-		Model:  "gpt-5.6-sol",
-		OpenAI: &llmtypes.OpenAIConfig{ServiceTier: llmtypes.OpenAIServiceTierFlex},
-	}))
-	assert.NoError(t, validateModelServiceTier(llmtypes.Config{
-		Model:     "gpt-6-sol",
-		WeakModel: "gpt-6-luna",
-		OpenAI:    &llmtypes.OpenAIConfig{ServiceTier: llmtypes.OpenAIServiceTierFlex},
-	}))
-
-	err := validateModelServiceTier(llmtypes.Config{
-		Model:  " GPT-6-ASTRA ",
-		OpenAI: &llmtypes.OpenAIConfig{ServiceTier: llmtypes.OpenAIServiceTierFlex},
-	})
-	require.ErrorContains(t, err, "flex is not supported for gpt-6-astra")
-
-	err = validateModelServiceTier(llmtypes.Config{
-		WeakModel: "gpt-6-astra",
-		OpenAI:    &llmtypes.OpenAIConfig{ServiceTier: llmtypes.OpenAIServiceTierFlex},
-	})
-	require.ErrorContains(t, err, "flex is not supported for gpt-6-astra")
 }
 
 func TestOpenAIReasoningEffortForChatRequest(t *testing.T) {

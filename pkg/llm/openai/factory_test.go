@@ -78,21 +78,23 @@ func TestShouldUseResponsesAPI(t *testing.T) {
 	}
 }
 
-func TestNewThreadRejectsGPT6AstraFlexTier(t *testing.T) {
-	for _, platform := range []string{"openai", "codex"} {
-		for _, model := range []string{"gpt-6-astra", ""} {
-			t.Run(platform+"/model="+model, func(t *testing.T) {
-				thread, err := NewThread(llmtypes.Config{
-					Provider: "openai",
-					Model:    model,
-					OpenAI: &llmtypes.OpenAIConfig{
-						Platform:    platform,
-						ServiceTier: llmtypes.OpenAIServiceTierFlex,
-					},
+func TestNewThreadRejectsFlexTier(t *testing.T) {
+	for _, platform := range []string{"", "openai", "codex"} {
+		for _, model := range []string{"gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-4.1", "custom-model", ""} {
+			for _, tier := range []llmtypes.OpenAIServiceTier{llmtypes.OpenAIServiceTierFlex, " FLEX "} {
+				t.Run(platform+"/model="+model+"/tier="+string(tier), func(t *testing.T) {
+					thread, err := NewThread(llmtypes.Config{
+						Provider: "openai",
+						Model:    model,
+						OpenAI: &llmtypes.OpenAIConfig{
+							Platform:    platform,
+							ServiceTier: tier,
+						},
+					})
+					require.EqualError(t, err, "openai.service_tier flex is not supported")
+					assert.Nil(t, thread)
 				})
-				require.ErrorContains(t, err, "flex is not supported for gpt-6-astra")
-				assert.Nil(t, thread)
-			})
+			}
 		}
 	}
 }
@@ -122,7 +124,7 @@ func TestNewThreadGPT6UsesResponses(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("KODELET_OPENAI_API_MODE", "chat_completions")
 	for _, platform := range []string{"openai", "codex"} {
-		for _, model := range []string{"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
+		for _, model := range []string{"gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
 			for _, role := range []string{"main", "weak"} {
 				t.Run(platform+"/"+model+"/"+role, func(t *testing.T) {
 					config := llmtypes.Config{

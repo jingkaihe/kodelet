@@ -557,17 +557,21 @@ func TestApplyPromptCacheOptions(t *testing.T) {
 }
 
 func TestOpenAIReasoningEffortForRequest(t *testing.T) {
-	for _, effort := range []shared.ReasoningEffort{
-		shared.ReasoningEffortLow,
-		shared.ReasoningEffortMedium,
-		shared.ReasoningEffortHigh,
-		shared.ReasoningEffortXhigh,
-		shared.ReasoningEffortMax,
+	for _, model := range []string{
+		"gpt-6.1-terra", " GPT-6.1-TERRA ", "gpt-6.1-sol", " GPT-6.1-SOL ",
 	} {
-		assert.Equal(t, effort, openAIReasoningEffortForRequest("gpt-6.1-sol", effort))
+		for _, effort := range []shared.ReasoningEffort{
+			shared.ReasoningEffortLow,
+			shared.ReasoningEffortMedium,
+			shared.ReasoningEffortHigh,
+			shared.ReasoningEffortXhigh,
+			shared.ReasoningEffortMax,
+		} {
+			assert.Equal(t, effort, openAIReasoningEffortForRequest(model, effort))
+		}
+		assert.Equal(t, shared.ReasoningEffortLow, openAIReasoningEffortForRequest(model, shared.ReasoningEffortNone))
+		assert.Equal(t, shared.ReasoningEffortLow, openAIReasoningEffortForRequest(model, shared.ReasoningEffort(" MINIMAL ")))
 	}
-	assert.Equal(t, shared.ReasoningEffortLow, openAIReasoningEffortForRequest("gpt-6.1-sol", shared.ReasoningEffortNone))
-	assert.Equal(t, shared.ReasoningEffortLow, openAIReasoningEffortForRequest(" GPT-6.1-SOL ", shared.ReasoningEffort(" MINIMAL ")))
 	assert.Equal(t, shared.ReasoningEffortMax, openAIReasoningEffortForRequest("gpt-6-astra", shared.ReasoningEffortMax))
 	assert.Equal(t, shared.ReasoningEffortXhigh, openAIReasoningEffortForRequest("gpt-6-astra", shared.ReasoningEffort("XHIGH")))
 	assert.Equal(t, shared.ReasoningEffortLow, openAIReasoningEffortForRequest("gpt-6-astra", shared.ReasoningEffortNone))
@@ -581,7 +585,7 @@ func TestOpenAIReasoningEffortForRequest(t *testing.T) {
 
 func TestProcessMessageExchangeGPT6(t *testing.T) {
 	for _, platform := range []string{"openai", "codex"} {
-		for _, model := range []string{"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
+		for _, model := range []string{"gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
 			t.Run(platform+"/"+model, func(t *testing.T) {
 				config := llmtypes.Config{
 					Provider: "openai",
