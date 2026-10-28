@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.8.16-beta
+
+Added GPT-6.1 Terra (`gpt-6.1-terra`) support for OpenAI and Codex.
+
+Removed `openai.service_tier: flex` support.
+
+Updated the Go toolchain and Docker build image to 1.27.3, incorporating TLS, HTTP, and X.509 security fixes, including rejection of certificate chains containing compromised eMudhra intermediate keys. Updated golangci-lint to 2.15.0 for toolchain compatibility.
+
+**Upgrade:** Install the new binaries or rebuild and redeploy containers, then restart running instances to activate the security fixes. Updating the Go toolchain alone does not patch existing executables.
+
 ## 0.8.15-beta
 
 Added a "Paste code" button to Web UI sign-in and runner enrollment forms, with validation and clear errors when clipboard access is blocked or the copied text is not an approval code. Pasting checks the code but does not automatically approve the request.
