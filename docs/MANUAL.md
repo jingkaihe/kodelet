@@ -1214,6 +1214,7 @@ Features:
 ### OpenAI
 
 Kodelet supports OpenAI models including:
+- `gpt-6.1-terra` (GPT-6.1 Terra, available on OpenAI and Codex)
 - `gpt-6.1-sol` (GPT-6.1 Sol, coding and agentic workflows)
 - `gpt-6-astra` (GPT-6 Astra, most capable model for complex agentic work)
 - `gpt-6-sol` (GPT-6 Sol, coding and agentic workflows)
@@ -1284,10 +1285,7 @@ profiles:
       websocket_mode: true
 ```
 
-`openai.service_tier` is optional. Kodelet accepts OpenAI's native values
-`auto`, `default`, `flex`, `priority`, and `scale`, plus Codex's
-user-facing `fast` alias. When you set `fast`, Kodelet sends
-`service_tier: priority` to the upstream API.
+`openai.service_tier` is optional. Kodelet accepts OpenAI's native values `auto`, `default`, `priority`, and `scale`, plus Codex's user-facing `fast` alias. When you set `fast`, Kodelet sends `service_tier: priority` to the upstream API. Kodelet does not support `flex`.
 
 `openai.websocket_mode` controls the Responses API WebSocket transport. It
 defaults to `true` for supported OpenAI and Codex Responses API endpoints to

@@ -9,6 +9,7 @@ import (
 // Models defines the Codex model categorization for reasoning and non-reasoning models.
 var Models = llm.CustomModels{
 	Reasoning: []string{
+		"gpt-6.1-terra",
 		"gpt-6.1-sol",
 		"gpt-6-astra",
 		"gpt-6-sol",
@@ -30,9 +31,19 @@ var Models = llm.CustomModels{
 }
 
 // Pricing defines the standard-tier pricing information for Codex models.
-// GPT-6.1 Sol, GPT-6 Sol, and Luna include long-context rates and no cache-write charges.
+// GPT-6.1 Terra and Sol, GPT-6 Sol, and Luna include long-context rates and no cache-write charges.
 // Older models retain their existing pricing and context bands.
 var Pricing = llm.CustomPricing{
+	"gpt-6.1-terra": llm.ModelPricing{
+		Input:                  0.000001,   // $1.00 per million tokens
+		CachedInput:            0.00000005, // $0.05 per million tokens
+		Output:                 0.000005,   // $5.00 per million tokens
+		LongContextInput:       0.000002,   // $2.00 per million tokens
+		LongContextCachedInput: 0.0000001,  // $0.10 per million tokens
+		LongContextOutput:      0.0000075,  // $7.50 per million tokens
+		LongContextThreshold:   272_000,
+		ContextWindow:          500_000,
+	},
 	"gpt-6.1-sol": llm.ModelPricing{
 		Input:                  0.000002,  // $2.00 per million tokens
 		CachedInput:            0.0000001, // $0.10 per million tokens
@@ -149,6 +160,16 @@ var Pricing = llm.CustomPricing{
 // PriorityPricing defines the fast/priority-tier pricing information for Codex
 // models. The `fast` service tier is sent upstream as OpenAI `priority`.
 var PriorityPricing = llm.CustomPricing{
+	"gpt-6.1-terra": llm.ModelPricing{
+		Input:                  0.000002,  // $2.00 per million tokens
+		CachedInput:            0.0000001, // $0.10 per million tokens
+		Output:                 0.00001,   // $10.00 per million tokens
+		LongContextInput:       0.000004,  // $4.00 per million tokens
+		LongContextCachedInput: 0.0000002, // $0.20 per million tokens
+		LongContextOutput:      0.000015,  // $15.00 per million tokens
+		LongContextThreshold:   272_000,
+		ContextWindow:          500_000,
+	},
 	"gpt-6.1-sol": llm.ModelPricing{
 		Input:                  0.000004,  // $4.00 per million tokens
 		CachedInput:            0.0000002, // $0.20 per million tokens
