@@ -10,52 +10,80 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
-// addDebugFlags registers profiling flags for serve and runner start.
-func addDebugFlags(cmd *cobra.Command) {
-	cmd.Flags().String("debug-addr", "", "Serve unauthenticated Go pprof endpoints on this host:port, for example 127.0.0.1:6060 (default: disabled)")
-	cmd.Flags().Bool("debug-allow-remote", false, "Allow --debug-addr to bind a non-loopback address; restrict network access to that port first")
+const defaultDebugAddr = "127.0.0.1:6060"
+
+// debugConfig is the resolved profiling listener setting.
+type debugConfig struct {
+	Address  string // empty disables the listener
+	Explicit bool   // from --debug-addr; bind failures are fatal
 }
 
-// applyDebugFlags lets explicitly set flags override inherited settings.
-func applyDebugFlags(cmd *cobra.Command, config *debugserver.Config) {
-	if address, err := cmd.Flags().GetString("debug-addr"); err == nil && cmd.Flags().Changed("debug-addr") {
-		config.Address = strings.TrimSpace(address)
+// addDebugFlags registers the profiling flag for serve and runner start.
+func addDebugFlags(cmd *cobra.Command) {
+	cmd.Flags().String("debug-addr", "", "Serve unauthenticated Go pprof endpoints on host:port, e.g. 127.0.0.1:6060; overrides debug.enabled/debug.addr, and an empty value disables")
+}
+
+// resolveDebugConfig applies --debug-addr over the debug config section.
+func resolveDebugConfig(cmd *cobra.Command) debugConfig {
+	if flag := cmd.Flags().Lookup("debug-addr"); flag != nil && flag.Changed {
+		return debugConfig{Address: strings.TrimSpace(flag.Value.String()), Explicit: true}
 	}
-	if allowRemote, err := cmd.Flags().GetBool("debug-allow-remote"); err == nil && cmd.Flags().Changed("debug-allow-remote") {
-		config.AllowRemote = allowRemote
+	if !viper.GetBool("debug.enabled") {
+		return debugConfig{}
 	}
+	address := strings.TrimSpace(viper.GetString("debug.addr"))
+	if address == "" {
+		address = defaultDebugAddr
+	}
+	return debugConfig{Address: address}
+}
+
+func (c debugConfig) validate() error {
+	if c.Address == "" {
+		return nil
+	}
+	return debugserver.ValidateAddress(c.Address)
 }
 
 // debugListener holds the optional profiling listener; the zero value is disabled.
 type debugListener struct {
-	server *debugserver.Server
+	server  *debugserver.Server
+	bindErr error
 }
 
 // startDebugListener validates the configuration and starts the listener when enabled.
-func startDebugListener(ctx context.Context, config debugserver.Config) (debugListener, error) {
-	if err := config.Validate(); err != nil {
+func startDebugListener(ctx context.Context, config debugConfig) (debugListener, error) {
+	if err := config.validate(); err != nil {
 		return debugListener{}, err
 	}
-	if !config.Enabled() {
+	if config.Address == "" {
 		return debugListener{}, nil
 	}
-	server, err := debugserver.Start(ctx, config)
+	server, err := debugserver.Start(ctx, config.Address)
 	if err != nil {
-		return debugListener{}, errors.Wrap(err, "failed to start the debug listener")
+		if config.Explicit {
+			return debugListener{}, errors.Wrap(err, "failed to start the debug listener")
+		}
+		// The server and every runner share one config, so a taken port only disables profiling here.
+		logger.G(ctx).WithError(err).Warn("debug profiling disabled")
+		return debugListener{bindErr: err}, nil
 	}
 	logger.G(ctx).WithField("address", server.Addr().String()).Info("Debug profiling listener started")
 	return debugListener{server: server}, nil
 }
 
 func (l debugListener) report() {
-	if l.server == nil {
-		return
-	}
-	presenter.Info(fmt.Sprintf("Debug profiling endpoints: http://%s/debug/pprof/", l.server.Addr()))
-	if !l.server.Loopback() {
-		presenter.Warning("Debug profiling endpoints are unauthenticated and reachable beyond this host; restrict network access to this port")
+	switch {
+	case l.bindErr != nil:
+		presenter.Warning(fmt.Sprintf("Debug profiling disabled: %v; pass --debug-addr to choose another address", l.bindErr))
+	case l.server != nil:
+		presenter.Info(fmt.Sprintf("Debug profiling endpoints: %s", l.server.URL()))
+		if !l.server.Loopback() {
+			presenter.Warning(fmt.Sprintf("Debug profiling endpoints are unauthenticated and listening on %s; restrict network access to this port", l.server.Addr()))
+		}
 	}
 }
 

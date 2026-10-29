@@ -411,7 +411,7 @@ Workspace execution belongs on separately deployed `kodelet runner start` proces
 
 #### Health checks and profiling
 
-`GET /healthz` and `GET /readyz` (or `HEAD`) are unauthenticated on the server port and return a plain `ok`. `/healthz` reports only that the process is serving HTTP; it does not check runners, providers, or storage, so use it for liveness. `/readyz` returns `503` with `Retry-After: 1` once shutdown starts draining active work, so load balancers stop sending new requests before the listener closes; an unavailable built-in runner does not affect it. Neither endpoint reveals the version or instance; the authenticated `/api/status` provides those details. Probe requests are logged at debug level.
+`GET /healthz` and `GET /readyz` are unauthenticated on the server port. `/healthz` reports liveness only; `/readyz` returns `503` once shutdown starts draining work. Neither reveals server details; use the authenticated `/api/status` for those.
 
 ```yaml
 livenessProbe:
@@ -424,16 +424,21 @@ readinessProbe:
     port: 8080
 ```
 
-To profile a server or runner, pass `--debug-addr` to serve Go's [pprof](https://pkg.go.dev/net/http/pprof) endpoints on a separate listener. Profiling is disabled by default. The listener has no authentication, so it accepts only loopback addresses unless `--debug-allow-remote` is also set; restrict network access to the port before using that option. `kodelet runner start` accepts the same flags. For the server, `serve.debug_addr` and `serve.debug_allow_remote` in trusted configuration also apply to the managed background server after `kodelet server restart`.
+To profile `kodelet serve` or `kodelet runner start`, enable Go's [pprof](https://pkg.go.dev/net/http/pprof) endpoints on a separate, unauthenticated listener in `~/.kodelet/config.yaml`, or pass `--debug-addr` to override it for one process:
+
+```yaml
+debug:
+  enabled: true
+  addr: "127.0.0.1:6060" # default
+```
 
 ```bash
-kodelet serve --debug-addr 127.0.0.1:6060
 go tool pprof 'http://127.0.0.1:6060/debug/pprof/profile?seconds=30'
 go tool pprof http://127.0.0.1:6060/debug/pprof/heap
 curl 'http://127.0.0.1:6060/debug/pprof/goroutine?debug=2'
 ```
 
-Release binaries are stripped, but profiles include function names and source lines, so they can be analyzed without the binary; pass `-source_path` with a checkout of the matching commit for source views. `/debug/pprof/cmdline` is disabled because command-line flags can contain tokens. In Kubernetes, keep the debug listener on loopback and reach it with `kubectl port-forward pod/NAME 6060`.
+A non-loopback address such as `0.0.0.0:6060` exposes the endpoints to the network. `/debug/pprof/cmdline` is disabled because flags can contain tokens.
 
 ### Workspace-bound Runners
 

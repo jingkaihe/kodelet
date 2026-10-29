@@ -20,7 +20,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/controlplane"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
-	"github.com/jingkaihe/kodelet/pkg/debugserver"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
@@ -60,28 +59,26 @@ type ServeConfig struct {
 	RunnerWorkspace      string
 	RunnerSettings       map[string]any
 	CORSOrigins          []string
-	Debug                debugserver.Config
+	Debug                debugConfig
 	ConfigError          error
 }
 
 type trustedServeConfig struct {
-	Host             *string                 `mapstructure:"host"`
-	Port             *int                    `mapstructure:"port"`
-	PublicBaseURL    *string                 `mapstructure:"public_base_url"`
-	CWD              *string                 `mapstructure:"cwd"`
-	AuthToken        *string                 `mapstructure:"auth_token"`
-	RunnerAuthToken  *string                 `mapstructure:"runner_auth_token"`
-	WebAuthMode      *string                 `mapstructure:"web_auth_mode"`
-	RunnerAuthMode   *string                 `mapstructure:"runner_auth_mode"`
-	SkipAuth         *bool                   `mapstructure:"skip_auth"`
-	EmbeddedRunner   *bool                   `mapstructure:"embedded_runner"`
-	BrowserEnabled   *bool                   `mapstructure:"browser_enabled"`
-	RunnerWorkspace  *string                 `mapstructure:"runner_workspace"`
-	RunnerSettings   map[string]any          `mapstructure:"runner_settings"`
-	CORSOrigins      []string                `mapstructure:"cors_origins"`
-	DebugAddr        *string                 `mapstructure:"debug_addr"`
-	DebugAllowRemote *bool                   `mapstructure:"debug_allow_remote"`
-	OIDC             *trustedServeOIDCConfig `mapstructure:"oidc"`
+	Host            *string                 `mapstructure:"host"`
+	Port            *int                    `mapstructure:"port"`
+	PublicBaseURL   *string                 `mapstructure:"public_base_url"`
+	CWD             *string                 `mapstructure:"cwd"`
+	AuthToken       *string                 `mapstructure:"auth_token"`
+	RunnerAuthToken *string                 `mapstructure:"runner_auth_token"`
+	WebAuthMode     *string                 `mapstructure:"web_auth_mode"`
+	RunnerAuthMode  *string                 `mapstructure:"runner_auth_mode"`
+	SkipAuth        *bool                   `mapstructure:"skip_auth"`
+	EmbeddedRunner  *bool                   `mapstructure:"embedded_runner"`
+	BrowserEnabled  *bool                   `mapstructure:"browser_enabled"`
+	RunnerWorkspace *string                 `mapstructure:"runner_workspace"`
+	RunnerSettings  map[string]any          `mapstructure:"runner_settings"`
+	CORSOrigins     []string                `mapstructure:"cors_origins"`
+	OIDC            *trustedServeOIDCConfig `mapstructure:"oidc"`
 }
 
 type trustedServeOIDCConfig struct {
@@ -265,7 +262,7 @@ func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
 	if corsOrigins, err := cmd.Flags().GetStringSlice("cors-origins"); err == nil && cmd.Flags().Changed("cors-origins") {
 		config.CORSOrigins = corsOrigins
 	}
-	applyDebugFlags(cmd, &config.Debug)
+	config.Debug = resolveDebugConfig(cmd)
 	if config.EmbeddedRunner {
 		browserConfig, err := runnerBrowserConfigFromFlags(cmd)
 		config.Browser = browserConfig
@@ -349,12 +346,6 @@ func applyTrustedServeConfig(config *ServeConfig) error {
 	config.RunnerSettings = trusted.RunnerSettings
 	if trusted.CORSOrigins != nil {
 		config.CORSOrigins = trusted.CORSOrigins
-	}
-	if trusted.DebugAddr != nil {
-		config.Debug.Address = strings.TrimSpace(*trusted.DebugAddr)
-	}
-	if trusted.DebugAllowRemote != nil {
-		config.Debug.AllowRemote = *trusted.DebugAllowRemote
 	}
 	if trusted.OIDC == nil {
 		return nil
@@ -489,7 +480,7 @@ func validateServeConfig(config *ServeConfig) error {
 	if err := controlplane.ValidateCORSOrigins(config.CORSOrigins); err != nil {
 		return err
 	}
-	if err := config.Debug.Validate(); err != nil {
+	if err := config.Debug.validate(); err != nil {
 		return err
 	}
 

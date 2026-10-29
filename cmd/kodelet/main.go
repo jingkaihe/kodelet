@@ -90,6 +90,8 @@ func init() {
 	viper.SetDefault("tracing.sampler", "ratio")
 	viper.SetDefault("tracing.ratio", 1)
 	viper.SetDefault("metrics.enabled", false)
+	viper.SetDefault("debug.enabled", false)
+	viper.SetDefault("debug.addr", defaultDebugAddr)
 
 	viper.SetDefault("log_level", "info")
 	viper.SetDefault("log_format", "fmt")

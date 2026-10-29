@@ -70,11 +70,6 @@ log_format: "json"
 #   skip_auth: false
 #   cors_origins:
 #     - "https://app.example.com"
-#   # Optional unauthenticated Go pprof listener on a separate port; loopback
-#   # only unless debug_allow_remote is true. /healthz and /readyz are always
-#   # served on the main port. See docs/MANUAL.md.
-#   # debug_addr: "127.0.0.1:6060"
-#   # debug_allow_remote: false
 #   oidc:
 #     issuer: "https://accounts.google.com"
 #     client_id: "CLIENT_ID.apps.googleusercontent.com"
@@ -469,6 +464,14 @@ context:
   # patterns:
   #   - "AGENTS.md"
   #   - "README.md"
+
+# Opt-in Go pprof endpoints on a separate, unauthenticated listener for
+# `kodelet serve` (including the background server) and `kodelet runner start`.
+# --debug-addr overrides it per process. A non-loopback address such as
+# 0.0.0.0:6060 exposes the endpoints to the network. See docs/MANUAL.md.
+debug:
+  enabled: false
+  addr: "127.0.0.1:6060"
 
 # Push metrics configuration (independent of tracing).
 # Configure on the daemon; runners report tool measurements over their existing connection.

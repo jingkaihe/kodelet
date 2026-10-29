@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/browser"
-	"github.com/jingkaihe/kodelet/pkg/debugserver"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
@@ -530,35 +529,23 @@ func TestConfirmRunnerRemovalDefaultsToNoAndExplainsTranscriptPreservation(t *te
 	require.ErrorContains(t, err, "--json requires --no-confirm")
 }
 
-func TestRunnerStartDebugListenerFlags(t *testing.T) {
+func TestRunnerStartDebugConfig(t *testing.T) {
 	setServerConfigForTest(t, "")
-	for _, cmd := range []*cobra.Command{serveCmd, runnerStartCmd} {
-		for _, flag := range []string{"debug-addr", "debug-allow-remote"} {
-			assert.NotNil(t, cmd.Flags().Lookup(flag), "%s registers %s", cmd.CommandPath(), flag)
-		}
-	}
+	assert.NotNil(t, serveCmd.Flags().Lookup("debug-addr"))
+	assert.NotNil(t, runnerStartCmd.Flags().Lookup("debug-addr"))
 
 	cmd := &cobra.Command{Use: "start"}
 	cmd.Flags().String("server", defaultRunnerServer, "")
 	cmd.Flags().String("auth-token", "", "")
 	cmd.Flags().String("name", "", "")
 	addDebugFlags(cmd)
-	assert.False(t, runnerStartConfigFromFlags(cmd).Debug.Enabled(), "profiling is disabled by default")
+	require.NoError(t, cmd.ParseFlags([]string{"--debug-addr=127.0.0.1:6061"}))
+	assert.Equal(t, debugConfig{Address: "127.0.0.1:6061", Explicit: true}, runnerStartConfigFromFlags(cmd).Debug)
 
-	require.NoError(t, cmd.ParseFlags([]string{"--debug-addr=127.0.0.1:6060", "--debug-allow-remote"}))
-	assert.Equal(t, debugserver.Config{Address: "127.0.0.1:6060", AllowRemote: true}, runnerStartConfigFromFlags(cmd).Debug)
-}
-
-func TestRunRunnerStartRejectsNonLoopbackDebugAddressBeforeConnecting(t *testing.T) {
 	t.Chdir(t.TempDir())
 	t.Setenv(controlPlaneServerEnv, "")
-
-	err := runRunnerStart(t.Context(), runnerStartConfig{
-		Server: defaultRunnerServer,
-		Debug:  debugserver.Config{Address: "0.0.0.0:6060"},
-	})
-	require.ErrorContains(t, err, "not a loopback address")
-	assert.Empty(t, os.Getenv(controlPlaneServerEnv), "validation must fail before runner setup")
+	err := runRunnerStart(t.Context(), runnerStartConfig{Server: defaultRunnerServer, Debug: debugConfig{Address: ":6060", Explicit: true}})
+	require.ErrorContains(t, err, "has no host", "an invalid address must fail before connecting")
 }
 
 func TestRunRunnerStartRejectsInvalidServerBeforeConnecting(t *testing.T) {

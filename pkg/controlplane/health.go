@@ -12,10 +12,8 @@ const (
 
 // isHealthProbeRequest matches public probes; only GET and HEAD qualify.
 func isHealthProbeRequest(r *http.Request) bool {
-	if r == nil || r.URL == nil || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
-		return false
-	}
-	return r.URL.Path == healthzPath || r.URL.Path == readyzPath
+	return (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
+		(r.URL.Path == healthzPath || r.URL.Path == readyzPath)
 }
 
 // handleHealthz reports liveness only, independent of runners, providers, and storage.

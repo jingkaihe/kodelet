@@ -19,7 +19,6 @@ import (
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/jingkaihe/kodelet/pkg/browser"
-	"github.com/jingkaihe/kodelet/pkg/debugserver"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
@@ -40,7 +39,7 @@ type runnerStartConfig struct {
 	AuthToken   string
 	DisplayName string
 	Browser     browser.Config
-	Debug       debugserver.Config
+	Debug       debugConfig
 	ConfigError error
 }
 
@@ -159,14 +158,12 @@ func runnerStartConfigFromFlags(cmd *cobra.Command) runnerStartConfig {
 	server, _ := serverFlagOrConfig(cmd)
 	displayName, _ := cmd.Flags().GetString("name")
 	browserConfig, err := runnerBrowserConfigFromFlags(cmd)
-	var debugConfig debugserver.Config
-	applyDebugFlags(cmd, &debugConfig)
 	return runnerStartConfig{
 		Server:      server,
 		AuthToken:   authTokenFlagOrEnvironment(cmd, runnerAuthTokenEnv),
 		DisplayName: displayName,
 		Browser:     browserConfig,
-		Debug:       debugConfig,
+		Debug:       resolveDebugConfig(cmd),
 		ConfigError: err,
 	}
 }

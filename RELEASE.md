@@ -4,6 +4,10 @@
 
 Added opt-in OpenTelemetry metrics for model calls, token usage, cost, and tool executions via `metrics.enabled`; see [Observability](docs/observability.md#enable-push-metrics).
 
+Added unauthenticated `/healthz` and `/readyz` endpoints on the server port for liveness and readiness probes.
+
+Added opt-in Go pprof profiling for `kodelet serve` and `kodelet runner start` on a separate listener, enabled with `debug.enabled` or `--debug-addr`; see [Health checks and profiling](docs/MANUAL.md#health-checks-and-profiling).
+
 Updated `go-jose/v4` to 4.1.6 and the TypeScript SDK's transitive `@hono/node-server` dependency to 2.1.3, addressing four Dependabot alerts for denial of service, panics, and a static-path middleware bypass.
 
 ## 0.8.16-beta
