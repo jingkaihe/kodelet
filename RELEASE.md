@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.8.17-beta
+
+Added opt-in OpenTelemetry metrics for model calls, token usage, cost, and tool executions via `metrics.enabled`; see [Observability](docs/observability.md#enable-push-metrics).
+
 ## 0.8.16-beta
 
 Added GPT-6.1 Terra (`gpt-6.1-terra`) support for OpenAI and Codex.
