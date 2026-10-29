@@ -563,6 +563,11 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isHealthProbeRequest(r) {
+			// Public probes; never redirect to sign-in.
+			next.ServeHTTP(w, r)
+			return
+		}
 		if r.URL.Path == protocol.BrowserRelayEndpoint && r.Method == http.MethodGet {
 			// The handler atomically consumes a short-lived, generation-bound relay ticket.
 			next.ServeHTTP(w, r)

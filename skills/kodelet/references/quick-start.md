@@ -102,6 +102,8 @@ kodelet serve --embedded-runner=false
 
 `serve` hosts an embedded runner by default; `--embedded-runner=false` uses external runners only. Workspace execution, discovery, Git and terminals always stay on runners. Use `--runner-workspace` instead of the removed `serve --cwd`.
 
+`/healthz` (liveness) and `/readyz` (503 while draining for shutdown) are unauthenticated on the server port. `--debug-addr 127.0.0.1:6060` on `serve` or `runner start` serves Go pprof endpoints on a separate, unauthenticated, loopback-only listener; `--debug-allow-remote` permits other addresses.
+
 With no explicit authentication modes, `kodelet serve` prints separate generated web/API and runner tokens. Tokens supplied through flags or trusted configuration are not echoed. For native browser OIDC and browser-approved runners, create a Web application OAuth client with the exact callback URI, store its client secret in a regular owner-only file, and run:
 
 ```bash

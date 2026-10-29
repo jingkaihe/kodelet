@@ -409,6 +409,32 @@ Arguments after the image name are appended to the fixed `serve` entrypoint, so 
 
 Workspace execution belongs on separately deployed `kodelet runner start` processes. Put the control plane behind an HTTPS reverse proxy or ingress before connecting non-loopback clients or runners over an untrusted network.
 
+#### Health checks and profiling
+
+`GET /healthz` and `GET /readyz` (or `HEAD`) are unauthenticated on the server port and return a plain `ok`. `/healthz` reports only that the process is serving HTTP; it does not check runners, providers, or storage, so use it for liveness. `/readyz` returns `503` with `Retry-After: 1` once shutdown starts draining active work, so load balancers stop sending new requests before the listener closes; an unavailable built-in runner does not affect it. Neither endpoint reveals the version or instance; the authenticated `/api/status` provides those details. Probe requests are logged at debug level.
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: 8080
+```
+
+To profile a server or runner, pass `--debug-addr` to serve Go's [pprof](https://pkg.go.dev/net/http/pprof) endpoints on a separate listener. Profiling is disabled by default. The listener has no authentication, so it accepts only loopback addresses unless `--debug-allow-remote` is also set; restrict network access to the port before using that option. `kodelet runner start` accepts the same flags. For the server, `serve.debug_addr` and `serve.debug_allow_remote` in trusted configuration also apply to the managed background server after `kodelet server restart`.
+
+```bash
+kodelet serve --debug-addr 127.0.0.1:6060
+go tool pprof 'http://127.0.0.1:6060/debug/pprof/profile?seconds=30'
+go tool pprof http://127.0.0.1:6060/debug/pprof/heap
+curl 'http://127.0.0.1:6060/debug/pprof/goroutine?debug=2'
+```
+
+Release binaries are stripped, but profiles include function names and source lines, so they can be analyzed without the binary; pass `-source_path` with a checkout of the matching commit for source views. `/debug/pprof/cmdline` is disabled because command-line flags can contain tokens. In Kubernetes, keep the debug listener on loopback and reach it with `kubectl port-forward pod/NAME 6060`.
+
 ### Workspace-bound Runners
 
 A workspace-bound runner supplies tools, context, skills, commands, and extensions to `kodelet serve`. Its startup directory is the default workspace, but conversations may select another directory accessible on the runner host.
@@ -1119,6 +1145,8 @@ Push-based OpenTelemetry metrics are independently opt-in with `metrics.enabled:
 Prompt and tool content is excluded by default. `tracing.capture_content: true`, `KODELET_TRACING_CAPTURE_CONTENT=true`, or `--tracing-capture-content` opts that process into sensitive content capture. See [Observability](observability.md) for sampling, trace structure, exporter configuration, and content-capture scope.
 
 Routine lifecycle and UI-cleanup RPC spans are hidden by default; actual extension handlers and failures remain visible. Set `tracing.internal_rpc_spans: true` or `--tracing-internal-rpc-spans` on each participating process to restore transport-level diagnostics.
+
+For liveness and readiness probes and opt-in Go profiling with `--debug-addr`, see [Health checks and profiling](#health-checks-and-profiling).
 
 ## Security Configuration
 

@@ -407,6 +407,9 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 
 // setupRoutes configures all the HTTP routes
 func (s *Server) setupRoutes() {
+	// Unauthenticated probes must precede the frontend fallback.
+	s.router.HandleFunc(healthzPath, s.handleHealthz).Methods(http.MethodGet, http.MethodHead)
+	s.router.HandleFunc(readyzPath, s.handleReadyz).Methods(http.MethodGet, http.MethodHead)
 	s.router.HandleFunc("/i/{shortCode}", s.requireRole(RoleUser, s.handleImageLink)).Methods("GET", "HEAD")
 	s.router.HandleFunc(runnerpayload.ArtifactUploadPath, s.handleArtifactUpload).Methods("PUT")
 	// Authentication and browser approval routes.
@@ -580,13 +583,19 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(rw, r)
 
 		duration := time.Since(start)
-		logger.G(r.Context()).WithFields(map[string]any{
+		entry := logger.G(r.Context()).WithFields(map[string]any{
 			"method":      r.Method,
 			"path":        r.URL.Path,
 			"status":      rw.statusCode,
 			"duration":    duration,
 			"remote_addr": r.RemoteAddr,
-		}).Info("HTTP request")
+		})
+		if isHealthProbeRequest(r) && rw.statusCode < http.StatusInternalServerError {
+			// Keep frequent probes out of request logs.
+			entry.Debug("HTTP request")
+			return
+		}
+		entry.Info("HTTP request")
 	})
 }
 

@@ -19,6 +19,7 @@ import (
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/jingkaihe/kodelet/pkg/browser"
+	"github.com/jingkaihe/kodelet/pkg/debugserver"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
@@ -39,6 +40,7 @@ type runnerStartConfig struct {
 	AuthToken   string
 	DisplayName string
 	Browser     browser.Config
+	Debug       debugserver.Config
 	ConfigError error
 }
 
@@ -137,6 +139,7 @@ func init() {
 	runnerStartCmd.Flags().String("auth-token", "", "Runner-only authentication token (or KODELET_RUNNER_AUTH_TOKEN)")
 	runnerStartCmd.Flags().String("name", "", "Display name for this runner")
 	addRunnerBrowserFlags(runnerStartCmd)
+	addDebugFlags(runnerStartCmd)
 	runnerEnrollCmd.Flags().String("server", defaultRunnerServer, "Server URL")
 	runnerEnrollCmd.Flags().String("name", "", "Display name for this runner")
 	runnerEnrollCmd.Flags().Bool("replace", false, "Replace an existing local runner credential after browser approval")
@@ -156,11 +159,14 @@ func runnerStartConfigFromFlags(cmd *cobra.Command) runnerStartConfig {
 	server, _ := serverFlagOrConfig(cmd)
 	displayName, _ := cmd.Flags().GetString("name")
 	browserConfig, err := runnerBrowserConfigFromFlags(cmd)
+	var debugConfig debugserver.Config
+	applyDebugFlags(cmd, &debugConfig)
 	return runnerStartConfig{
 		Server:      server,
 		AuthToken:   authTokenFlagOrEnvironment(cmd, runnerAuthTokenEnv),
 		DisplayName: displayName,
 		Browser:     browserConfig,
+		Debug:       debugConfig,
 		ConfigError: err,
 	}
 }
@@ -199,6 +205,12 @@ func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
 	if config.ConfigError != nil {
 		return config.ConfigError
 	}
+	// Runners only dial out, so profiling needs its own listener.
+	debug, err := startDebugListener(ctx, config.Debug)
+	if err != nil {
+		return err
+	}
+	defer debug.close(ctx)
 	workspace, err := os.Getwd()
 	if err != nil {
 		return errors.Wrap(err, "failed to determine current workspace")
@@ -238,6 +250,7 @@ func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
 	defer cancel()
 	presenter.Info(fmt.Sprintf("Binding runner to workspace: %s", workspace))
 	presenter.Info(fmt.Sprintf("Connecting to server: %s", config.Server))
+	debug.report()
 	presenter.Info("Press Ctrl+C to stop the runner")
 	if err := runner.Run(runCtx); err != nil {
 		return err

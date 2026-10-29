@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/controlplane"
+	"github.com/jingkaihe/kodelet/pkg/debugserver"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -216,6 +217,34 @@ func TestValidateServeConfig(t *testing.T) {
 				CWD:          "/srv/kodelet",
 			},
 			expectedError: "serve --cwd is no longer supported",
+		},
+		{
+			name: "loopback debug address",
+			config: &ServeConfig{
+				Host:         "0.0.0.0",
+				Port:         8080,
+				CompactRatio: 0.8,
+				Debug:        debugserver.Config{Address: "127.0.0.1:6060"},
+			},
+		},
+		{
+			name: "non-loopback debug address",
+			config: &ServeConfig{
+				Host:         "0.0.0.0",
+				Port:         8080,
+				CompactRatio: 0.8,
+				Debug:        debugserver.Config{Address: "0.0.0.0:6060"},
+			},
+			expectedError: "not a loopback address",
+		},
+		{
+			name: "remote debug address explicitly allowed",
+			config: &ServeConfig{
+				Host:         "0.0.0.0",
+				Port:         8080,
+				CompactRatio: 0.8,
+				Debug:        debugserver.Config{Address: "0.0.0.0:6060", AllowRemote: true},
+			},
 		},
 	}
 
@@ -819,6 +848,38 @@ func TestGetServeConfigFromFlags_UsesTrustedYAMLSettings(t *testing.T) {
 	assert.True(t, config.OIDC.AllowAnyUser)
 	assert.Equal(t, 24*time.Hour, config.OIDC.SessionDuration)
 	assert.Equal(t, 168*time.Hour, config.OIDC.CLISessionDuration)
+}
+
+func TestGetServeConfigFromFlags_DebugListener(t *testing.T) {
+	setTrustedServeConfigForTest(t, map[string]any{
+		"debug_addr":         " 127.0.0.1:6060 ",
+		"debug_allow_remote": true,
+	})
+
+	config := getServeConfigFromFlags(newServeCommandForTest())
+	require.NoError(t, config.ConfigError)
+	assert.Equal(t, debugserver.Config{Address: "127.0.0.1:6060", AllowRemote: true}, config.Debug)
+
+	cmd := newServeCommandForTest()
+	require.NoError(t, cmd.ParseFlags([]string{"--debug-addr=[::1]:7070", "--debug-allow-remote=false"}))
+	config = getServeConfigFromFlags(cmd)
+	require.NoError(t, config.ConfigError)
+	assert.Equal(t, debugserver.Config{Address: "[::1]:7070"}, config.Debug, "explicit flags override trusted YAML")
+
+	cmd = newServeCommandForTest()
+	require.NoError(t, cmd.ParseFlags([]string{"--debug-addr="}))
+	config = getServeConfigFromFlags(cmd)
+	require.NoError(t, config.ConfigError)
+	assert.False(t, config.Debug.Enabled(), "an explicit empty flag disables the trusted listener")
+}
+
+func TestGetServeConfigFromFlags_DisablesDebugListenerByDefault(t *testing.T) {
+	setTrustedServeConfigForTest(t, map[string]any{})
+	t.Setenv("KODELET_SERVE_DEBUG_ADDR", "0.0.0.0:6060")
+
+	config := getServeConfigFromFlags(newServeCommandForTest())
+	require.NoError(t, config.ConfigError)
+	assert.Equal(t, debugserver.Config{}, config.Debug)
 }
 
 func TestGetServeConfigFromFlags_DoesNotUseServeEnvironmentVariables(t *testing.T) {
