@@ -4,6 +4,8 @@
 
 Added opt-in OpenTelemetry metrics for model calls, token usage, cost, and tool executions via `metrics.enabled`; see [Observability](docs/observability.md#enable-push-metrics).
 
+Updated `go-jose/v4` to 4.1.6 and the TypeScript SDK's transitive `@hono/node-server` dependency to 2.1.3, addressing four Dependabot alerts for denial of service, panics, and a static-path middleware bypass.
+
 ## 0.8.16-beta
 
 Added GPT-6.1 Terra (`gpt-6.1-terra`) support for OpenAI and Codex.
