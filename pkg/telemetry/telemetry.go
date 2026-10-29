@@ -4,6 +4,8 @@ package telemetry
 import (
 	"context"
 
+	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 )
@@ -28,7 +30,7 @@ type Config struct {
 }
 
 func telemetryResource(ctx context.Context, cfg Config) (*resource.Resource, error) {
-	return resource.New(ctx,
+	res, err := resource.New(ctx,
 		resource.WithHost(),
 		resource.WithAttributes(
 			semconv.ServiceName(cfg.ServiceName),
@@ -36,4 +38,11 @@ func telemetryResource(ctx context.Context, cfg Config) (*resource.Resource, err
 		),
 		resource.WithFromEnv(),
 	)
+	if errors.Is(err, resource.ErrPartialResource) {
+		// The SDK keeps valid attributes and drops malformed environment entries;
+		// a bad OTEL_RESOURCE_ATTRIBUTES entry must not disable telemetry.
+		logger.G(ctx).WithError(err).Warn("Ignoring invalid OpenTelemetry resource attributes")
+		return res, nil
+	}
+	return res, err
 }
