@@ -212,8 +212,8 @@ The current control-plane registry establishes capabilities around a centrally d
 tool.child.begin({ runId, parentToolCallId, toolCallId, name })
 
 // Runner -> control plane; acknowledged after child work and cleanup finish.
-// Contains ownership metadata only, never the child result body.
-tool.child.end({ runId, parentToolCallId, toolCallId, name })
+// Contains ownership and optional completion measurements, never the child result body.
+tool.child.end({ runId, parentToolCallId, toolCallId, name, metrics: { durationNs, outcome } })
 ```
 
 For the first version, register every dispatched child before running its hooks or implementation. The control plane validates the authenticated runner connection generation, live run, active `code_execute` parent, unique child ID, allowed tool name, and parent call budget. It retains the parent's resolved authorization and central service context for that invocation; these are not supplied by the script or trusted from a child registration request. Reject recursive code execution and children of children.
@@ -223,6 +223,8 @@ On accepted registration, reuse the existing per-tool capability rules for the a
 The runner waits for registration acknowledgement before dispatch. It then installs the child's helper, artifact, fork, and browser context through the shared execution machinery. Final effective results stay local, while any required artifact uploads or central service requests use the existing authenticated channels. Send `tool.child.end` after those operations finish. Cleanup releases active call authority, not already persisted artifacts.
 
 Registration is not a durable job or a replay mechanism. A failed or uncertain begin acknowledgement prevents local execution; any orphan registration is bounded by the parent lifetime. End cleanup is safe to repeat for the same owner, and parent cancellation/completion, run closure, or connection-generation loss revokes all remaining child registrations. Registry locks are never held while awaiting a reverse RPC or tool completion.
+
+The control plane records optional runner-measured completion summaries once per child, using the tool name retained at registration. The run's child-ID tombstones also accept late completion reports after parent cleanup, while the run and connection generation remain active; they do not restore revoked capabilities. Run teardown discards these tombstones. Metrics are best-effort and do not require child arguments/results or a separate runner-to-Collector connection.
 
 Track the parent-child relationship for ownership, summaries, and diagnostics, but do not conflate it with the child tool-call ID or an extension JSON-RPC `parentId`. The latter continues to identify its actual pending extension request.
 

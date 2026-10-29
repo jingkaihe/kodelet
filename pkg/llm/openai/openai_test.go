@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 // skipIfNoOpenAIAPIKey skips the test if OPENAI_API_KEY is not set
@@ -1141,6 +1142,7 @@ func TestChatCompletionTracing(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			recorder, provider := telemetrytest.NewRecorder(t, false)
+			collectMetrics := telemetrytest.NewMetricsRecorder(t)
 			attempts := 0
 			client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(req *http.Request) (*http.Response, error) {
 				attempts++
@@ -1186,6 +1188,11 @@ func TestChatCompletionTracing(t *testing.T) {
 			if tc.retry {
 				assert.Equal(t, 2, attempts)
 			}
+			metrics := collectMetrics()
+			require.Contains(t, metrics, "kodelet.model.calls")
+			calls := metrics["kodelet.model.calls"].Data.(metricdata.Sum[int64])
+			require.Len(t, calls.DataPoints, 1)
+			assert.EqualValues(t, 1, calls.DataPoints[0].Value, "HTTP retries share one logical call")
 		})
 	}
 }
@@ -1237,6 +1244,61 @@ func TestGetExtraHeadersAddsCopilotInitiatorAndManualCache(t *testing.T) {
 	headers = thread.getExtraHeaders(llm.MessageOpt{})
 	require.NotNil(t, headers)
 	assert.Equal(t, "user", headers["X-Initiator"])
+}
+
+func TestUsageMetricsRecordPerResponseIncrements(t *testing.T) {
+	collectMetrics := telemetrytest.NewMetricsRecorder(t)
+	thread := &Thread{
+		Thread: base.NewThread(llm.Config{Model: "primary"}, "private-conversation"),
+	}
+	thread.customPricing = llm.CustomPricing{
+		"call-model": {
+			Input:                  1,
+			CachedInput:            0.1,
+			Output:                 2,
+			LongContextInput:       3,
+			LongContextCachedInput: 0.3,
+			LongContextOutput:      4,
+			LongContextThreshold:   80,
+		},
+	}
+	thread.Usage.InputTokens = 10000
+	thread.Usage.InputCost = 1000
+	for range 2 {
+		thread.updateUsage(openai.Usage{
+			PromptTokens:     100,
+			CompletionTokens: 40,
+			PromptTokensDetails: &openai.PromptTokensDetails{
+				CachedTokens: 60,
+			},
+		}, "call-model")
+	}
+	thread.AggregateSubagentUsage(llm.Usage{
+		InputTokens: 5000,
+		InputCost:   500,
+	})
+
+	metrics := collectMetrics()
+	require.Contains(t, metrics, "kodelet.model.tokens")
+	usage := metrics["kodelet.model.tokens"].Data.(metricdata.Sum[int64])
+	tokens := map[string]int64{}
+	for _, point := range usage.DataPoints {
+		tokenType, _ := point.Attributes.Value("token.type")
+		provider, _ := point.Attributes.Value("gen_ai.provider.name")
+		model, _ := point.Attributes.Value("gen_ai.request.model")
+		assert.Equal(t, "openai", provider.AsString())
+		assert.Equal(t, "call-model", model.AsString())
+		tokens[tokenType.AsString()] += point.Value
+	}
+	assert.Equal(t, map[string]int64{
+		"input":      80,
+		"output":     80,
+		"cache_read": 120,
+	}, tokens)
+	require.Contains(t, metrics, "kodelet.model.cost")
+	cost := metrics["kodelet.model.cost"].Data.(metricdata.Sum[float64])
+	require.Len(t, cost.DataPoints, 1)
+	assert.InDelta(t, 2*(40*3+60*0.3+40*4), cost.DataPoints[0].Value, 1e-12)
 }
 
 func TestUpdateUsageWithCachedTokens(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/binaries"
@@ -88,6 +89,7 @@ func init() {
 	viper.SetDefault("tracing.internal_rpc_spans", false)
 	viper.SetDefault("tracing.sampler", "ratio")
 	viper.SetDefault("tracing.ratio", 1)
+	viper.SetDefault("metrics.enabled", false)
 
 	viper.SetDefault("log_level", "info")
 	viper.SetDefault("log_format", "fmt")
@@ -316,12 +318,17 @@ func main() {
 	}
 
 	var tracingShutdown func(context.Context) error
+	var metricsShutdown func(context.Context) error
 	cobra.OnInitialize(func() {
-		// Cobra has parsed flags by this point; CLI overrides must apply to tracing.
+		// Cobra has parsed flags by this point; CLI overrides must apply to telemetry.
 		var err error
 		tracingShutdown, err = initTracing(ctx)
 		if err != nil {
 			logger.G(ctx).WithError(err).Warn("Failed to initialize tracing")
+		}
+		metricsShutdown, err = initMetrics(ctx)
+		if err != nil {
+			logger.G(ctx).WithError(err).Warn("Failed to initialize metrics")
 		}
 		if logLevel := viper.GetString("log_level"); logLevel != "" {
 			if err := logger.SetLogLevel(logLevel); err != nil {
@@ -423,13 +430,24 @@ func main() {
 
 	// Flush before os.Exit, which does not run deferred functions.
 	err := executeCLICommand(ctx, rootCmd)
-	if tracingShutdown != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if shutdownErr := tracingShutdown(shutdownCtx); shutdownErr != nil {
-			logger.G(ctx).WithError(shutdownErr).Warn("Failed to shutdown tracing")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	var shutdowns sync.WaitGroup
+	for signal, shutdown := range map[string]func(context.Context) error{
+		"tracing": tracingShutdown,
+		"metrics": metricsShutdown,
+	} {
+		if shutdown != nil {
+			// A stalled trace exporter must not prevent the final metrics export.
+			shutdowns.Go(func() {
+				if shutdownErr := shutdown(shutdownCtx); shutdownErr != nil {
+					logger.G(ctx).WithError(shutdownErr).
+						WithField("signal", signal).Warn("Failed to shutdown telemetry")
+				}
+			})
 		}
-		cancel()
 	}
+	shutdowns.Wait()
+	cancel()
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			os.Exit(130)

@@ -29,7 +29,7 @@ func (r *Registry) registerArtifactTool(ctx context.Context, params runnerpayloa
 	if r.runs[key.runID].Status != RunStatusRunning {
 		return nil, errors.New("artifact access requires a running tool owner")
 	}
-	if r.runs[key.runID].codeChildIDs[key.toolCallID] != "" {
+	if r.runs[key.runID].codeChildren[key.toolCallID] != nil {
 		return nil, errors.New("tool call ID was already used by a code child")
 	}
 	if r.artifactTools == nil {

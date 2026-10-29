@@ -33,6 +33,123 @@ type staticRuntimeProvider struct {
 	runtime *extensions.Runtime
 }
 
+func TestServiceToolExecutionMetrics(t *testing.T) {
+	for _, test := range []struct {
+		outcome     string
+		nested      bool
+		failureKind string
+		toolError   string
+		err         error
+	}{
+		{outcome: "success", nested: true},
+		{outcome: "error", toolError: "private tool error"},
+		{outcome: "cancelled", err: context.Canceled},
+		{outcome: "timeout", err: context.DeadlineExceeded},
+		{outcome: "blocked", nested: true, failureKind: "blocked"},
+	} {
+		t.Run(test.outcome, func(t *testing.T) {
+			collect := telemetrytest.NewMetricsRecorder(t)
+			environment := &codeTestEnvironment{execute: func(
+				ctx context.Context,
+				request agentenv.ToolRequest,
+				_ agentenv.ToolUpdateSink,
+			) (agentenv.ToolExecution, error) {
+				assert.False(t, trace.SpanFromContext(ctx).IsRecording())
+				result := tooltypes.BaseToolResult{
+					Result: "private result",
+					Error:  test.toolError,
+				}
+				structured := result.StructuredData()
+				structured.ToolName = request.Name
+				return agentenv.ToolExecution{
+					Input:            request.Input,
+					Result:           result,
+					StructuredResult: structured,
+					FailureKind:      test.failureKind,
+				}, test.err
+			}}
+			service, run, peer, params := newCodeService(t, environment)
+			var metrics *runnerpayload.ToolExecutionMetrics
+			if test.nested {
+				authority, err := service.codeExecutionContext(t.Context(), run, params)
+				require.NoError(t, err)
+				_, err = authority.Call(
+					t.Context(), "test_tool", `{"private":"input"}`, "private-child-id", nil,
+				)
+				assert.Equal(t, test.outcome != "success", err != nil)
+				require.Equal(t, []string{
+					protocol.MethodToolChildBegin,
+					protocol.MethodToolChildEnd,
+				}, peer.calls)
+				assert.NotContains(t, string(mustJSON(t, peer.callParams[0])), `"metrics"`)
+				var completion runnerpayload.ToolChildParams
+				require.NoError(t, json.Unmarshal(mustJSON(t, peer.callParams[1]), &completion))
+				metrics = completion.Metrics
+			} else {
+				result, err := service.executeTool(t.Context(), runnerpayload.ToolExecuteParams{
+					RunID:      run.id,
+					Name:       "test_tool",
+					ToolCallID: "private-tool-id",
+					Input:      json.RawMessage(`{"private":"input"}`),
+				})
+				assert.Equal(t, test.err, err)
+				var completion runnerpayload.ToolExecuteResult
+				require.NoError(t, json.Unmarshal(mustJSON(t, result), &completion))
+				metrics = completion.Metrics
+			}
+
+			require.NotNil(t, metrics)
+			assert.Equal(t, test.outcome, metrics.Outcome)
+			assert.Positive(t, metrics.DurationNS)
+			assert.Empty(t, collect(), "runner must forward measurements, not record local metrics")
+		})
+	}
+}
+
+func TestToolExecutionRPCErrorCarriesMetrics(t *testing.T) {
+	environment := &codeTestEnvironment{execute: func(
+		context.Context, agentenv.ToolRequest, agentenv.ToolUpdateSink,
+	) (agentenv.ToolExecution, error) {
+		return agentenv.ToolExecution{}, context.DeadlineExceeded
+	}}
+	service, run, _, _ := newCodeService(t, environment)
+	params := runnerpayload.ToolExecuteParams{
+		RunID:      run.id,
+		Name:       "test_tool",
+		ToolCallID: "tool-call",
+		Input:      json.RawMessage(`{"private":"input"}`),
+	}
+	result, rpcErr := service.HandleRequest(t.Context(), protocol.MethodToolExecute, mustJSON(t, params))
+	assert.Nil(t, result)
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, protocol.ErrorCodeUnavailable, rpcErr.Code)
+	assert.Equal(t, context.DeadlineExceeded.Error(), rpcErr.Message)
+
+	// Exercise the same JSON error-data decoding used by the control plane.
+	var received protocol.RPCError
+	require.NoError(t, json.Unmarshal(mustJSON(t, rpcErr), &received))
+	data := mustJSON(t, received.Data)
+	var completion runnerpayload.ToolExecuteResult
+	require.NoError(t, json.Unmarshal(data, &completion))
+	require.NotNil(t, completion.Metrics)
+	assert.Positive(t, completion.Metrics.DurationNS)
+	wantData := map[string]any{
+		"reason": "",
+		"metrics": map[string]any{
+			"durationNs": completion.Metrics.DurationNS,
+			"outcome":    "timeout",
+		},
+	}
+	assert.JSONEq(t, string(mustJSON(t, wantData)), string(data))
+
+	// A rejected request retains its existing error reason and has no measurement.
+	params.RunID = "missing-run"
+	_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodToolExecute, mustJSON(t, params))
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, protocol.ErrorReasonRunNotActive, rpcErr.Reason())
+	assert.NotContains(t, string(mustJSON(t, rpcErr)), `"metrics"`)
+}
+
 func TestDecorateRunContextEnablesBackgroundTasks(t *testing.T) {
 	ctx := (&Service{}).decorateRunContext(context.Background(), "run-1", "conversation-1")
 	capabilities := extensions.RuntimeCapabilitiesFromContext(ctx)

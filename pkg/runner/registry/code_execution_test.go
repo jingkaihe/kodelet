@@ -9,6 +9,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
+	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -157,6 +158,78 @@ func TestCodeChildrenAuthorityAndTombstones(t *testing.T) {
 	_, _, err = registry.ArtifactToolContext(identity, child.RunID, child.ToolCallID)
 	require.Error(t, err)
 	assert.Empty(t, registry.codeParents)
+}
+
+func TestCodeChildCompletionMetrics(t *testing.T) {
+	for _, mode := range []string{"normal", "cancelled parent", "closed run"} {
+		t.Run(mode, func(t *testing.T) {
+			collect := telemetrytest.NewMetricsRecorder(t)
+			registry, session, params := newCodeRegistry(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			cleanup, err := registry.registerCodeParent(ctx, params)
+			require.NoError(t, err)
+			defer cleanup()
+			identity := codeRegistryIdentity(session)
+			child := runnerpayload.ToolChildParams{
+				RunID:            params.RunID,
+				ParentToolCallID: params.ToolCallID,
+				ToolCallID:       "private-child-id",
+				Name:             "bash",
+			}
+			_, rpcErr := registry.codeChild(t.Context(), identity, child, true)
+			require.Nil(t, rpcErr)
+			artifactCtx, _, err := registry.ArtifactToolContext(identity, child.RunID, child.ToolCallID)
+			require.NoError(t, err)
+			child.Name = "untrusted completion name"
+			child.Metrics = &runnerpayload.ToolExecutionMetrics{
+				DurationNS: int64(3 * time.Second),
+				Outcome:    "success",
+			}
+
+			stale := identity
+			stale.Generation++
+			_, rpcErr = registry.codeChild(t.Context(), stale, child, false)
+			require.NotNil(t, rpcErr)
+			wrongParent := child
+			wrongParent.ParentToolCallID = "other-parent"
+			_, rpcErr = registry.codeChild(t.Context(), identity, wrongParent, false)
+			require.NotNil(t, rpcErr)
+			assert.Empty(t, collect(), "rejected reports must not record metrics")
+
+			switch mode {
+			case "cancelled parent":
+				cancel()
+				cleanup()
+				child.Metrics.Outcome = "cancelled"
+				assert.ErrorIs(t, artifactCtx.Err(), context.Canceled)
+			case "closed run":
+				require.NoError(t, registry.CloseRun(t.Context(), child.RunID, RunStatusSucceeded, nil))
+				assert.Empty(t, registry.runs[child.RunID].codeChildren)
+				_, rpcErr = registry.codeChild(t.Context(), identity, child, false)
+				require.NotNil(t, rpcErr)
+				assert.Empty(t, collect())
+				return
+			}
+			for range 2 {
+				_, rpcErr = session.HandleRequest(
+					t.Context(), protocol.MethodToolChildEnd, mustRegistryJSON(t, child),
+				)
+				require.Nil(t, rpcErr)
+			}
+			assertReportedToolMetrics(t, collect(), "bash", true, child.Metrics.Outcome, 3)
+			assert.ErrorIs(t, artifactCtx.Err(), context.Canceled)
+			_, _, err = registry.ArtifactToolContext(identity, child.RunID, child.ToolCallID)
+			require.Error(t, err, "late completion must not restore tool authority")
+			if mode == "cancelled parent" {
+				child.ToolCallID = "another-child"
+				child.Name = "bash"
+				child.Metrics = nil
+				_, rpcErr = registry.codeChild(t.Context(), identity, child, true)
+				require.NotNil(t, rpcErr, "cancelled parent cannot authorize new children")
+			}
+		})
+	}
 }
 
 func TestCodeChildRegistrationFences(t *testing.T) {

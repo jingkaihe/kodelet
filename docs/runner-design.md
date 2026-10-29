@@ -469,6 +469,8 @@ authoritative assistant-facing and structured result
 
 Only post-policy updates and results cross the runner boundary.
 
+Tool responses optionally include `metrics: { durationNs, outcome }`, measured around the runner-side lifecycle. Execution errors carry the same summary in JSON-RPC error data. The control plane records and exports `kodelet.tool.*` metrics from these reports; runners do not record the OTel instruments or need connectivity to the metrics backend. Missing reports, including responses from older runners or interrupted connections, are not reconstructed from RPC wall time. Code-mode child summaries use `tool.child.end` instead of forwarding child result bodies.
+
 ### Tool lifecycle protocol compatibility
 
 The environment and runner protocol retain individual `tool.call`, `tool.update`, and `tool.result` lifecycle operations for extension dispatch. Runner-side `tool.execute` applies the complete lifecycle locally; the central agent loop does not execute a separate class of built-in control-plane tools or proxy a second tool lifecycle around them.

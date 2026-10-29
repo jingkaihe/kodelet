@@ -243,12 +243,13 @@ type ToolExecuteParams struct {
 }
 
 // ToolChildParams establishes or releases a runner-local child invocation.
-// It carries ownership metadata only, never tool arguments or result bodies.
+// It carries ownership and optional completion metrics, never tool arguments or result bodies.
 type ToolChildParams struct {
-	RunID            string `json:"runId"`
-	ParentToolCallID string `json:"parentToolCallId"`
-	ToolCallID       string `json:"toolCallId"`
-	Name             string `json:"name,omitempty"`
+	RunID            string                `json:"runId"`
+	ParentToolCallID string                `json:"parentToolCallId"`
+	ToolCallID       string                `json:"toolCallId"`
+	Name             string                `json:"name,omitempty"`
+	Metrics          *ToolExecutionMetrics `json:"metrics,omitempty"`
 }
 
 // ToolResult is the serializable authoritative or transient result sent over the runner link.
@@ -260,11 +261,19 @@ type ToolResult struct {
 	ContentParts    []tooltypes.ToolResultContentPart `json:"contentParts,omitempty"`
 }
 
+// ToolExecutionMetrics reports runner-measured duration and outcome for the
+// control plane to record. It contains no tool input, output, or error text.
+type ToolExecutionMetrics struct {
+	DurationNS int64  `json:"durationNs"`
+	Outcome    string `json:"outcome"`
+}
+
 // ToolExecuteResult is the authoritative final runner tool result.
 type ToolExecuteResult struct {
-	Input    json.RawMessage `json:"input"`
-	Result   ToolResult      `json:"result"`
-	Modified bool            `json:"modified,omitempty"`
+	Input    json.RawMessage       `json:"input"`
+	Result   ToolResult            `json:"result"`
+	Modified bool                  `json:"modified,omitempty"`
+	Metrics  *ToolExecutionMetrics `json:"metrics,omitempty"`
 	// Runner-local failure provenance is host-owned, never inferred from hooks.
 	FailureKind    string `json:"-"`
 	FailureOutcome string `json:"-"`

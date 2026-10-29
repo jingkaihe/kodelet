@@ -18,10 +18,13 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
+	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
 	conversationtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 type fakeLink struct {
@@ -1413,6 +1416,107 @@ func TestStaleOpenFailureCannotPoisonReplacementGeneration(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, RunStatusLost, run.Status)
 	assert.Contains(t, run.Error, "replaced")
+}
+
+func TestExecuteToolRecordsReportedMetrics(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		outcome    string
+		duration   time.Duration
+		rpcFailure bool
+		lost       bool
+		wantMetric bool
+	}{
+		{name: "success", outcome: "success", duration: 2 * time.Second, wantMetric: true},
+		{
+			name: "reported RPC failure", outcome: "error", duration: 2 * time.Second,
+			rpcFailure: true, wantMetric: true,
+		},
+		{name: "older runner without report"},
+		{name: "invalid outcome", outcome: "private error text", duration: time.Second},
+		{name: "negative duration", outcome: "success", duration: -1},
+		{name: "lost connection", lost: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			collect := telemetrytest.NewMetricsRecorder(t)
+			registry, link, _ := newModelHelperRegistry(t)
+			var report *runnerpayload.ToolExecutionMetrics
+			if test.outcome != "" {
+				report = &runnerpayload.ToolExecutionMetrics{
+					DurationNS: int64(test.duration),
+					Outcome:    test.outcome,
+				}
+			}
+			link.mu.Lock()
+			link.call = func(_ context.Context, method string, _, result any) error {
+				require.Equal(t, protocol.MethodToolExecute, method)
+				if test.lost {
+					return protocol.ErrPeerClosed
+				}
+				if test.rpcFailure {
+					// Match the generic JSON data decoded by the wire protocol.
+					var data any
+					payload := mustRegistryJSON(t, map[string]any{"metrics": report})
+					require.NoError(t, json.Unmarshal(payload, &data))
+					return &protocol.RPCError{
+						Code:    protocol.ErrorCodeInternal,
+						Message: "private tool error",
+						Data:    data,
+					}
+				}
+				*result.(*runnerpayload.ToolExecuteResult) = runnerpayload.ToolExecuteResult{
+					Metrics: report,
+				}
+				return nil
+			}
+			link.mu.Unlock()
+			_, err := registry.ExecuteTool(t.Context(), runnerpayload.ToolExecuteParams{
+				RunID:      "run-one",
+				ToolCallID: "private-call-id",
+				Name:       "bash",
+				Input:      json.RawMessage(`{"command":"private input"}`),
+			}, nil)
+			assert.Equal(t, test.rpcFailure || test.lost, err != nil)
+			metrics := collect()
+			if !test.wantMetric {
+				assert.Empty(t, metrics)
+				return
+			}
+			assertReportedToolMetrics(t, metrics, "bash", false, test.outcome, 2)
+		})
+	}
+}
+
+func assertReportedToolMetrics(
+	t *testing.T,
+	metrics map[string]metricdata.Metrics,
+	name string,
+	nested bool,
+	outcome string,
+	durationSeconds float64,
+) {
+	t.Helper()
+	require.Len(t, metrics, 2)
+	wantAttributes := attribute.NewSet(
+		attribute.String("gen_ai.tool.name", name),
+		attribute.Bool("kodelet.tool.nested", nested),
+		attribute.String("outcome", outcome),
+	)
+	executions := metrics["kodelet.tool.executions"]
+	assert.Equal(t, "{execution}", executions.Unit)
+	sum, ok := executions.Data.(metricdata.Sum[int64])
+	require.True(t, ok)
+	require.Len(t, sum.DataPoints, 1)
+	assert.Equal(t, int64(1), sum.DataPoints[0].Value)
+	assert.Equal(t, wantAttributes, sum.DataPoints[0].Attributes)
+	duration := metrics["kodelet.tool.duration"]
+	assert.Equal(t, "s", duration.Unit)
+	histogram, ok := duration.Data.(metricdata.Histogram[float64])
+	require.True(t, ok)
+	require.Len(t, histogram.DataPoints, 1)
+	assert.Equal(t, uint64(1), histogram.DataPoints[0].Count)
+	assert.Equal(t, durationSeconds, histogram.DataPoints[0].Sum)
+	assert.Equal(t, wantAttributes, histogram.DataPoints[0].Attributes)
 }
 
 func TestExecuteToolRoutesMonotonicUpdates(t *testing.T) {

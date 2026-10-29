@@ -18,6 +18,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
+	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -246,7 +247,7 @@ type runEntry struct {
 	reservedToolNames   []string
 	codeExecution       bool
 	codeStopping        bool
-	codeChildIDs        map[string]string
+	codeChildren        map[string]*codeChildRegistration
 	sessionExtensions   *protocol.SessionExtensions
 	checkpoint          *runCheckpoint
 	connectionID        string
@@ -1566,11 +1567,36 @@ func (r *Registry) ExecuteTool(ctx context.Context, params runnerpayload.ToolExe
 	}); err != nil {
 		var rpcErr *protocol.RPCError
 		if errors.As(err, &rpcErr) {
+			// Execution failures can still carry a runner-measured completion.
+			data, marshalErr := json.Marshal(rpcErr.Data)
+			if marshalErr == nil && json.Unmarshal(data, &result) == nil {
+				recordToolMetrics(ctx, params.Name, false, result.Metrics)
+			}
 			return runnerpayload.ToolExecuteResult{}, err
 		}
 		return runnerpayload.ToolExecuteResult{}, errors.Wrap(err, "runner tool response was not received; execution may have started and side effects are uncertain")
 	}
+	recordToolMetrics(ctx, params.Name, false, result.Metrics)
 	return result, nil
+}
+
+// Only the control plane records tool instruments. Missing reports (including
+// older runners and interrupted RPCs) must not become fabricated completions.
+func recordToolMetrics(
+	ctx context.Context,
+	name string,
+	nested bool,
+	metrics *runnerpayload.ToolExecutionMetrics,
+) {
+	if metrics == nil || metrics.DurationNS < 0 {
+		return
+	}
+	switch metrics.Outcome {
+	case "success", "error", "cancelled", "timeout", "blocked":
+		telemetry.RecordToolExecution(
+			ctx, name, nested, time.Duration(metrics.DurationNS), metrics.Outcome,
+		)
+	}
 }
 
 func (r *Registry) registerToolForker(runID, toolCallID, toolName string, forker llmtypes.ConversationForker) func() {

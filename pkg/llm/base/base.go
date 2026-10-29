@@ -8,6 +8,7 @@ import (
 	"maps"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
@@ -509,6 +510,7 @@ func (t *Thread) CreateMessageSpan(
 // StartModelSpan describes one logical provider call, including streaming and retries.
 // Callers must keep tool execution on the original context, outside this span.
 func (t *Thread) StartModelSpan(ctx context.Context, provider, model string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
+	started := time.Now()
 	attributes := []attribute.KeyValue{
 		attribute.String("gen_ai.operation.name", "chat"),
 		attribute.String("gen_ai.provider.name", provider),
@@ -516,12 +518,36 @@ func (t *Thread) StartModelSpan(ctx context.Context, provider, model string, att
 		attribute.String("gen_ai.conversation.id", t.ConversationID),
 	}
 	attributes = append(attributes, attrs...)
-	return telemetry.Tracer("kodelet.llm").Start(ctx, "chat "+model,
+	ctx, span := telemetry.Tracer("kodelet.llm").Start(ctx, "chat "+model,
 		trace.WithSpanKind(trace.SpanKindClient), trace.WithAttributes(attributes...))
+	return ctx, &modelCallSpan{
+		Span:     span,
+		ctx:      ctx,
+		provider: provider,
+		model:    model,
+		started:  started,
+	}
+}
+
+// Keep call timing outside the tracing SDK so disabled or sampled-out spans
+// still produce metrics. Embedding preserves the existing trace.Span API.
+type modelCallSpan struct {
+	trace.Span
+	ctx      context.Context
+	provider string
+	model    string
+	started  time.Time
+	finished atomic.Bool
 }
 
 // FinishModelSpan records the logical call outcome and ends its span exactly once.
 func FinishModelSpan(span trace.Span, err error) {
+	if call, ok := span.(*modelCallSpan); ok {
+		if !call.finished.CompareAndSwap(false, true) {
+			return
+		}
+		telemetry.RecordModelCall(call.ctx, call.provider, call.model, time.Since(call.started), err)
+	}
 	if err != nil {
 		telemetry.RecordSpanError(span, err)
 	} else {

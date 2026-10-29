@@ -21,6 +21,14 @@ type codeParentRegistration struct {
 	children map[string]bool // false retains a completed-child tombstone.
 }
 
+// Keep completion tombstones until run teardown, independently of the parent's
+// capability lifetime. Late child reports never restore execution authority.
+type codeChildRegistration struct {
+	parentID  string
+	name      string
+	completed bool
+}
+
 func (r *Registry) registerCodeParent(ctx context.Context, params runnerpayload.ToolExecuteParams) (func(), error) {
 	if params.CallableTools == nil || params.ManifestDigest == "" {
 		return nil, errors.New("code execution requires host-owned callable tools and manifest digest")
@@ -106,29 +114,44 @@ func (r *Registry) codeChild(ctx context.Context, identity UIRequestIdentity, pa
 	}
 	key := modelHelperKey{params.RunID, params.ParentToolCallID}
 	childKey := modelHelperKey{params.RunID, params.ToolCallID}
+	var metricName string
+	var metrics *runnerpayload.ToolExecutionMetrics
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer func() {
+		r.mu.Unlock()
+		recordToolMetrics(ctx, metricName, true, metrics)
+	}()
 	runner, err := r.currentRunnerLocked(identity.RunnerID, identity.ConnectionID, identity.Generation)
 	run := r.runs[params.RunID]
 	parent := r.codeParents[key]
 	if err != nil || run == nil || run.Status != RunStatusRunning || run.codeStopping ||
 		run.RunnerID != identity.RunnerID || run.connectionID != identity.ConnectionID || run.generation != identity.Generation ||
-		!runnerHasActiveRun(runner, params.RunID) || parent == nil || parent.ctx.Err() != nil {
-		return fail(protocol.ErrorCodeStale, "child ownership requires an active code execution parent and runner generation")
+		!runnerHasActiveRun(runner, params.RunID) {
+		return fail(protocol.ErrorCodeStale, "child ownership requires an active run and runner generation")
 	}
 	if !begin {
-		if _, exists := parent.children[params.ToolCallID]; !exists {
+		child := run.codeChildren[params.ToolCallID]
+		if child == nil || child.parentID != params.ParentToolCallID {
 			return fail(protocol.ErrorCodeInvalidParams, "tool call is not a child of this parent")
 		}
+		if !child.completed {
+			child.completed = true
+			metricName, metrics = child.name, params.Metrics
+		}
 		r.clearCodeChildLocked(childKey)
-		parent.children[params.ToolCallID] = false
+		if parent != nil {
+			parent.children[params.ToolCallID] = false
+		}
 		return struct{}{}, nil
+	}
+	if parent == nil || parent.ctx.Err() != nil {
+		return fail(protocol.ErrorCodeStale, "child ownership requires an active code execution parent")
 	}
 	if params.Name == "code_execute" || !parent.allowed[params.Name] {
 		return fail(protocol.ErrorCodeInvalidParams, "child tool is not in the authorized catalog")
 	}
 	if params.ToolCallID == params.ParentToolCallID ||
-		r.artifactTools[childKey] != nil || run.codeChildIDs[params.ToolCallID] != "" {
+		r.artifactTools[childKey] != nil || run.codeChildren[params.ToolCallID] != nil {
 		return fail(protocol.ErrorCodeConflict, "child tool call ID has already been used")
 	}
 	if len(parent.children) >= 128 {
@@ -143,10 +166,13 @@ func (r *Registry) codeChild(ctx context.Context, identity UIRequestIdentity, pa
 	if active >= codemode.MaxConcurrentToolCalls {
 		return fail(protocol.ErrorCodeConflict, "code execution active child limit exceeded")
 	}
-	if run.codeChildIDs == nil {
-		run.codeChildIDs = make(map[string]string)
+	if run.codeChildren == nil {
+		run.codeChildren = make(map[string]*codeChildRegistration)
 	}
-	run.codeChildIDs[params.ToolCallID] = params.ParentToolCallID
+	run.codeChildren[params.ToolCallID] = &codeChildRegistration{
+		parentID: params.ParentToolCallID,
+		name:     params.Name,
+	}
 	parent.children[params.ToolCallID] = true
 	artifactCtx, artifactCancel := context.WithCancel(parent.ctx)
 	if r.artifactTools == nil {
@@ -198,7 +224,7 @@ func (r *Registry) clearCodeParentLocked(key modelHelperKey, parent *codeParentR
 func (r *Registry) clearRunCodeParentsLocked(runID string) {
 	if run := r.runs[runID]; run != nil {
 		run.codeStopping = true
-		run.codeChildIDs = nil
+		run.codeChildren = nil
 	}
 	for key, parent := range r.codeParents {
 		if key.runID == runID {

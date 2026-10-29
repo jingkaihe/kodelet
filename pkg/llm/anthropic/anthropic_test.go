@@ -3,6 +3,7 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -86,6 +88,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"outpu
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			recorder, provider := telemetrytest.NewRecorder(t, tc.content)
+			collectMetrics := telemetrytest.NewMetricsRecorder(t)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "text/event-stream")
 				_, _ = io.WriteString(w, streamStart)
@@ -132,6 +135,11 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"outpu
 				assert.Equal(t, "actual-model", attrs["gen_ai.response.model"].AsString())
 				assert.Equal(t, "msg_trace", attrs["gen_ai.response.id"].AsString())
 			}
+			metrics := collectMetrics()
+			require.Contains(t, metrics, "kodelet.model.calls")
+			calls := metrics["kodelet.model.calls"].Data.(metricdata.Sum[int64])
+			require.Len(t, calls.DataPoints, 1)
+			assert.EqualValues(t, 1, calls.DataPoints[0].Value)
 		})
 	}
 }
@@ -473,6 +481,78 @@ func TestHaiku55Pricing(t *testing.T) {
 	assert.Equal(t, 0.0000002, pricing.PromptCachingWrite1h)
 	assert.Equal(t, 0.00000001, pricing.PromptCachingRead)
 	assert.Equal(t, 1_000_000, pricing.ContextWindow)
+}
+
+func TestUsageMetricsRecordPerResponseIncrements(t *testing.T) {
+	for _, mode := range []string{"message", "compaction"} {
+		t.Run(mode, func(t *testing.T) {
+			collectMetrics := telemetrytest.NewMetricsRecorder(t)
+			thread := &Thread{
+				Thread:          base.NewThread(llmtypes.Config{Model: "primary"}, "private-conversation"),
+				useSubscription: true,
+			}
+			thread.Usage.InputTokens = 10000
+			thread.Usage.InputCost = 1000
+			const model = anthropic.ModelClaudeSonnet4_6
+			const usageJSON = `{
+				"type": "compaction",
+				"input_tokens": 100,
+				"output_tokens": 40,
+				"cache_read_input_tokens": 60,
+				"cache_creation_input_tokens": 30,
+				"cache_creation": {
+					"ephemeral_5m_input_tokens": 10,
+					"ephemeral_1h_input_tokens": 20
+				}
+			}`
+			for range 2 {
+				if mode == "message" {
+					var usage anthropic.Usage
+					require.NoError(t, json.Unmarshal([]byte(usageJSON), &usage))
+					thread.updateUsage(&anthropic.Message{Usage: usage}, model)
+				} else {
+					var message anthropic.BetaMessage
+					raw := fmt.Sprintf(`{
+						"usage": {
+							"iterations": [%s]
+						}
+					}`, usageJSON)
+					require.NoError(t, json.Unmarshal([]byte(raw), &message))
+					thread.recordCompactionUsage(t.Context(), message, model)
+				}
+			}
+			thread.AggregateSubagentUsage(llmtypes.Usage{
+				InputTokens: 5000,
+				InputCost:   500,
+			})
+
+			metrics := collectMetrics()
+			require.Contains(t, metrics, "kodelet.model.tokens")
+			usage := metrics["kodelet.model.tokens"].Data.(metricdata.Sum[int64])
+			tokens := map[string]int64{}
+			for _, point := range usage.DataPoints {
+				tokenType, _ := point.Attributes.Value("token.type")
+				provider, _ := point.Attributes.Value("gen_ai.provider.name")
+				requestModel, _ := point.Attributes.Value("gen_ai.request.model")
+				assert.Equal(t, "anthropic", provider.AsString())
+				assert.Equal(t, model, requestModel.AsString())
+				tokens[tokenType.AsString()] += point.Value
+			}
+			assert.Equal(t, map[string]int64{
+				"input":       200,
+				"output":      80,
+				"cache_read":  120,
+				"cache_write": 60,
+			}, tokens)
+			require.Contains(t, metrics, "kodelet.model.cost")
+			cost := metrics["kodelet.model.cost"].Data.(metricdata.Sum[float64])
+			require.Len(t, cost.DataPoints, 1)
+			pricing := getModelPricing(model)
+			expected := 2 * (100*pricing.Input + 40*pricing.Output + 60*pricing.PromptCachingRead +
+				10*pricing.PromptCachingWrite5m + 20*pricing.PromptCachingWrite1h)
+			assert.InDelta(t, expected, cost.DataPoints[0].Value, 1e-12)
+		})
+	}
 }
 
 func TestHaiku55UsagePricingTiers(t *testing.T) {

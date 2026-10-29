@@ -1,6 +1,94 @@
 # Observability
 
-Kodelet exports OpenTelemetry traces over OTLP/HTTP. A chat submission carries W3C trace context through the client, daemon, and runner so model calls, tool lifecycles, and remote execution appear in one trace. Conversation history remains separate from tracing; this integration does not export OpenTelemetry logs or metrics.
+Kodelet exports OpenTelemetry traces and opt-in metrics over OTLP/HTTP. A chat submission carries W3C trace context through the client, daemon, and runner so model calls, tool lifecycles, and remote execution appear in one trace. Metrics are recorded independently of trace sampling. Conversation history remains separate; this integration does not export OpenTelemetry logs.
+
+## Enable push metrics
+
+Set `metrics.enabled: true` in trusted process configuration (`~/.kodelet/config.yaml` or `KODELET_CONFIG_FILE`), or set `KODELET_METRICS_ENABLED=true`. Metrics default to disabled. `--metrics-enabled` overrides configuration for the receiving process only. Tracing can remain disabled.
+
+```yaml
+metrics:
+  enabled: true
+```
+
+```bash
+export KODELET_METRICS_ENABLED=true
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318"
+# Optional authentication; never put credentials in repository configuration.
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer <collector-token>"
+kodelet server restart
+```
+
+Configure and restart the daemon for both model and tool metrics. Runners report tool duration and outcome over their existing control-plane connection; they do not need metrics enabled, Collector credentials, or connectivity to the metrics backend. Embedded and standalone runners use the same reporting path. Enabling metrics only on `kodelet run` does not enable them in an existing daemon. Kodelet does not expose a Prometheus scrape endpoint or start an extra HTTP listener.
+
+The exporter sends HTTP Protobuf to `/v1/metrics` under `OTEL_EXPORTER_OTLP_ENDPOINT`. `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` overrides this with a complete URL; `OTEL_EXPORTER_OTLP_METRICS_HEADERS` overrides shared exporter headers. The default export interval is 60 seconds; set `OTEL_METRIC_EXPORT_INTERVAL` in milliseconds to change it. `OTEL_METRIC_EXPORT_TIMEOUT` controls the periodic reader's export timeout, also in milliseconds. Exports run in the background and normal process shutdown makes a final export within the shared five-second telemetry shutdown window. Delivery is best-effort: abrupt termination, collector outages, and expired shutdown deadlines can lose data. Metrics are not a billing ledger.
+
+Metrics default to cumulative temporality, suitable for Prometheus. `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE` can select `cumulative`, `delta`, or `lowmemory` when required by another backend; delta metrics require conversion before a conventional Prometheus scrape exporter.
+
+### Exported metrics
+
+| OTEL instrument | Kind / unit | Meaning |
+| --- | --- | --- |
+| `kodelet.model.calls` | Counter / calls | Logical model calls, including streaming and retries, by provider, model, and outcome |
+| `kodelet.model.duration` | Histogram / seconds | Duration of those logical model calls |
+| `kodelet.model.tokens` | Counter / tokens | Per-response usage increments by provider, model, and `token.type` |
+| `kodelet.model.cost` | Counter / USD | Estimated cost increments using Kodelet's configured model pricing |
+| `kodelet.tool.executions` | Counter / executions | Reported tool completions by tool name, outcome, and `kodelet.tool.nested` |
+| `kodelet.tool.duration` | Histogram / seconds | Runner-measured duration of those tool lifecycles, excluding the control-plane round trip |
+
+Token categories are disjoint: `input` excludes cache reads/writes, `output` includes reasoning tokens where billed as output, and `cache_read` / `cache_write` report cache usage. Usage is recorded where provider responses update accounting, not from cumulative conversation snapshots or parent aggregation of helper usage. Model call metrics count logical calls rather than individual HTTP retry attempts.
+
+Tool metrics include ordinary calls and code-mode children. The control plane records completion summaries from tool responses (including reported execution errors) and code-mode child-end messages. A `code_execute` wrapper and its child calls are distinct executions, identified by `kodelet.tool.nested`; their durations overlap and must not be summed as elapsed run time. Runners, caller-side logical tool spans, and RPC spans do not increment these counters again. Outcomes are `success`, `error`, `cancelled`, `timeout`, and, for tools, `blocked`.
+
+Completion reporting is best-effort. Duplicate child-end messages are counted once, and a child can report after parent cancellation while its run and runner connection remain valid. Reports lost after run teardown, RPC cancellation, or connection loss are not reconstructed as successful executions or estimated durations. Older runners that do not send completion summaries contribute no tool metrics; upgrade them to collect these measurements.
+
+Metric attributes exclude prompts, content, file paths, conversation/tool-call IDs, and raw error text. Model/provider and tool names remain visible. Cardinality is capped at 2,000 attribute sets per instrument; excess combinations aggregate into the SDK's overflow series.
+
+Model and tool metrics use the daemon's service resource and `host.name`, not the runner's identity. `OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES` can override resource attributes. For multiple daemons exporting the same metric series, configure a distinct `service.instance.id` per daemon (for example, `OTEL_RESOURCE_ATTRIBUTES=service.instance.id=build-host-daemon-1`) and preserve it through the Collector. Prometheus does not automatically use `host.name` as its `instance` label.
+
+### Prometheus via a Collector
+
+Use a Collector distribution containing the `prometheus` exporter, such as OpenTelemetry Collector Contrib. For processes on the same host, a minimal metrics-only Collector configuration is:
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4318
+exporters:
+  prometheus:
+    endpoint: 127.0.0.1:8889
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      exporters: [prometheus]
+```
+
+Configure Prometheus to scrape the Collector, not Kodelet:
+
+```yaml
+scrape_configs:
+  - job_name: kodelet
+    honor_labels: true
+    static_configs:
+      - targets: ["127.0.0.1:8889"]
+```
+
+The Collector receives pushed OTLP metrics and exposes `/metrics` for scraping. Preserve the exported job/instance labels; metric names may be translated to Prometheus naming conventions. Adjust listener addresses and add TLS/authentication for remote daemons or container deployments. This example does not configure a traces pipeline.
+
+### Directly to Prometheus
+
+Alternatively, start a recent Prometheus with `--web.enable-otlp-receiver` and configure:
+
+```bash
+export KODELET_METRICS_ENABLED=true
+export OTEL_EXPORTER_OTLP_METRICS_ENDPOINT="http://localhost:9090/api/v1/otlp/v1/metrics"
+export OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=cumulative
+```
+
+Restart the daemon with these settings. This pushes directly to Prometheus without a Collector or scrape step. Use the metrics-specific endpoint so existing traces can continue to use their own destination.
 
 ## Enable tracing
 

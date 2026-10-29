@@ -162,6 +162,7 @@ func (s *Service) codeExecutionContext(ctx context.Context, run *activeRun, para
 				Name:       name,
 				Input:      json.RawMessage(input),
 			}, true, childUpdates)
+			ownership.Metrics = execution.Metrics
 			if err != nil {
 				kind := "transport"
 				if operationCtx.Err() != nil {

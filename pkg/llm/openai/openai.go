@@ -1054,13 +1054,22 @@ func (t *Thread) updateUsage(usage openai.Usage, model string) {
 	}
 	pricing = pricing.ForPromptTokens(usage.PromptTokens)
 
-	if nonCachedInput > 0 {
-		t.Usage.InputCost += float64(nonCachedInput) * pricing.Input
-	}
-	if cachedTokens > 0 {
-		t.Usage.CacheReadCost += float64(cachedTokens) * pricing.CachedInput
-	}
-	t.Usage.OutputCost += float64(usage.CompletionTokens) * pricing.Output
+	inputCost := float64(max(nonCachedInput, 0)) * pricing.Input
+	cacheReadCost := float64(max(cachedTokens, 0)) * pricing.CachedInput
+	outputCost := float64(usage.CompletionTokens) * pricing.Output
+	t.Usage.InputCost += inputCost
+	t.Usage.CacheReadCost += cacheReadCost
+	t.Usage.OutputCost += outputCost
+
+	// Accounting has no request context. Emit per-response increments only;
+	// cached input is a separate category, not part of the input metric.
+	ctx := context.Background()
+	telemetry.RecordTokenUsage(ctx, "openai", model, "input",
+		int64(max(usage.PromptTokens-cachedTokens, 0)),
+	)
+	telemetry.RecordTokenUsage(ctx, "openai", model, "output", int64(usage.CompletionTokens))
+	telemetry.RecordTokenUsage(ctx, "openai", model, "cache_read", int64(cachedTokens))
+	telemetry.RecordCost(ctx, "openai", model, inputCost+cacheReadCost+outputCost)
 
 	t.Usage.CurrentContextWindow = usage.PromptTokens + usage.CompletionTokens
 	t.Usage.MaxContextWindow = pricing.ContextWindow

@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -193,6 +194,7 @@ func TestResponsesTracing(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			recorder, provider := telemetrytest.NewRecorder(t, false)
+			collectMetrics := telemetrytest.NewMetricsRecorder(t)
 			thread, err := NewThread(llmtypes.Config{
 				Provider: "openai",
 				Model:    "primary",
@@ -294,12 +296,22 @@ func TestResponsesTracing(t *testing.T) {
 			if tc.retry {
 				assert.Equal(t, 2, attempts)
 			}
+			metrics := collectMetrics()
+			require.Contains(t, metrics, "kodelet.model.calls")
+			calls := metrics["kodelet.model.calls"].Data.(metricdata.Sum[int64])
+			require.Len(t, calls.DataPoints, 1)
+			assert.EqualValues(t, 1, calls.DataPoints[0].Value, "stream retries share one logical call")
+			if tc.toolErr != nil {
+				outcome, _ := calls.DataPoints[0].Attributes.Value("outcome")
+				assert.Equal(t, "success", outcome.AsString(), "tool failures do not change model outcomes")
+			}
 		})
 	}
 }
 
 func TestRemoteCompactionFallbackSharesModelSpan(t *testing.T) {
 	recorder, provider := telemetrytest.NewRecorder(t, false)
+	collectMetrics := telemetrytest.NewMetricsRecorder(t)
 	thread := &Thread{
 		Thread: base.NewThread(llmtypes.Config{
 			Model: "primary", Retry: llmtypes.RetryConfig{Attempts: 1, InitialDelay: 1, MaxDelay: 1},
@@ -344,6 +356,11 @@ func TestRemoteCompactionFallbackSharesModelSpan(t *testing.T) {
 		}
 	}
 	assert.True(t, sawFallback)
+	metrics := collectMetrics()
+	require.Contains(t, metrics, "kodelet.model.calls")
+	calls := metrics["kodelet.model.calls"].Data.(metricdata.Sum[int64])
+	require.Len(t, calls.DataPoints, 1)
+	assert.EqualValues(t, 1, calls.DataPoints[0].Value, "transport fallback is one logical compaction call")
 }
 
 type codeModeResponsesEnvironment struct {
@@ -1170,6 +1187,77 @@ func TestProcessStreamThinkingEndsBeforeTextWithoutDoneEvent(t *testing.T) {
 		"text_delta:Answer",
 		"content_block_end",
 	}, handler.events)
+}
+
+func TestUsageMetricsRecordPerResponseIncrements(t *testing.T) {
+	for _, mode := range []string{"ordinary", "local input", "compaction"} {
+		t.Run(mode, func(t *testing.T) {
+			collectMetrics := telemetrytest.NewMetricsRecorder(t)
+			thread := &Thread{
+				Thread: base.NewThread(llmtypes.Config{Model: "primary"}, "private-conversation"),
+				customPricing: map[string]llmtypes.ModelPricing{
+					"call-model": {
+						Input:                      1,
+						CachedInput:                0.1,
+						CacheWriteInput:            1.25,
+						Output:                     2,
+						LongContextInput:           3,
+						LongContextCachedInput:     0.3,
+						LongContextCacheWriteInput: 3.75,
+						LongContextOutput:          4,
+						LongContextThreshold:       80,
+					},
+				},
+			}
+			thread.Usage.InputTokens = 10000
+			thread.Usage.InputCost = 1000
+			usage := responses.ResponseUsage{
+				InputTokens:  100,
+				OutputTokens: 10,
+				InputTokensDetails: responses.ResponseUsageInputTokensDetails{
+					CachedTokens:     20,
+					CacheWriteTokens: 30,
+				},
+			}
+			for range 2 {
+				switch mode {
+				case "ordinary":
+					thread.updateUsage(usage, "call-model")
+				case "local input":
+					thread.updateUsageWithLocalInput(usage, "call-model", "", 4000)
+				case "compaction":
+					thread.updateUsageTotals(usage, "call-model", "")
+				}
+			}
+			thread.AggregateSubagentUsage(llmtypes.Usage{
+				InputTokens: 5000,
+				InputCost:   500,
+			})
+
+			metrics := collectMetrics()
+			require.Contains(t, metrics, "kodelet.model.tokens")
+			sum := metrics["kodelet.model.tokens"].Data.(metricdata.Sum[int64])
+			tokens := map[string]int64{}
+			for _, point := range sum.DataPoints {
+				tokenType, _ := point.Attributes.Value("token.type")
+				provider, _ := point.Attributes.Value("gen_ai.provider.name")
+				model, _ := point.Attributes.Value("gen_ai.request.model")
+				assert.Equal(t, "openai", provider.AsString())
+				assert.Equal(t, "call-model", model.AsString())
+				tokens[tokenType.AsString()] += point.Value
+			}
+			assert.Equal(t, map[string]int64{
+				"input":       100,
+				"output":      20,
+				"cache_read":  40,
+				"cache_write": 60,
+			}, tokens)
+			require.Contains(t, metrics, "kodelet.model.cost")
+			cost := metrics["kodelet.model.cost"].Data.(metricdata.Sum[float64])
+			require.Len(t, cost.DataPoints, 1)
+			assert.InDelta(t, 2*(50*3+20*0.3+30*3.75+10*4), cost.DataPoints[0].Value, 1e-12)
+		})
+	}
 }
 
 func TestUpdateUsageAccumulatesCachedTokensLikeCodexTotals(t *testing.T) {

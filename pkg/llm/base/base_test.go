@@ -15,8 +15,11 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 )
@@ -105,6 +108,60 @@ func TestInvocationAndModelErrorsRespectContentPolicy(t *testing.T) {
 					assert.NotContains(t, span.Status().Description, providerErr.Error())
 					assert.NotContains(t, string(events), providerErr.Error())
 				}
+			}
+		})
+	}
+}
+
+func TestModelCallMetricsWithoutRecordingSpans(t *testing.T) {
+	for _, mode := range []string{"disabled", "sampled out"} {
+		t.Run(mode, func(t *testing.T) {
+			collectMetrics := telemetrytest.NewMetricsRecorder(t)
+			previousTracer := otel.GetTracerProvider()
+			t.Cleanup(func() { otel.SetTracerProvider(previousTracer) })
+			otel.SetTracerProvider(noop.NewTracerProvider())
+			if mode == "sampled out" {
+				traces := sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.NeverSample()))
+				otel.SetTracerProvider(traces)
+				t.Cleanup(func() { assert.NoError(t, traces.Shutdown(context.Background())) })
+			}
+			thread := NewThread(llmtypes.Config{Model: "primary"}, "private-conversation")
+			for _, err := range []error{nil, assert.AnError, context.Canceled, context.DeadlineExceeded} {
+				ctx, span := thread.StartModelSpan(t.Context(), "openai", "weak-model")
+				assert.False(t, span.IsRecording())
+				assert.Equal(t, span.SpanContext(), trace.SpanFromContext(ctx).SpanContext())
+				FinishModelSpan(span, err)
+				FinishModelSpan(span, nil) // Repeated cleanup must not count the call again.
+			}
+
+			metrics := collectMetrics()
+			require.Contains(t, metrics, "kodelet.model.calls")
+			sum := metrics["kodelet.model.calls"].Data.(metricdata.Sum[int64])
+			calls := map[string]int64{}
+			for _, point := range sum.DataPoints {
+				provider, _ := point.Attributes.Value("gen_ai.provider.name")
+				model, _ := point.Attributes.Value("gen_ai.request.model")
+				outcome, _ := point.Attributes.Value("outcome")
+				assert.Equal(t, "openai", provider.AsString())
+				assert.Equal(t, "weak-model", model.AsString())
+				assert.Equal(t, 3, point.Attributes.Len(), "no conversation or payload labels")
+				calls[outcome.AsString()] += point.Value
+			}
+			assert.Equal(t, map[string]int64{
+				"success":   1,
+				"error":     1,
+				"cancelled": 1,
+				"timeout":   1,
+			}, calls)
+
+			require.Contains(t, metrics, "kodelet.model.duration")
+			duration := metrics["kodelet.model.duration"]
+			histogram := duration.Data.(metricdata.Histogram[float64])
+			assert.Equal(t, "s", duration.Unit)
+			require.Len(t, histogram.DataPoints, 4)
+			for _, point := range histogram.DataPoints {
+				assert.EqualValues(t, 1, point.Count)
+				assert.Positive(t, point.Sum)
 			}
 		})
 	}

@@ -396,7 +396,14 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 			return nil, rpcErr
 		}
 		result, err := s.executeTool(ctx, value)
-		return rpcResult(result, err)
+		response, rpcErr := rpcResult(result, err)
+		if rpcErr != nil && result.Metrics != nil {
+			rpcErr.Data = map[string]any{
+				"reason":  rpcErr.Reason(),
+				"metrics": result.Metrics,
+			}
+		}
+		return response, rpcErr
 	case protocol.MethodWorkspaceGitDiff:
 		value, rpcErr := decodeParams[protocol.WorkspaceGitDiffParams](params)
 		if rpcErr != nil {
@@ -1624,7 +1631,37 @@ func (s *Service) executeTool(ctx context.Context, params runnerpayload.ToolExec
 
 // executeRunTool is shared by top-level RPCs and runner-local children.
 // Callers own run-operation accounting and the invocation's cancellation context.
-func (s *Service) executeRunTool(operationCtx context.Context, run *activeRun, params runnerpayload.ToolExecuteParams, nested bool, childUpdates agentenv.ToolUpdateSink) (runnerpayload.ToolExecuteResult, error) {
+func (s *Service) executeRunTool(
+	operationCtx context.Context,
+	run *activeRun,
+	params runnerpayload.ToolExecuteParams,
+	nested bool,
+	childUpdates agentenv.ToolUpdateSink,
+) (result runnerpayload.ToolExecuteResult, err error) {
+	started := time.Now()
+	defer func() {
+		outcome := "success"
+		switch {
+		case errors.Is(err, context.DeadlineExceeded),
+			errors.Is(operationCtx.Err(), context.DeadlineExceeded),
+			result.FailureKind == "timeout":
+			outcome = "timeout"
+		case errors.Is(err, context.Canceled),
+			errors.Is(operationCtx.Err(), context.Canceled),
+			result.FailureKind == "cancelled":
+			outcome = "cancelled"
+		case result.FailureKind == "blocked":
+			outcome = "blocked"
+		case err != nil, result.FailureKind != "",
+			!result.Result.Structured.Success, result.Result.Error != "":
+			outcome = "error"
+		}
+		result.Metrics = &runnerpayload.ToolExecutionMetrics{
+			DurationNS: time.Since(started).Nanoseconds(),
+			Outcome:    outcome,
+		}
+	}()
+
 	peer := s.currentPeer()
 	if nested || params.Name == "code_execute" {
 		operationCtx = extensions.ContextWithStrictToolPolicy(operationCtx)

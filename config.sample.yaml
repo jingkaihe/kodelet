@@ -465,6 +465,12 @@ context:
   #   - "AGENTS.md"
   #   - "README.md"
 
+# Push metrics configuration (independent of tracing).
+# Configure on the daemon; runners report tool measurements over their existing connection.
+# Uses OTEL_EXPORTER_OTLP_ENDPOINT or OTEL_EXPORTER_OTLP_METRICS_ENDPOINT.
+metrics:
+  enabled: false
+
 # Tracing Configuration
 tracing:
   # Enable OpenTelemetry tracing (default: false)
@@ -501,6 +507,7 @@ tracing:
 # - KODELET_ALLOWED_TOOLS: Comma-separated list of allowed tools for main agent
 # - KODELET_CONTEXT_PATTERNS: Comma-separated list of context file patterns (e.g., "AGENTS.md,README.md")
 # - KODELET_TRACING_ENABLED: Enables/disables tracing
+# - KODELET_METRICS_ENABLED: Enables/disables OTLP/HTTP metrics
 # - KODELET_TRACING_CAPTURE_CONTENT: Opts in to sensitive content in traces
 # - KODELET_TRACING_INTERNAL_RPC_SPANS: Includes routine lifecycle and housekeeping RPC spans
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy

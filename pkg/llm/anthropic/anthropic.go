@@ -1376,10 +1376,23 @@ func (t *Thread) recordUsage(usage anthropic.Usage, model anthropic.Model, updat
 	}
 
 	// Calculate individual costs and show usage regardless of subscription.
-	t.Usage.InputCost += float64(usage.InputTokens) * pricing.Input
-	t.Usage.OutputCost += float64(usage.OutputTokens) * pricing.Output
-	t.Usage.CacheCreationCost += cacheCreationCost(usage, pricing)
-	t.Usage.CacheReadCost += float64(usage.CacheReadInputTokens) * pricing.PromptCachingRead
+	inputCost := float64(usage.InputTokens) * pricing.Input
+	outputCost := float64(usage.OutputTokens) * pricing.Output
+	cacheWriteCost := cacheCreationCost(usage, pricing)
+	cacheReadCost := float64(usage.CacheReadInputTokens) * pricing.PromptCachingRead
+	t.Usage.InputCost += inputCost
+	t.Usage.OutputCost += outputCost
+	t.Usage.CacheCreationCost += cacheWriteCost
+	t.Usage.CacheReadCost += cacheReadCost
+
+	// Accounting has no request context. Record only this response's increments,
+	// including compaction usage, rather than the thread's cumulative totals.
+	ctx := context.Background()
+	telemetry.RecordTokenUsage(ctx, "anthropic", model, "input", usage.InputTokens)
+	telemetry.RecordTokenUsage(ctx, "anthropic", model, "output", usage.OutputTokens)
+	telemetry.RecordTokenUsage(ctx, "anthropic", model, "cache_read", usage.CacheReadInputTokens)
+	telemetry.RecordTokenUsage(ctx, "anthropic", model, "cache_write", usage.CacheCreationInputTokens)
+	telemetry.RecordCost(ctx, "anthropic", model, inputCost+outputCost+cacheWriteCost+cacheReadCost)
 
 	if updateContext {
 		t.Usage.CurrentContextWindow = int(promptTokens + usage.OutputTokens)

@@ -1,4 +1,4 @@
-// Package telemetrytest provides tracing fixtures and assertions for tests.
+// Package telemetrytest provides telemetry fixtures and assertions for tests.
 package telemetrytest
 
 import (
@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
@@ -38,6 +40,33 @@ func NewRecorder(t *testing.T, captureContent bool) (*tracetest.SpanRecorder, *s
 	require.NoError(t, err)
 	otel.SetTracerProvider(provider)
 	return recorder, provider
+}
+
+// NewMetricsRecorder installs an in-memory meter provider and returns a collector
+// keyed by instrument name. It restores the global provider at cleanup; callers
+// must not run in parallel.
+func NewMetricsRecorder(t *testing.T) func() map[string]metricdata.Metrics {
+	t.Helper()
+	previous := otel.GetMeterProvider()
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	t.Cleanup(func() {
+		otel.SetMeterProvider(previous)
+		assert.NoError(t, provider.Shutdown(context.Background()))
+	})
+	return func() map[string]metricdata.Metrics {
+		t.Helper()
+		var data metricdata.ResourceMetrics
+		require.NoError(t, reader.Collect(t.Context(), &data))
+		metrics := map[string]metricdata.Metrics{}
+		for _, scope := range data.ScopeMetrics {
+			for _, metric := range scope.Metrics {
+				metrics[metric.Name] = metric
+			}
+		}
+		return metrics
+	}
 }
 
 // AssertToolTracePrivacy checks that lifecycle events stay metadata-only and tool

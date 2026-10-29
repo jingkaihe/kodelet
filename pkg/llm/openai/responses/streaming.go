@@ -803,23 +803,34 @@ func (t *Thread) updateUsageAccounting(
 
 	// Non-cached input tokens
 	nonCachedInput := inputTokens - cachedTokens - cacheWriteTokens
-	if nonCachedInput > 0 {
-		t.Usage.InputCost += float64(nonCachedInput) * pricing.Input
-	}
+	inputCost := float64(max(nonCachedInput, 0)) * pricing.Input
+	t.Usage.InputCost += inputCost
 
 	// Cached input tokens (typically cheaper)
-	if cachedTokens > 0 {
-		t.Usage.CacheReadCost += float64(cachedTokens) * pricing.CachedInput
-	}
+	cacheReadCost := float64(max(cachedTokens, 0)) * pricing.CachedInput
+	t.Usage.CacheReadCost += cacheReadCost
 
 	// Cache write tokens are billed separately from regular input when pricing
 	// provides a cache-write rate.
-	if cacheWriteTokens > 0 {
-		t.Usage.CacheCreationCost += float64(cacheWriteTokens) * pricing.CacheWriteInput
-	}
+	cacheWriteCost := float64(max(cacheWriteTokens, 0)) * pricing.CacheWriteInput
+	t.Usage.CacheCreationCost += cacheWriteCost
 
 	// Output tokens
-	t.Usage.OutputCost += float64(outputTokens) * pricing.Output
+	outputCost := float64(outputTokens) * pricing.Output
+	t.Usage.OutputCost += outputCost
+
+	// Accounting has no request context. Export disjoint per-response counts,
+	// not the persisted input total (which includes cache reads) or local estimates.
+	ctx := context.Background()
+	telemetry.RecordTokenUsage(ctx, "openai", model, "input", int64(max(nonCachedInput, 0)))
+	telemetry.RecordTokenUsage(ctx, "openai", model, "output", usage.OutputTokens)
+	telemetry.RecordTokenUsage(ctx, "openai", model, "cache_read",
+		usage.InputTokensDetails.CachedTokens,
+	)
+	telemetry.RecordTokenUsage(ctx, "openai", model, "cache_write",
+		usage.InputTokensDetails.CacheWriteTokens,
+	)
+	telemetry.RecordCost(ctx, "openai", model, inputCost+cacheReadCost+cacheWriteCost+outputCost)
 
 	if updateCurrentContext {
 		t.Usage.CurrentContextWindow = inputTokens + outputTokens + max(localInputTokens, 0)

@@ -314,6 +314,7 @@ var explicitFlagKeyOverrides = map[string]string{
 	"enable-openai-search":       "openai.enable_search",
 	"context-patterns":           "context.patterns",
 	"tracing-enabled":            "tracing.enabled",
+	"metrics-enabled":            "metrics.enabled",
 	"tracing-sampler":            "tracing.sampler",
 	"tracing-ratio":              "tracing.ratio",
 	"tracing-capture-content":    "tracing.capture_content",

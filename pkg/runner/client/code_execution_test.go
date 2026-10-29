@@ -366,6 +366,10 @@ func TestRunnerCodeChildCancellation(t *testing.T) {
 	}
 	run.ops.Wait()
 	assert.Equal(t, []string{protocol.MethodToolChildBegin, protocol.MethodToolChildEnd}, peer.calls)
+	completion := peer.callParams[1].(runnerpayload.ToolChildParams)
+	require.NotNil(t, completion.Metrics)
+	assert.Equal(t, "cancelled", completion.Metrics.Outcome)
+	assert.Positive(t, completion.Metrics.DurationNS)
 }
 
 func TestRunnerCodeModeNegotiation(t *testing.T) {

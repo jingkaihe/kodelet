@@ -1,4 +1,3 @@
-// Package telemetry provides OpenTelemetry tracing for Kodelet
 package telemetry
 
 import (
@@ -10,28 +9,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 )
-
-// Config represents the configuration for the telemetry system
-type Config struct {
-	// Enabled determines if tracing is enabled
-	Enabled bool
-	// CaptureContent opts in to recording prompts, messages, and tool payloads.
-	CaptureContent bool
-	// InternalRPCSpans includes routine lifecycle and housekeeping transport spans.
-	InternalRPCSpans bool
-	// ServiceName is the name of the service in traces
-	ServiceName string
-	// ServiceVersion is the version of the service in traces
-	ServiceVersion string
-	// SamplerType is the type of sampler to use (always, never, ratio)
-	SamplerType string
-	// SamplerRatio is the sampling ratio when using ratio sampler
-	SamplerRatio float64
-}
 
 var (
 	captureContent   atomic.Bool
@@ -60,12 +39,7 @@ func InitTracer(ctx context.Context, cfg Config) (shutdown func(context.Context)
 	}
 
 	// Configure resource with service information
-	res, err := resource.New(ctx,
-		resource.WithAttributes(
-			semconv.ServiceName(cfg.ServiceName),
-			semconv.ServiceVersion(cfg.ServiceVersion),
-		),
-	)
+	res, err := telemetryResource(ctx, cfg)
 	if err != nil {
 		return nil, pkgerrors.Wrap(err, "failed to create resource")
 	}

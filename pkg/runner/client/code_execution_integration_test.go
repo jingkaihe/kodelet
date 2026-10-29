@@ -18,10 +18,12 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
+	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 // codeWire records actual JSON-RPC frames in both directions, not just mocks of
@@ -255,6 +257,7 @@ return "selected";
 }
 
 func TestRunnerCodeLoopbackVMAndChildHelper(t *testing.T) {
+	collectMetrics := telemetrytest.NewMetricsRecorder(t)
 	loop := newCodeLoopback(t)
 	const secret = "intermediate-visible-to-user-not-model"
 	filePath := filepath.Join(loop.manifest.WorkingDirectory, "private.txt")
@@ -305,6 +308,17 @@ return {names: page.tools.map(t => t.name), found: matches.tools[0].name,
 	require.True(t, result.Result.Structured.Success, result.Result.AssistantFacing)
 	metadata, ok := result.Result.Structured.Metadata.(tooltypes.CodeExecutionMetadata)
 	require.True(t, ok)
+	counts := map[bool]map[string]int64{false: {}, true: {}}
+	metrics := collectMetrics()
+	require.Contains(t, metrics, "kodelet.tool.executions")
+	executions := metrics["kodelet.tool.executions"].Data.(metricdata.Sum[int64])
+	for _, point := range executions.DataPoints {
+		name, _ := point.Attributes.Value("gen_ai.tool.name")
+		nested, _ := point.Attributes.Value("kodelet.tool.nested")
+		counts[nested.AsBool()][name.AsString()] += point.Value
+	}
+	assert.Equal(t, map[string]int64{"web_fetch": 1, "code_execute": 1}, counts[false])
+	assert.Equal(t, map[string]int64{"file_read": 1, "web_fetch": 1}, counts[true])
 	require.Len(t, metadata.Items, 1)
 	require.Len(t, metadata.Calls, 2)
 	assert.NotContains(t, result.Result.AssistantFacing, secret)
@@ -341,6 +355,14 @@ return {names: page.tools.map(t => t.name), found: matches.tools[0].name,
 		case protocol.MethodToolChildBegin, protocol.MethodToolChildEnd:
 			var ownership map[string]any
 			require.NoError(t, json.Unmarshal(message.Params, &ownership))
+			if message.Method == protocol.MethodToolChildEnd {
+				summary, ok := ownership["metrics"].(map[string]any)
+				require.True(t, ok)
+				assert.Len(t, summary, 2, "only duration and outcome cross the wire")
+				assert.Equal(t, "success", summary["outcome"])
+				assert.Positive(t, summary["durationNs"])
+				delete(ownership, "metrics")
+			}
 			assert.Len(t, ownership, 4, "ownership RPC contains IDs and name only")
 			assert.Equal(t, "parent", ownership["parentToolCallId"])
 			if message.Method == protocol.MethodToolChildBegin {
