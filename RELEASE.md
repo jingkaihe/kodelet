@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.8.18-beta
+
+Improved Web UI terminal rendering by avoiding repeated redraws of unchanged scrollback while continuing to repaint on scrolling and new output.
+
+Updated Storybook and its React/Vite integrations to 10.6.5 and refreshed frontend development dependencies, including a `glob` 14.0.3 override for the React docgen plugin.
+
 ## 0.8.17-beta
 
 Added opt-in OpenTelemetry metrics for model calls, token usage, cost, and tool executions via `metrics.enabled`; see [Observability](docs/observability.md#enable-push-metrics).
