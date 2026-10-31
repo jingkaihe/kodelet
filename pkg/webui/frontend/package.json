@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "anser": "2.3.5",
-    "ghostty-web": "0.4.0-next.20.g1858a59",
+    "ghostty-web": "https://github.com/jingkaihe/ghostty-web/releases/download/v0.4.0-idle-rendering.1/ghostty-web-0.4.0-idle-rendering.1.tgz",
     "lucide-react": "^1.14.0",
     "marked": "^9.1.6",
     "prismjs": "^1.29.0",
