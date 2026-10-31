@@ -54,6 +54,9 @@
     "vitest": "^4.1.12"
   },
   "overrides": {
+    "@joshwooding/vite-plugin-react-docgen-typescript": {
+      "glob": "^14.0.3"
+    },
     "ws": "^8.20.1",
     "esbuild": "^0.28.1"
   },
