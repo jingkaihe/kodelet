@@ -49,6 +49,12 @@ jobs:
       - name: Test Go SDK
         run: mise run sdk-go-test
 
+      - name: Lint MCP extension
+        run: mise run mcp-lint
+
+      - name: Test MCP extension
+        run: mise run mcp-test
+
       - name: Test TypeScript and Go SDKs across process boundaries
         run: mise run sdk-acceptance
 

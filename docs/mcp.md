@@ -1,70 +1,37 @@
 # Kodelet MCP extension
 
-The MCP integration is implemented as a Kodelet extension built with the TypeScript SDK. It is installed as the plugin `kodelet@mcp` and exposes the executable `kodelet-extension-mcp`.
-
-The extension keeps MCP out of the Go core: MCP servers become normal extension-registered tools.
+The MCP integration runs in the native Go executable `kodelet-extension-mcp`, separate from the Kodelet core. MCP servers become normal extension-registered tools.
 
 ## Installation
 
-Requirements: Kodelet CLI with extensions enabled, and Node.js 20+ available as `node`.
-
-Install from npm:
-
-```bash
-npm install -g kodelet --allow-scripts=kodelet
-```
-
-The npm package runs the MCP installer automatically. If you need to regenerate the wrapper, run:
-
-```bash
-kodelet-mcp-install
-```
-
-Set `KODELET_SKIP_MCP_PLUGIN_INSTALL=1` to skip the automatic npm postinstall step.
+The RPM/DEB packages and standalone installer include `kodelet-extension-mcp` alongside `kodelet`. Release downloads also provide `kodelet-extension-mcp-<os>-<arch>` for Linux/macOS on amd64/arm64; install it as `kodelet-extension-mcp` in a directory on the runner's PATH. If your Homebrew formula does not yet include the extension, install the matching standalone extension release asset separately.
 
 Install from a source checkout:
 
 ```bash
-(cd sdk/typescript && npm ci && npm run build)
-node sdk/typescript/dist/extensions/mcp/install.js
+mise run mcp-build
+mkdir -p ~/.local/bin
+install -m 755 bin/kodelet-extension-mcp ~/.local/bin/kodelet-extension-mcp
 ```
 
-Both paths create this plugin wrapper:
-
-```text
-~/.kodelet/plugins/kodelet@mcp/extensions/mcp/kodelet-extension-mcp
-```
+The runner discovers the extension automatically when extensions and PATH discovery are enabled (the defaults). No Node.js or npm installation is required for the bridge. Individual MCP servers launched with `node` or `npx` still require Node.js on the runner.
 
 Verify discovery:
 
 ```bash
 kodelet extension list
-kodelet extension inspect kodelet@mcp/mcp
+kodelet extension inspect mcp
 ```
 
-Uninstall:
+For existing npm installations, remove the old generated plugin wrapper before loading the native extension:
 
 ```bash
-rm -rf ~/.kodelet/plugins/kodelet@mcp
+rm -rf "$HOME/.kodelet/plugins/kodelet@mcp"
 ```
 
-After installation, add MCP servers to `~/.kodelet/mcp.json` or a workspace-local `./mcp.json` as described below.
+Keep `~/.kodelet/mcp.json`, workspace `mcp.json` files, and `~/.kodelet/mcp/oauth/`; they remain the configuration and credential locations. The extension ID changes from `kodelet@mcp/mcp` to `mcp`. If you configured extension allow/deny rules, replace the plugin reference with the absolute installed executable path, such as `/usr/bin/kodelet-extension-mcp`. Leaving both installations active can cause duplicate tool registration errors.
 
-Upgrade from npm:
-
-```bash
-npm install -g kodelet@latest
-```
-
-Upgrade from source:
-
-```bash
-git pull
-(cd sdk/typescript && npm ci && npm run build)
-node sdk/typescript/dist/extensions/mcp/install.js
-```
-
-Restart any running Kodelet sessions after upgrading.
+Upgrade the extension together with Kodelet. Restart or reload running sessions after installing or upgrading. To disable only this extension, deny its absolute executable path in `extensions.deny`; `extensions.discover_path: false` disables all PATH-discovered extensions.
 
 ## Configuration
 
@@ -158,10 +125,14 @@ String values support `$VAR` and `${VAR}` environment expansion.
 
 To force reauthorization for a server, remove its cached credentials from `~/.kodelet/mcp/oauth/`.
 
-Device-code OAuth is not implemented in this extension yet.
+Device-code OAuth is not implemented. Browser authorization runs on the runner; a remote or headless runner may need manual browser access or port forwarding for its loopback callback.
+
+OAuth endpoints must use HTTPS, except for HTTP loopback endpoints used for local development. Callback URLs must be HTTP loopback URLs. MCP redirects and SSE message endpoints must stay on the configured server's origin.
 
 ## Development checks
 
 ```bash
-(cd sdk/typescript && npm run typecheck && npm test && npm run build)
+mise run mcp-lint
+mise run mcp-test
+mise run mcp-build
 ```

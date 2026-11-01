@@ -10,7 +10,8 @@ Dockerfile
 /docs/
 /examples/
 /recipes/
-/sdk/
+/sdk/*
+!/sdk/go/
 /skills/
 /*.md
 

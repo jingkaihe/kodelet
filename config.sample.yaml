@@ -534,5 +534,5 @@ tracing:
 # - OTEL_RESOURCE_ATTRIBUTES: Additional resource attributes to include
 
 # MCP (Model Context Protocol) servers are not configured in the core Kodelet
-# config. The SDK MCP extension reads `./mcp.json` or `~/.kodelet/mcp.json`.
-# See `sdk/typescript/src/extensions/mcp/README.md`.
+# config. The native MCP extension reads `./mcp.json` or `~/.kodelet/mcp.json`.
+# See `docs/mcp.md`.

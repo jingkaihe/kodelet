@@ -111,4 +111,4 @@ _, err := session.RunAndWait(ctx, agent.RunOptions{Message: task})
 snapshot := progress.Finish(ctx, err == nil, "")
 ```
 
-Not included in Go: Mustache `renderTemplate` and the MCP adapter (install the `kodelet@mcp` extension instead).
+Mustache `renderTemplate` is not included in the Go SDK. MCP support is provided separately by the native `kodelet-extension-mcp` executable, bundled with Kodelet's RPM/DEB packages and standalone installer.

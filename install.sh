@@ -192,20 +192,37 @@ detect_shell_profile() {
 }
 
 install_binary() {
-    local download_url
+    local binary download_url status
+    local binaries=()
 
     require_command curl
     resolve_version_tag
 
-    mkdir -p "$INSTALL_DIR/bin"
-    download_url="https://github.com/${GITHUB_REPO}/releases/download/${VERSION_TAG}/kodelet-${OS}-${ARCH}"
+    if [ -z "$TEMP_DIR" ]; then
+        TEMP_DIR="$(mktemp -d)"
+    fi
+    for binary in kodelet kodelet-extension-mcp; do
+        download_url="https://github.com/${GITHUB_REPO}/releases/download/${VERSION_TAG}/${binary}-${OS}-${ARCH}"
+        echo "Downloading standalone binary from: $download_url"
+        status="$(curl -sSL -w '%{http_code}' "$download_url" -o "$TEMP_DIR/$binary")" || fail "Failed to download $binary"
+        if [ "$status" = 404 ] && [ "$binary" = kodelet-extension-mcp ] && [ "$VERSION" != latest ]; then
+            warn "${VERSION_TAG} has no native MCP extension; leaving any existing MCP installation unchanged"
+            continue
+        fi
+        [ "$status" = 200 ] || fail "Failed to download $binary (HTTP $status)"
+        binaries+=("$binary")
+    done
 
-    echo "Downloading standalone binary from: $download_url"
-    curl -fL "$download_url" -o "$INSTALL_DIR/bin/kodelet"
-    chmod +x "$INSTALL_DIR/bin/kodelet"
+    mkdir -p "$INSTALL_DIR/bin"
+    for binary in "${binaries[@]}"; do
+        chmod +x "$TEMP_DIR/$binary"
+        mv "$TEMP_DIR/$binary" "$INSTALL_DIR/bin/$binary"
+    done
 
     if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
-        ln -sf "$INSTALL_DIR/bin/kodelet" /usr/local/bin/kodelet
+        for binary in "${binaries[@]}"; do
+            ln -sf "$INSTALL_DIR/bin/$binary" "/usr/local/bin/$binary"
+        done
         info "Kodelet installed successfully via standalone binary"
         echo "You can now run: kodelet"
         return 0

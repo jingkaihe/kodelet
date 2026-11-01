@@ -10,7 +10,7 @@ npm run basic -- "what is the meaning of life?"
 npm run streaming -- "explain this repository in one paragraph"
 ```
 
-During development, build the local `sdk/typescript/` package, then run `npm install --no-save --package-lock=false --ignore-scripts ../../../../sdk/typescript` from this example directory to use that build without running the SDK's global MCP plugin installer.
+During development, build the local `sdk/typescript/` package, then run `npm install --no-save --package-lock=false ../../../../sdk/typescript` from this example directory to use that build.
 
 Useful environment variables:
 

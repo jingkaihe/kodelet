@@ -983,7 +983,7 @@ tool_mode: full
 
 ```
 
-MCP servers are configured outside Kodelet's core `config.yaml`. MCP is provided by the SDK MCP extension, which reads `./mcp.json` and `~/.kodelet/mcp.json`. See the [SDK MCP extension README](../sdk/typescript/src/extensions/mcp/README.md) for local installation, `mcp.json` examples, remote HTTP/SSE, OAuth, and tool filtering.
+MCP servers are configured outside Kodelet's core `config.yaml`. The native `kodelet-extension-mcp` executable reads `./mcp.json` and `~/.kodelet/mcp.json` and is discovered on the runner's PATH. RPM/DEB packages and the standalone installer include it; Node.js is needed only for MCP servers that themselves use Node. See the [MCP guide](mcp.md) for installation, migration from the former npm plugin, `mcp.json` examples, remote HTTP/SSE, OAuth, and tool filtering.
 
 ### Command Line Flags
 

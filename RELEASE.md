@@ -2,6 +2,10 @@
 
 ## 0.8.18-beta
 
+MCP now runs in the native Go `kodelet-extension-mcp` executable, included in RPM/DEB packages and standalone installs and discovered on the runner's PATH. The TypeScript SDK no longer contains the MCP adapter, `kodelet-mcp-install`, or the npm postinstall hook. Node.js is no longer required for the bridge; servers launched through `node` or `npx` still need it.
+
+**MCP migration:** After installing the native extension, remove the old generated plugin wrapper with `rm -rf "$HOME/.kodelet/plugins/kodelet@mcp"`. Keep `~/.kodelet/mcp.json`, workspace `mcp.json` files, and `~/.kodelet/mcp/oauth/`. The extension ID changes from `kodelet@mcp/mcp` to `mcp`; update extension allow/deny entries to use the absolute native executable path, such as `/usr/bin/kodelet-extension-mcp`. Restart or reload sessions, then verify with `kodelet extension inspect mcp`. Leaving both installations active may cause duplicate tool registration errors. If your Homebrew formula does not yet include the binary, install the matching `kodelet-extension-mcp-<os>-<arch>` release asset on PATH. See the [MCP guide](docs/mcp.md).
+
 Improved Web UI terminal rendering by avoiding repeated redraws of unchanged scrollback while continuing to repaint on scrolling and new output.
 
 Updated Storybook and its React/Vite integrations to 10.6.5 and refreshed frontend development dependencies, including a `glob` 14.0.3 override for the React docgen plugin.

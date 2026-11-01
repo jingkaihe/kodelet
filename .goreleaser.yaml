@@ -26,6 +26,20 @@ builds:
         -X github.com/jingkaihe/kodelet/pkg/version.Version={{ .Version }}
         -X github.com/jingkaihe/kodelet/pkg/version.GitCommit={{ .Commit }}
         -X github.com/jingkaihe/kodelet/pkg/version.BuildTime={{ .Date }}
+  - id: kodelet-extension-mcp
+    dir: extensions/mcp
+    main: .
+    binary: kodelet-extension-mcp
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
 
 archives:
   - id: raw-binaries
@@ -38,6 +52,12 @@ archives:
       {{- if eq .Arch "amd64" -}}amd64
       {{- else if eq .Arch "arm64" -}}arm64
       {{- else -}}{{ .Arch }}{{- end -}}
+  - id: mcp-raw-binaries
+    ids:
+      - kodelet-extension-mcp
+    formats:
+      - binary
+    name_template: kodelet-extension-mcp-{{ .Os }}-{{ .Arch }}
 
 snapshot:
   version_template: "{{ if .Env.VERSION }}{{ .Env.VERSION }}{{ else }}{{ .Version }}{{ end }}"
@@ -57,6 +77,7 @@ nfpms:
   - id: kodelet-linux
     ids:
       - kodelet
+      - kodelet-extension-mcp
     package_name: kodelet
     formats:
       - deb

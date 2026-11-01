@@ -35,7 +35,7 @@ VERSION_PKG = "github.com/jingkaihe/kodelet/pkg/version"
 
 [tasks.build]
 description = "Build the application with embedded web UI"
-depends = ["code-generation"]
+depends = ["code-generation", "mcp-build"]
 run = [
   "mkdir -p bin",
   "echo 'Building kodelet binary...'",
@@ -44,7 +44,7 @@ run = [
 
 [tasks.build-dev]
 description = "Build the application without web UI (faster for development)"
-depends = ["codemode-generation"]
+depends = ["codemode-generation", "mcp-build"]
 run = [
   "mkdir -p bin",
   "echo 'Building kodelet binary (without frontend)...'",
@@ -243,6 +243,18 @@ run = [
 description = "Run golangci-lint on the Go SDK module"
 run = ["cd sdk/go && golangci-lint run --config ../../.golangci.yml ./..."]
 
+[tasks.mcp-build]
+description = "Build the native MCP extension"
+run = ["CGO_ENABLED=0 go -C extensions/mcp build -ldflags=\"-s -w -X main.version=$VERSION\" -o ../../bin/kodelet-extension-mcp ."]
+
+[tasks.mcp-test]
+description = "Vet and test the native MCP extension"
+run = ["go -C extensions/mcp vet ./...", "go -C extensions/mcp test -race ./..."]
+
+[tasks.mcp-lint]
+description = "Lint the native MCP extension"
+run = ["cd extensions/mcp && golangci-lint run --config ../../.golangci.yml ./..."]
+
 [tasks.sdk-acceptance]
 description = "Run SDK, ACP, daemon, and runner process-boundary gates (KODELET_TEST_EXTENSION_SDKS, default: typescript go)"
 run = ['''
@@ -337,7 +349,7 @@ run = ["./bin/kodelet run -r release-note"]
 
 [tasks.release]
 description = "Build GoReleaser snapshot artifacts"
-depends = ["lint", "test"]
+depends = ["lint", "test", "mcp-lint", "mcp-test"]
 run = [
   "mise run release-snapshot",
 ]
@@ -376,6 +388,7 @@ run = [
   "echo 'Installing Go modules...'",
   "go mod download",
   "go -C sdk/go mod download",
+  "go -C extensions/mcp mod download",
   "echo 'Installing frontend npm dependencies...'",
   "cd pkg/webui/frontend && npm install",
   "echo 'Installing TypeScript SDK npm dependencies and building the SDK...'",
