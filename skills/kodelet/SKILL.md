@@ -1,6 +1,6 @@
 ---
 name: kodelet
-description: Use when working with Kodelet CLI usage, configuration, recipes, skills, plugins, extensions, or the TypeScript SDK.
+description: Use when working with Kodelet CLI usage, configuration, recipes, skills, plugins, extensions, or the TypeScript and Go SDKs.
 ---
 
 # Kodelet guide
@@ -16,5 +16,6 @@ Read only the reference relevant to the task. Prefer current repository docs/sou
 - [Skills](references/skills.md) — discovery, layout, configuration, and skill plugins.
 - [Extensions](references/extensions.md) — authoring, discovery, runtime, configuration, and extension plugins.
 - [TypeScript SDK](references/sdk.md) — agent sessions, tools, commands, events, and TUI integration.
+- [Go SDK](references/go-sdk.md) — agent sessions, inline extensions, and compiled Go extensions.
 
 Runnable examples: [ACP chatbot](examples/streamlit-acp/), [workspace extension](examples/extensions/workspace/), and [SDK sessions](examples/sdk/).

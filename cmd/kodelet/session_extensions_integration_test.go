@@ -29,11 +29,11 @@ import (
 
 // This opt-in acceptance gate runs a real SDK interpreter, ACP subprocess,
 // authenticated daemon, selected runner, and deterministic model HTTP fixture.
-// KODELET_TEST_EXTENSION_SDK=typescript|python selects the SDK installation.
+// KODELET_TEST_EXTENSION_SDK=typescript|python|go selects the SDK installation.
 func TestSessionExtensionsAcrossProcessBoundary(t *testing.T) {
 	sdk := os.Getenv("KODELET_TEST_EXTENSION_SDK")
-	if sdk != "typescript" && sdk != "python" {
-		t.Skip("set KODELET_TEST_EXTENSION_SDK=typescript or python")
+	if sdk != "typescript" && sdk != "python" && sdk != "go" {
+		t.Skip("set KODELET_TEST_EXTENSION_SDK=typescript, python, or go")
 	}
 	for _, placement := range []string{"embedded", "standalone"} {
 		t.Run(placement, func(t *testing.T) {
@@ -55,14 +55,20 @@ func TestSessionExtensionsAcrossProcessBoundary(t *testing.T) {
 					viper.Set(key, value)
 				}
 			})
-			viper.Set("provider", "openai")
-			viper.Set("model", "gpt-4o")
-			viper.Set("max_tokens", 256)
-			viper.Set("openai", map[string]any{
-				"platform":        "openai",
-				"base_url":        provider.URL,
-				"api_key_env_var": "KODELET_TEST_PROVIDER_KEY",
-				"api_mode":        "chat_completions",
+			// The daemon resolves models only from named profiles.
+			viper.Set("profile", "inline")
+			viper.Set("profiles", map[string]any{
+				"inline": map[string]any{
+					"provider":   "openai",
+					"model":      "gpt-4o",
+					"max_tokens": 256,
+					"openai": map[string]any{
+						"platform":        "openai",
+						"base_url":        provider.URL,
+						"api_key_env_var": "KODELET_TEST_PROVIDER_KEY",
+						"api_mode":        "chat_completions",
+					},
+				},
 			})
 			viper.Set("extensions.enabled", true)
 			viper.Set("skills.enabled", false)
@@ -161,35 +167,44 @@ KODELET_TEST_CLI_PROCESS=1 exec %q -test.run '^TestDaemonFirstCLIProcess$' -- "$
 				"runner":  runnerID,
 			})
 			require.NoError(t, err)
-			var interpreter, script, source string
-			if sdk == "typescript" {
-				interpreter, err = exec.LookPath("node")
+			var command []string
+			switch sdk {
+			case "typescript":
+				interpreter, err := exec.LookPath("node")
 				require.NoError(t, err)
-				dist, err := filepath.Abs("../../sdk/dist/index.js")
+				dist, err := filepath.Abs("../../sdk/typescript/dist/index.js")
 				require.NoError(t, err)
-				script = filepath.Join(root, "inline.mjs")
-				source = fmt.Sprintf(sessionExtensionTypeScriptFixture, "file://"+dist, options, workspace)
-			} else {
+				script := filepath.Join(root, "inline.mjs")
+				require.NoError(t, os.WriteFile(script, []byte(fmt.Sprintf(sessionExtensionTypeScriptFixture, "file://"+dist, options, workspace)), 0o600))
+				command = []string{interpreter, script}
+			case "python":
 				sdkPath := os.Getenv("KODELET_PYTHON_SDK_PATH")
 				require.NotEmpty(t, sdkPath, "set KODELET_PYTHON_SDK_PATH to the local Python SDK checkout")
-				interpreter = filepath.Join(sdkPath, ".venv", "bin", "python")
 				environment = append(environment, "PYTHONPATH="+filepath.Join(sdkPath, "src"))
-				script = filepath.Join(root, "inline.py")
-				source = fmt.Sprintf(sessionExtensionPythonFixture, options, workspace)
+				script := filepath.Join(root, "inline.py")
+				require.NoError(t, os.WriteFile(script, []byte(fmt.Sprintf(sessionExtensionPythonFixture, options, workspace)), 0o600))
+				command = []string{filepath.Join(sdkPath, ".venv", "bin", "python"), script}
+			default:
+				command = []string{buildGoSDKSource(ctx, t, root, "inline", fmt.Sprintf(sessionExtensionGoFixture, workspace, options))}
 			}
-			require.NoError(t, os.WriteFile(script, []byte(source), 0o600))
-			process := exec.CommandContext(ctx, interpreter, script)
+			process := exec.CommandContext(ctx, command[0], command[1:]...)
 			process.Dir, process.Env = root, environment
 			output, err := process.CombinedOutput()
 			require.NoError(t, err, "%s", output)
 			assert.Contains(t, string(output), "inline acceptance passed")
 			assertSessionExtensionHierarchy(ctx, t, serverURL, string(output))
-			if sdk == "typescript" {
-				tsx, err := filepath.Abs("../../sdk/node_modules/.bin/tsx")
-				require.NoError(t, err)
-				example, err := filepath.Abs("../../sdk/examples/inline-extension-session.ts")
-				require.NoError(t, err)
-				process := exec.CommandContext(ctx, tsx, example, "Use sdk_echo to say hello")
+			if sdk == "typescript" || sdk == "go" {
+				var process *exec.Cmd
+				if sdk == "typescript" {
+					tsx, err := filepath.Abs("../../sdk/typescript/node_modules/.bin/tsx")
+					require.NoError(t, err)
+					example, err := filepath.Abs("../../sdk/typescript/examples/inline-extension-session.ts")
+					require.NoError(t, err)
+					process = exec.CommandContext(ctx, tsx, example, "Use sdk_echo to say hello")
+				} else {
+					example := buildGoSDKFixture(ctx, t, filepath.Join(root, "inline-example"), "./examples/inline-extension-session")
+					process = exec.CommandContext(ctx, example, "Use sdk_echo to say hello")
+				}
 				process.Dir = root
 				process.Env = append(environment,
 					"KODELET_BIN="+wrapper,

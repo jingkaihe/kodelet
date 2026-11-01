@@ -2,6 +2,8 @@
 
 Kodelet is an agentic coding CLI: Go backend in `cmd/kodelet/` and `pkg/`, React/TypeScript UI in `pkg/webui/frontend/`.
 
+SDKs: TypeScript in `sdk/typescript/` (the npm package root) and Go in `sdk/go/`, a separate module (`github.com/jingkaihe/kodelet/sdk/go`) outside the root `./...`. Neither Go module imports the other, so the SDKs duplicate the wire types; keep them in step with `pkg/extensions` and `pkg/acp`.
+
 TUI audio uses `audio/` (Rust) and `pkg/audio/` (Go IPC); see [audio/README.md](audio/README.md) for local build/test tasks.
 
 Opt-in code mode uses a runner-local QuickJS/WASM runtime and tool catalog in `pkg/codemode/`, with shared execution and child ownership in `pkg/runner/`. The embedded runtime's pins and licenses are in `pkg/codemode/runtime_wasm_provenance.md`. `mise run code-generation` installs its locked npm dependency and generates the gitignored WASM alongside the frontend; `mise run codemode-generation` generates only the runtime. No external JavaScript runtime is required by the compiled binary. See [the code-mode design](docs/codemode-design.md) for lifecycle and authorization boundaries.
@@ -27,6 +29,10 @@ Use `mise` tasks. For code changes, run the relevant lint and tests:
 | --- | --- | --- |
 | Go | `mise run lint` | `mise run test` |
 | Frontend | `mise run frontend-lint` | `mise run frontend-test` |
+| TypeScript SDK | `mise run sdk-test` | `mise run sdk-test` |
+| Go SDK | `mise run sdk-go-lint` | `mise run sdk-go-test` |
+
+`mise run sdk-acceptance` runs the SDK process-boundary gates for TypeScript and Go, as CI does. Set `KODELET_TEST_EXTENSION_SDKS` to choose SDKs; `python` also needs `KODELET_PYTHON_SDK_PATH` set to a uv-synced checkout.
 
 ## Read as needed
 

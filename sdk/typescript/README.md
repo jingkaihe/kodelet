@@ -4,7 +4,7 @@ The SDK starts `kodelet acp` as a client of the Kodelet daemon. The daemon owns 
 
 ## Extension model profiles
 
-`ext.registerProfile({ name, provider, model, ...configuration })` declares a self-contained profile using ordinary snake_case configuration keys and built-in defaults. See the [registration example](../skills/kodelet/references/sdk.md#registered-model-profiles). Session `ExecutionOptions` remains a separate camelCase API.
+`ext.registerProfile({ name, provider, model, ...configuration })` declares a self-contained profile using ordinary snake_case configuration keys and built-in defaults. See the [registration example](../../skills/kodelet/references/sdk.md#registered-model-profiles). Session `ExecutionOptions` remains a separate camelCase API.
 
 ## Inline extensions
 
@@ -44,14 +44,14 @@ The bridge relays the existing extension protocol through an authenticated sessi
 
 ### Runnable example
 
-`sdk/examples/inline-extension-session.ts` demonstrates an inline `sdk_echo` tool, captured application state, progress updates, a local notification handler, and Ctrl+C cancellation with session cleanup. From the repository root:
+`sdk/typescript/examples/inline-extension-session.ts` demonstrates an inline `sdk_echo` tool, captured application state, progress updates, a local notification handler, and Ctrl+C cancellation with session cleanup. From the repository root:
 
 ```bash
-npm --prefix sdk ci
-npm --prefix sdk run build
-npm --prefix sdk run example:inline
+npm --prefix sdk/typescript ci
+npm --prefix sdk/typescript run build
+npm --prefix sdk/typescript run example:inline
 # Or supply your own prompt:
-npm --prefix sdk run example:inline -- "Use sdk_echo to say hello"
+npm --prefix sdk/typescript run example:inline -- "Use sdk_echo to say hello"
 ```
 
 Use a compatible `kodelet` executable on `PATH`, or set `KODELET_BIN` to its path. The example uses the normal local daemon by default; set `KODELET_SERVER` and `KODELET_RUNNER` to target a remote daemon and registered runner, using the CLI's usual authentication configuration. `KODELET_CWD` selects the runner workspace directory and `KODELET_PROFILE` selects a daemon model profile. Model credentials stay on the daemon. The effective extension/tool policy must permit `sdk_echo`.
@@ -103,14 +103,14 @@ Fresh children require ACP `_meta.conversationHierarchy.version: 1`; child forks
 
 Installed extension tools can call `await ctx.browser.acquire()` to obtain `{ leaseId, sessionId, cdpUrl, pageTargetId, release }` for the same Chrome session as the conversation's Web UI. The host must advertise `capabilities.browser.version: 1`, and the daemon must authorize browser access. Inline SDK extensions cannot acquire runner-local endpoints.
 
-Use `chromium.connectOverCDP(connection.cdpUrl, { noDefaults: true })` from Playwright, resolve the exact `pageTargetId`, and keep all automation in the extension. Disconnect the client and call `connection.release()` in `finally`; also honor `ctx.signal`. The lease ends when the tool invocation ends, and release does not close Chrome or revoke raw CDP access. This is broad browser access for trusted installed extensions, not a per-action permission boundary. See the [wire protocol and lifecycle](../docs/extension-design.md#runner-local-browser-connections).
+Use `chromium.connectOverCDP(connection.cdpUrl, { noDefaults: true })` from Playwright, resolve the exact `pageTargetId`, and keep all automation in the extension. Disconnect the client and call `connection.release()` in `finally`; also honor `ctx.signal`. The lease ends when the tool invocation ends, and release does not close Chrome or revoke raw CDP access. This is broad browser access for trusted installed extensions, not a per-action permission boundary. See the [wire protocol and lifecycle](../../docs/extension-design.md#runner-local-browser-connections).
 
 ## Image results
 
 Extension tools can return image attachments with exactly one source: `{type: "image", path: "chart.png"}` for a runner-local file, or `{type: "image", data: pngBytes.toString("base64"), mimeType: "image/png"}` for inline bytes. Optional fields include `filename` and `alt`. Inline data must be strict base64, not a data URL. The runner accepts at most eight images per final result and 32 MiB per decoded image, validates and stores them through the normal artifact pipeline, and replaces sources with persistent artifact references. Attachments belong on final results, not progress updates. The MCP adapter preserves image content blocks using this same path, including partial images in error results.
 
-An image attachment is user-visible but is not automatically sent as pixels to the model. Direct `view_image` can inspect it; inside code mode, use `emit.image(reply.attachments[0])` for model-visible pixels or `emit.artifact(reply.attachments[0])` to retain it without pixels. Returning an ID alone does not select media. See the [code-mode manual](../docs/MANUAL.md#tool-calls-as-code) for permission and emission rules.
+An image attachment is user-visible but is not automatically sent as pixels to the model. Direct `view_image` can inspect it; inside code mode, use `emit.image(reply.attachments[0])` for model-visible pixels or `emit.artifact(reply.attachments[0])` to retain it without pixels. Returning an ID alone does not select media. See the [code-mode manual](../../docs/MANUAL.md#tool-calls-as-code) for permission and emission rules.
 
 ## Development
 
-From the repository root, run `mise run sdk-test` for TypeScript checking, build, SDK tests, and package dry-run. The real SDK/ACP/daemon/runner acceptance gate is `KODELET_TEST_EXTENSION_SDK=typescript mise exec -- go test ./cmd/kodelet -run '^TestSessionExtensionsAcrossProcessBoundary$' -count=1 -timeout=3m`.
+From the repository root, run `mise run sdk-test` for TypeScript checking, build, SDK tests, and package dry-run. `KODELET_TEST_EXTENSION_SDKS=typescript mise run sdk-acceptance` builds the SDK and runs the real SDK, ACP, daemon, and runner acceptance gates. CI runs both.

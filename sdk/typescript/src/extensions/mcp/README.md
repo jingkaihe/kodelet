@@ -25,8 +25,8 @@ Set `KODELET_SKIP_MCP_PLUGIN_INSTALL=1` to skip the automatic npm postinstall st
 Install from a source checkout:
 
 ```bash
-(cd sdk && npm ci && npm run build)
-node sdk/dist/extensions/mcp/install.js
+(cd sdk/typescript && npm ci && npm run build)
+node sdk/typescript/dist/extensions/mcp/install.js
 ```
 
 Both paths create this plugin wrapper:
@@ -60,8 +60,8 @@ Upgrade from source:
 
 ```bash
 git pull
-(cd sdk && npm ci && npm run build)
-node sdk/dist/extensions/mcp/install.js
+(cd sdk/typescript && npm ci && npm run build)
+node sdk/typescript/dist/extensions/mcp/install.js
 ```
 
 Restart any running Kodelet sessions after upgrading.
@@ -163,5 +163,5 @@ Device-code OAuth is not implemented in this extension yet.
 ## Development checks
 
 ```bash
-(cd sdk && npm run typecheck && npm test && npm run build)
+(cd sdk/typescript && npm run typecheck && npm test && npm run build)
 ```

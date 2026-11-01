@@ -535,4 +535,4 @@ tracing:
 
 # MCP (Model Context Protocol) servers are not configured in the core Kodelet
 # config. The SDK MCP extension reads `./mcp.json` or `~/.kodelet/mcp.json`.
-# See `sdk/src/extensions/mcp/README.md`.
+# See `sdk/typescript/src/extensions/mcp/README.md`.

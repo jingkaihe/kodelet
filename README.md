@@ -8,7 +8,7 @@
 
 [Kodelet](https://kodelet.com/) runs agentic loops on a server instead of your terminal session. Start a task in the terminal, pick it up in the browser or an editor that supports [ACP](https://agentclientprotocol.com/), and disconnect whenever you like. Keep everything on your laptop, or host the server remotely and send work to [runners](docs/MANUAL.md#workspace-bound-runners) on other machines.
 
-Kodelet comes with a minimal core but is highly customizable through its powerful [extension system](docs/extension-design.md). Add custom tools and commands, intercept prompts and tool calls, build interactive terminal widgets, or plug in MCP servers, using TypeScript, Python, or any language that speaks JSON-RPC. Bring your own Claude, OpenAI, or OpenAI-compatible models, add skills for specialist know-how, and control access with sign-in through your identity provider.
+Kodelet comes with a minimal core but is highly customizable through its powerful [extension system](docs/extension-design.md). Add custom tools and commands, intercept prompts and tool calls, build interactive terminal widgets, or plug in MCP servers, using TypeScript, Python, Go, or any language that speaks JSON-RPC. Bring your own Claude, OpenAI, or OpenAI-compatible models, add skills for specialist know-how, and control access with sign-in through your identity provider.
 
 ## Get started
 
@@ -93,7 +93,7 @@ Start with project instructions, then add capabilities as you need them:
 | [Recipes](docs/FRAGMENTS.md) | Reusable prompts with arguments and shell substitutions for tasks you repeat. |
 | [Skills](docs/SKILLS.md) | Domain guidance the agent loads when relevant to the task. |
 | [Extensions](docs/extension-design.md) | Executable tools, commands, and lifecycle behavior that connect the agent to your workflows. |
-| [MCP tools](sdk/src/extensions/mcp/README.md) | Tools from local or remote MCP servers, connected through the SDK MCP extension. |
+| [MCP tools](sdk/typescript/src/extensions/mcp/README.md) | Tools from local or remote MCP servers, connected through the SDK MCP extension. |
 | [Plugins](docs/SKILLS.md#managing-skills-with-plugins) | Bundles of skills, recipes, and extensions you can install and share. |
 
 For example, with an image-generation extension installed, a request in terminal chat can produce an image you open in the Web UI.
@@ -105,8 +105,9 @@ With remote runners, install workspace skills, recipes, and extensions on the ru
 - [User manual](docs/MANUAL.md): commands, configuration, providers, and troubleshooting.
 - [Remote runners](docs/MANUAL.md#workspace-bound-runners): work on another machine's workspace.
 - [Sample configuration](config.sample.yaml): model profiles, runner settings, and permissions.
-- [TypeScript SDK](sdk/README.md): build applications and extensions around Kodelet.
+- [TypeScript SDK](sdk/typescript/README.md): build applications and extensions around Kodelet.
 - [Python SDK](https://github.com/jingkaihe/kodelet-python-sdk/blob/main/README.md): run agent sessions and write extensions in Python.
+- [Go SDK](sdk/go/README.md): run agent sessions and write extensions in Go.
 - [Skills collection](https://github.com/jingkaihe/skills/blob/main/README.md): reusable skills for specialist tools and workflows.
 - [Subagent extension](https://github.com/jingkaihe/kodelet-subagent/blob/main/README.md): delegate tasks to background agents you can monitor, steer, and resume.
 

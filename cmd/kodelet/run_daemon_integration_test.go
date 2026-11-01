@@ -1089,7 +1089,7 @@ func testDaemonDelegation(t *testing.T, f *daemonRunFixture) {
 	}
 	require.NotEmpty(t, parentID, "parent profile, runner metadata and usage assertions must run")
 	require.NotEmpty(t, childID, "child has its own persisted conversation")
-	if f.sdk == "typescript" {
+	if f.sdk == "typescript" || f.sdk == "go" {
 		assert.Equal(t, parentID, childParentID, "registered-profile ACP children retain their requested parent")
 	}
 	if f.sdk != "" {
@@ -1097,13 +1097,14 @@ func testDaemonDelegation(t *testing.T, f *daemonRunFixture) {
 		require.NoError(t, err)
 		assert.Equal(t, "code-search", profileSettings.CurrentProfile)
 		assert.Equal(t, "none", profileSettings.ReasoningEffort)
-		for _, profile := range profileSettings.Profiles {
-			assert.NotEqual(t, "code-search", profile.Name, "hidden profiles must not appear in normal pickers")
-		}
 		parentSettings, err := f.client.ChatSettings(f.ctx, "deep")
 		require.NoError(t, err)
 		assert.Equal(t, "xhigh", parentSettings.ReasoningEffort)
 		assert.Equal(t, []string{"high", "xhigh"}, parentSettings.ReasoningEffortOptions)
+		// A selected hidden profile stays listed; other pickers must omit it.
+		for _, profile := range parentSettings.Profiles {
+			assert.NotEqual(t, "code-search", profile.Name, "hidden profiles must not appear in normal pickers")
+		}
 		daemonSDKClient(f.ctx, t, f.root, f.workspace, f.sdk, f.serverURL, f.runnerID, f.clientEnv)
 	}
 }
@@ -1252,7 +1253,7 @@ model: forbidden-repository-model
 	}
 }
 
-// Opt-in cross-repository SDK gate: build sdk/dist first, or set
+// Opt-in cross-repository SDK gate: build sdk/typescript/dist first, or set
 // KODELET_PYTHON_SDK_PATH to a uv-synced Python SDK checkout. The ordinary Go
 // suite always runs the ordinary ACP protocol fixture without an external SDK.
 // The Python SDK must emit native snake_case profile configuration on the wire.
@@ -1264,7 +1265,7 @@ func daemonSDKSearchExtension(t *testing.T, dir, sdk, providerURL string) string
 		var err error
 		executable, err = exec.LookPath("node")
 		require.NoError(t, err)
-		dist, err := filepath.Abs("../../sdk/dist")
+		dist, err := filepath.Abs("../../sdk/typescript/dist")
 		require.NoError(t, err)
 		name = "search.mjs"
 		source = fmt.Sprintf(`import { Client, defineExtension, z } from %q;
@@ -1363,6 +1364,11 @@ async def search(_input, ctx):
         await client.close()
 asyncio.run(run_extension(ext))
 `, providerURL, daemonACPSearchPrompt)
+	case "go":
+		binary := buildGoSDKSource(context.Background(), t, t.TempDir(), "search", fmt.Sprintf(daemonSDKSearchExtensionGoFixture, providerURL, daemonACPSearchPrompt))
+		return fmt.Sprintf(`#!/bin/sh
+exec %q
+`, binary)
 	default:
 		t.Fatalf("unknown extension SDK %q", sdk)
 	}
@@ -1384,11 +1390,21 @@ KODELET_TEST_CLI_PROCESS=1 exec %q -test.run '^TestDaemonFirstCLIProcess$' -- "$
 	require.NoError(t, os.WriteFile(wrapper, []byte(script), 0o700))
 	options, err := json.Marshal(map[string]string{"command": wrapper, "server": server, "runner": runner})
 	require.NoError(t, err)
+	if sdk == "go" {
+		binary := buildGoSDKSource(ctx, t, root, "client", fmt.Sprintf(daemonSDKClientGoFixture, options, workspace))
+		process := exec.CommandContext(ctx, binary)
+		process.Env = append(environment, "KODELET_AUTH_TOKEN=client-secret")
+		process.Dir = root
+		output, err := process.CombinedOutput()
+		require.NoError(t, err, "%s", output)
+		assert.Equal(t, "tool-free answer\n", string(output))
+		return
+	}
 	var interpreter, path, source string
 	if sdk == "typescript" {
 		interpreter, err = exec.LookPath("node")
 		require.NoError(t, err)
-		dist, err := filepath.Abs("../../sdk/dist/index.js")
+		dist, err := filepath.Abs("../../sdk/typescript/dist/index.js")
 		require.NoError(t, err)
 		path = filepath.Join(root, "client.mjs")
 		source = fmt.Sprintf(`import { Client } from %q;

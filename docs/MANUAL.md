@@ -983,7 +983,7 @@ tool_mode: full
 
 ```
 
-MCP servers are configured outside Kodelet's core `config.yaml`. MCP is provided by the SDK MCP extension, which reads `./mcp.json` and `~/.kodelet/mcp.json`. See the [SDK MCP extension README](../sdk/src/extensions/mcp/README.md) for local installation, `mcp.json` examples, remote HTTP/SSE, OAuth, and tool filtering.
+MCP servers are configured outside Kodelet's core `config.yaml`. MCP is provided by the SDK MCP extension, which reads `./mcp.json` and `~/.kodelet/mcp.json`. See the [SDK MCP extension README](../sdk/typescript/src/extensions/mcp/README.md) for local installation, `mcp.json` examples, remote HTTP/SSE, OAuth, and tool filtering.
 
 ### Command Line Flags
 
@@ -1480,7 +1480,7 @@ await client.close();
 
 Select a named daemon profile with `profile: "my-profile"`, stream output with `session.on("assistant.message_delta", ...)`, or add inline tools with `extensions: [extension]`. Inline callbacks run in your application process. When resuming, supply the same extensions in the same order.
 
-See the [SDK guide](../sdk/README.md) for setup and compatibility requirements, or try the [runnable inline-extension example](../sdk/examples/inline-extension-session.ts).
+See the [SDK guide](../sdk/typescript/README.md) for setup and compatibility requirements, or try the [runnable inline-extension example](../sdk/typescript/examples/inline-extension-session.ts).
 
 ### Creating TypeScript Extensions
 
@@ -1539,11 +1539,33 @@ Example wrapper:
 exec kodelet-extension-node ./dist/index.js
 ```
 
+### Go SDK
+
+The Go module `github.com/jingkaihe/kodelet/sdk/go` provides the same two halves: the `agent` package runs daemon-backed sessions through `kodelet acp`, including inline extensions, and the `extension` package builds extensions whose tool and command schemas are inferred from Go types. A Go extension is a single compiled executable, so no wrapper is needed:
+
+```go
+ext := extension.New(extension.Metadata{Name: "weather", Version: "0.1.0"})
+extension.RegisterTool(ext, extension.Tool[weatherInput]{
+	Name:        "get_weather",
+	Description: "Get the current weather for a location",
+	Execute: func(ctx context.Context, in weatherInput, tc *extension.ToolContext) (extension.ToolResult, error) {
+		return extension.Text("18°C, cloudy in " + in.Location), nil
+	},
+})
+ext.Main()
+```
+
+```bash
+go build -o .kodelet/extensions/weather/kodelet-extension-weather .
+```
+
+See the [Go SDK guide](../sdk/go/README.md) for sessions, events, UI helpers, testing, and examples.
+
 ### Streaming Extension Tool Progress
 
 Long-running extension tools can publish an accumulated snapshot with `ctx.update(content, data)`. Kodelet replaces the previous snapshot for that tool call in the TUI, Web UI, ACP, and TypeScript SDK; the tool handler's eventual return value remains the authoritative result sent to the model and stored in the conversation.
 
-The TypeScript and Python SDKs provide `TaskProgress` for bounded multi-activity progress. It uses the generic `data.taskRun` shape, supports direct activities for any kind of task, and can attach to a child Kodelet session to translate its tool lifecycle events automatically.
+The TypeScript and Python SDKs provide `TaskProgress`, and the Go SDK provides the `taskprogress` package, for bounded multi-activity progress. It uses the generic `data.taskRun` shape, supports direct activities for any kind of task, and can attach to a child Kodelet session to translate its tool lifecycle events automatically.
 
 ```typescript
 import { TaskProgress } from "kodelet";

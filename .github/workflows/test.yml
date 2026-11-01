@@ -43,6 +43,15 @@ jobs:
       - name: Test TypeScript SDK
         run: mise run sdk-test
 
+      - name: Lint Go SDK
+        run: mise run sdk-go-lint
+
+      - name: Test Go SDK
+        run: mise run sdk-go-test
+
+      - name: Test TypeScript and Go SDKs across process boundaries
+        run: mise run sdk-acceptance
+
       - name: Lint frontend (Biome)
         run: mise run frontend-lint
 
@@ -56,3 +65,29 @@ jobs:
         run: mise run release-snapshot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  go-sdk-minimum:
+    name: Go SDK / minimum Go version
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        working-directory: sdk/go
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go from sdk/go/go.mod
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: sdk/go/go.mod
+          cache-dependency-path: sdk/go/go.sum
+
+      - name: Vet Go SDK
+        run: go vet ./...
+
+      - name: Test Go SDK
+        run: go test -race ./...

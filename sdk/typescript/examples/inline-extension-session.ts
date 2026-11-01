@@ -1,7 +1,7 @@
 import { Client, defineExtension, z } from "kodelet";
 
 if (process.argv.includes("--help")) {
-  console.log(`Usage: npm --prefix sdk run example:inline -- [message]
+  console.log(`Usage: npm --prefix sdk/typescript run example:inline -- [message]
 
 Optional environment: KODELET_BIN, KODELET_SERVER, KODELET_RUNNER,
 KODELET_CWD, KODELET_PROFILE. Configure model credentials on the daemon.

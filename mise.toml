@@ -229,8 +229,33 @@ run = [
 description = "Run TypeScript SDK typecheck and tests"
 run = [
   "echo 'Running extension SDK checks...'",
-  "cd sdk && npm run typecheck && npm run build && npm test && npm pack --dry-run",
+  "cd sdk/typescript && npm run typecheck && npm run build && npm test && npm pack --dry-run",
 ]
+
+[tasks.sdk-go-test]
+description = "Run Go SDK vet and race-enabled tests"
+run = [
+  "echo 'Running Go SDK checks...'",
+  "cd sdk/go && go vet ./... && go test -race ./...",
+]
+
+[tasks.sdk-go-lint]
+description = "Run golangci-lint on the Go SDK module"
+run = ["cd sdk/go && golangci-lint run --config ../../.golangci.yml ./..."]
+
+[tasks.sdk-acceptance]
+description = "Run SDK, ACP, daemon, and runner process-boundary gates (KODELET_TEST_EXTENSION_SDKS, default: typescript go)"
+run = ['''
+set -eu
+sdks="${KODELET_TEST_EXTENSION_SDKS:-typescript go}"
+case " $sdks " in
+  *" typescript "*) (cd sdk/typescript && npm run build) ;;
+esac
+for sdk in $sdks; do
+  echo "Running $sdk SDK process-boundary gates..."
+  KODELET_TEST_EXTENSION_SDK="$sdk" go test ./cmd/kodelet -run '^(TestSessionExtensionsAcrossProcessBoundary|TestDaemonFirstRunAcrossProcessBoundary)$' -count=1 -timeout=5m
+done
+''']
 
 [tasks.frontend-storybook]
 description = "Run the frontend Storybook"
@@ -350,10 +375,11 @@ description = "Install all dependencies (Go modules and npm packages)"
 run = [
   "echo 'Installing Go modules...'",
   "go mod download",
+  "go -C sdk/go mod download",
   "echo 'Installing frontend npm dependencies...'",
   "cd pkg/webui/frontend && npm install",
   "echo 'Installing TypeScript SDK npm dependencies and building the SDK...'",
-  "cd sdk && npm install && npm run build",
+  "cd sdk/typescript && npm install && npm run build",
   "echo 'Installing extension example npm dependencies...'",
   "cd skills/kodelet/examples/extensions/workspace && npm install",
   "echo 'All dependencies installed successfully!'",

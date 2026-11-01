@@ -13,7 +13,7 @@ Extensions communicate over stdio JSON-RPC using `Content-Length` framing. `stdo
 - **Lifecycle event handlers**: observers/mutators/blockers for session, user, agent, turn, and tool events.
 - **Persistent TUI UI**: passive styled widgets above/below the composer and interactive overlay surfaces with focus, keyboard, mouse, and resize notifications.
 
-Use the TypeScript SDK to author extension subprocesses, or implement the JSON-RPC protocol directly. See `references/sdk.md` for SDK agent sessions and the full SDK API surface.
+Use the TypeScript or Go SDK to author extension subprocesses, or implement the JSON-RPC protocol directly. See `references/sdk.md` and `references/go-sdk.md` for SDK agent sessions and the full SDK API surfaces.
 
 ## Authoring a standalone extension
 

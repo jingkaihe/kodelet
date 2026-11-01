@@ -12,8 +12,8 @@ go.work
 vendor/
 bin/
 pkg/codemode/node_modules/
-!sdk/src/bin/
-!sdk/src/bin/**
+!sdk/typescript/src/bin/
+!sdk/typescript/src/bin/**
 .kodelet/extensions/*/node_modules/
 examples/extensions/*/node_modules/
 skills/kodelet/examples/extensions/*/node_modules/
