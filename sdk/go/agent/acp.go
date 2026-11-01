@@ -70,21 +70,33 @@ func newACPConn(proc acpProcess, extensions []*extension.Extension, ui *UIHandle
 }
 
 func (c *acpConn) readLoop() {
-	reader := jsonrpc.NewLineReader(c.proc.Stdout(), acpMessageLimit)
+	stdout := c.proc.Stdout()
+	reader := jsonrpc.NewLineReader(stdout, acpMessageLimit)
 	for {
 		line, err := reader.Read()
 		if err != nil {
-			if !c.isClosed() {
-				select {
-				case <-c.proc.Done():
-					c.fail(c.proc.Exit().runError())
-				case <-time.After(stdoutExitGrace):
-					c.fail(errStdoutEnded)
-				}
-			}
+			// Unblock the process's output copier, or cmd.Wait never returns.
+			_ = stdout.Close()
+			c.readFailed(err)
 			return
 		}
 		c.handleLine(line)
+	}
+}
+
+func (c *acpConn) readFailed(err error) {
+	if c.isClosed() {
+		return
+	}
+	if errors.Is(err, jsonrpc.ErrMessageTooLarge) {
+		c.fail(fmt.Errorf("invalid output from kodelet acp: %w", err))
+		return
+	}
+	select {
+	case <-c.proc.Done():
+		c.fail(c.proc.Exit().runError())
+	case <-time.After(stdoutExitGrace):
+		c.fail(errStdoutEnded)
 	}
 }
 

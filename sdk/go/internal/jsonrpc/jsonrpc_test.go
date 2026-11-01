@@ -46,6 +46,7 @@ func TestLineReaderTrimsCRAndEnforcesLimit(t *testing.T) {
 	_, err := reader.Read()
 	require.True(t, errors.Is(err, io.EOF))
 	_, err = NewLineReader(strings.NewReader(strings.Repeat("x", 100)+"\n"), 8).Read()
+	require.ErrorIs(t, err, ErrMessageTooLarge)
 	require.ErrorContains(t, err, "exceeds 8 byte limit")
 }
 

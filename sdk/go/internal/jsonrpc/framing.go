@@ -17,6 +17,9 @@ const MaxFrameSize = 512 * 1024 * 1024
 // ErrMissingContentLength is returned for a frame header without Content-Length.
 var ErrMissingContentLength = errors.New("missing Content-Length header")
 
+// ErrMessageTooLarge is returned for a line longer than the LineReader limit.
+var ErrMessageTooLarge = errors.New("message too large")
+
 // FrameReader reads LSP-style Content-Length frames.
 type FrameReader struct {
 	reader *bufio.Reader
@@ -119,7 +122,7 @@ func (l *LineReader) Read() ([]byte, error) {
 		chunk, err := l.reader.ReadSlice('\n')
 		line = append(line, chunk...)
 		if len(line) > l.limit+2 {
-			return nil, fmt.Errorf("message exceeds %d byte limit", l.limit)
+			return nil, fmt.Errorf("%w: exceeds %d byte limit", ErrMessageTooLarge, l.limit)
 		}
 		if err == nil {
 			break
@@ -134,7 +137,7 @@ func (l *LineReader) Read() ([]byte, error) {
 	}
 	line = bytes.TrimRight(line, "\r\n")
 	if len(line) > l.limit {
-		return nil, fmt.Errorf("message exceeds %d byte limit", l.limit)
+		return nil, fmt.Errorf("%w: exceeds %d byte limit", ErrMessageTooLarge, l.limit)
 	}
 	return line, nil
 }

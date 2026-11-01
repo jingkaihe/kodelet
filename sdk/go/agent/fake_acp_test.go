@@ -37,7 +37,7 @@ func newFakeProcess() *fakeProcess {
 }
 
 func (p *fakeProcess) Write(data []byte) (int, error) { return p.stdinWriter.Write(data) }
-func (p *fakeProcess) Stdout() io.Reader              { return p.stdoutReader }
+func (p *fakeProcess) Stdout() io.ReadCloser          { return p.stdoutReader }
 func (p *fakeProcess) Done() <-chan struct{}          { return p.done }
 func (p *fakeProcess) Exit() processExit              { return p.exit }
 

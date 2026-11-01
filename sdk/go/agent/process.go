@@ -17,7 +17,9 @@ import (
 type acpProcess interface {
 	// Write writes to the process's stdin.
 	Write(p []byte) (int, error)
-	Stdout() io.Reader
+	// Stdout must be closed when reading stops, so the process can be reaped
+	// even if it is still writing.
+	Stdout() io.ReadCloser
 	Terminate() error
 	Kill() error
 	// Done is closed after the process exits and its output is drained.
@@ -98,7 +100,7 @@ func signalName(signal syscall.Signal) string {
 }
 
 func (p *execProcess) Write(data []byte) (int, error) { return p.stdin.Write(data) }
-func (p *execProcess) Stdout() io.Reader              { return p.stdout }
+func (p *execProcess) Stdout() io.ReadCloser          { return p.stdout }
 func (p *execProcess) Done() <-chan struct{}          { return p.done }
 func (p *execProcess) Exit() processExit              { return p.exit }
 
