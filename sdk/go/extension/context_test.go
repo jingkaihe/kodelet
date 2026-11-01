@@ -127,12 +127,12 @@ func TestForkConversation(t *testing.T) {
 	var options extension.ForkOptions
 	var forkErr error
 	h := toolHarness(t, replies(map[string]any{
-		"kodelet.conversation.fork": reply(func(extensiontest.HostCall) (any, error) {
+		"kodelet.conversation.fork": func(extensiontest.HostCall) (any, error) {
 			if err := hostErr.Load(); err != nil {
 				return nil, err
 			}
 			return map[string]any{"conversationId": " conv-2 "}, nil
-		}),
+		},
 	}), func(ctx context.Context, tc *extension.ToolContext) (extension.ToolResult, error) {
 		var id string
 		id, forkErr = tc.ForkConversation(ctx, options)
@@ -180,14 +180,14 @@ func TestBrowserAcquisitionSharesConcurrentReleaseAndRetriesFailures(t *testing.
 	var failNext atomic.Bool
 	h := toolHarness(t, replies(map[string]any{
 		"kodelet.browser.acquire": map[string]any{"leaseId": "lease-1", "sessionId": "session-1", "cdpUrl": "ws://127.0.0.1/devtools", "pageTargetId": "page-1"},
-		"kodelet.browser.release": reply(func(extensiontest.HostCall) (any, error) {
+		"kodelet.browser.release": func(extensiontest.HostCall) (any, error) {
 			releases.Add(1)
 			<-gate
 			if failNext.Swap(false) {
 				return nil, errors.New("release failed")
 			}
 			return map[string]any{}, nil
-		}),
+		},
 	}), func(ctx context.Context, tc *extension.ToolContext) (extension.ToolResult, error) {
 		connection, err := tc.AcquireBrowser(ctx)
 		if err != nil {
@@ -240,18 +240,18 @@ func TestBackgroundTaskLeases(t *testing.T) {
 	var lease *extension.BackgroundTaskLease
 	var description string
 	h := toolHarness(t, replies(map[string]any{
-		"kodelet.runtime.background.acquire": reply(func(extensiontest.HostCall) (any, error) {
+		"kodelet.runtime.background.acquire": func(extensiontest.HostCall) (any, error) {
 			if !acquireSupported.Load() {
 				return nil, &extension.RPCError{Code: -32601, Message: "method not found"}
 			}
 			return map[string]any{"leaseId": " lease-1 "}, nil
-		}),
-		"kodelet.runtime.background.release": reply(func(extensiontest.HostCall) (any, error) {
+		},
+		"kodelet.runtime.background.release": func(extensiontest.HostCall) (any, error) {
 			if failRelease.Swap(false) {
 				return nil, errors.New("try again")
 			}
 			return map[string]any{}, nil
-		}),
+		},
 	}), func(ctx context.Context, tc *extension.ToolContext) (extension.ToolResult, error) {
 		var err error
 		lease, err = tc.AcquireBackgroundTask(ctx, description)

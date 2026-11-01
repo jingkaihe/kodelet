@@ -260,9 +260,9 @@ func (f *fakeACP) nextRequest(method string) jsonrpc.Message {
 }
 
 // session starts a session from a default client.
-func (f *fakeACP) session(opts SessionOptions) *Session {
+func (f *fakeACP) session() *Session {
 	f.t.Helper()
-	session, err := f.client(ClientOptions{}).CreateSession(f.t.Context(), opts)
+	session, err := f.client(ClientOptions{}).CreateSession(f.t.Context(), SessionOptions{})
 	require.NoError(f.t, err)
 	return session
 }

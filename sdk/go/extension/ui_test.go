@@ -221,7 +221,7 @@ func TestRejectedSurfaceOperationsCanBeRetried(t *testing.T) {
 func TestSurfaceRetainsEventsUntilListenersAttach(t *testing.T) {
 	var fixture *uiFixture
 	fixture = newUIFixture(t, map[string]any{"surfaces": true}, map[string]any{
-		"kodelet.ui.surface.open": reply(func(call extensiontest.HostCall) (any, error) {
+		"kodelet.ui.surface.open": func(call extensiontest.HostCall) (any, error) {
 			var params struct {
 				ScopeID string `json:"scopeId"`
 			}
@@ -229,7 +229,7 @@ func TestSurfaceRetainsEventsUntilListenersAttach(t *testing.T) {
 			_ = fixture.h.Notify("extension.ui.surface.input", map[string]any{"id": "panel", "scopeId": params.ScopeID, "sequence": 1, "kind": "focus"})
 			_ = fixture.h.Notify("extension.ui.surface.resize", map[string]any{"id": "panel", "scopeId": params.ScopeID, "sequence": 2, "width": 40, "height": 10})
 			return map[string]any{"accepted": true}, nil
-		}),
+		},
 	})
 	surface := fixture.openSurface(t, "panel", "s")
 	var focus extension.SurfaceInputEvent

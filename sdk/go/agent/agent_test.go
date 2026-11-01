@@ -113,7 +113,7 @@ func TestRunAndWaitTranslatesACPUpdatesIntoEvents(t *testing.T) {
 		f.update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "resource", "resource": map[string]any{"text": "world"}}})
 		f.respond(message.ID, map[string]any{"stopReason": "end_turn"})
 	}
-	session := fake.session(SessionOptions{})
+	session := fake.session()
 	var mu sync.Mutex
 	var seen []string
 	session.Subscribe(func(event Event) {
@@ -167,7 +167,7 @@ func TestRunsAreSequentialAndFailuresEmitErrors(t *testing.T) {
 		<-release
 		f.respondError(message.ID, -32603, "session requires its session extensions; reattach callbacks")
 	}
-	session := fake.session(SessionOptions{})
+	session := fake.session()
 	errs := make(chan error, 1)
 	go func() {
 		_, err := session.RunAndWait(t.Context(), RunOptions{Message: "first"})
@@ -199,7 +199,7 @@ func TestEarlyCancellationIsWrittenAfterThePrompt(t *testing.T) {
 			return false
 		}
 		fake.prompt = respondAfterCancel
-		session := fake.session(SessionOptions{})
+		session := fake.session()
 		ctx, cancel := context.WithCancel(t.Context())
 		var errorEvent Event
 		session.Subscribe(func(event Event) {
@@ -226,7 +226,7 @@ func TestStreamYieldsEventsAndBreakingCancelsTheRun(t *testing.T) {
 		f.chunk("chunk")
 		f.respond(message.ID, map[string]any{"stopReason": "end_turn"})
 	}
-	session := fake.session(SessionOptions{})
+	session := fake.session()
 	var types []string
 	for event, err := range session.Stream(t.Context(), RunOptions{Message: "go"}) {
 		require.NoError(t, err)
@@ -256,7 +256,7 @@ func TestStreamWaitsForCallbacksWhenCloseStopsEvents(t *testing.T) {
 		<-release
 		f.respondError(message.ID, -32603, "connection closed")
 	}
-	session := fake.session(SessionOptions{})
+	session := fake.session()
 	inCallback, callbackDone := busyOnToolCall(session, 100*time.Millisecond)
 	go func() {
 		<-inCallback
@@ -285,7 +285,7 @@ func TestClosingDuringAStreamDoesNotPanic(t *testing.T) {
 		fake.prompt = func(f *fakeACP, _ jsonrpc.Message) {
 			f.toolCall("t1", "bash", map[string]any{})
 		}
-		session := fake.session(SessionOptions{})
+		session := fake.session()
 		inCallback, _ := busyOnToolCall(session, time.Millisecond)
 		closed := make(chan error, 1)
 		go func() {
@@ -305,7 +305,7 @@ func TestSteerRequiresAnActiveRunAndSupport(t *testing.T) {
 		<-release
 		f.respond(message.ID, map[string]any{})
 	}
-	session := fake.session(SessionOptions{})
+	session := fake.session()
 	_, err := session.Steer(t.Context(), "focus")
 	require.ErrorContains(t, err, "without an active run")
 	done := make(chan struct{})
@@ -330,7 +330,7 @@ func TestProcessExitRejectsPendingRequestsWithStderr(t *testing.T) {
 	fake.prompt = func(f *fakeACP, _ jsonrpc.Message) {
 		f.proc.finish(processExit{Code: 3, Stderr: "daemon unreachable\n"})
 	}
-	session := fake.session(SessionOptions{})
+	session := fake.session()
 	_, err := session.RunAndWait(t.Context(), RunOptions{Message: "x"})
 	var runErr *RunError
 	require.ErrorAs(t, err, &runErr)
