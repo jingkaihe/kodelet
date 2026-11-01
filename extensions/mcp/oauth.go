@@ -62,6 +62,10 @@ type oauthTransport struct {
 	openBrowser                     func(string) error
 }
 
+// Interactive logins share callback ports and the user's browser within this
+// process. Discovery, token refresh, and ordinary requests remain concurrent.
+var oauthAuthorizationGate = make(chan struct{}, 1)
+
 func newOAuthClient(name, serverURL string, config oauthConfig) (*http.Client, func(), error) {
 	endpoint, err := url.Parse(serverURL)
 	if err != nil || endpoint.Host == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") {
@@ -279,6 +283,19 @@ func (t *oauthTransport) authorize(ctx context.Context, headers []string) error 
 	metadata := discovery.Metadata
 	if !oauthInteractiveAllowed(t.config.Interactive) {
 		return errors.New("OAuth authorization requires an interactive session or oauth.interactive: always")
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.ctx.Done():
+		return t.ctx.Err()
+	case oauthAuthorizationGate <- struct{}{}:
+	}
+	// Registered before closeCallback so the listener closes before the next
+	// login acquires the gate. Waiting consumes the enclosing startup budget.
+	defer func() { <-oauthAuthorizationGate }()
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	ctx, cancel := context.WithTimeout(ctx, oauthCallbackTimeout(t.config.CallbackTimeout))
 	defer cancel()

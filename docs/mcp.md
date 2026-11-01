@@ -131,7 +131,9 @@ To force reauthorization for a server, remove its cached credentials from `~/.ko
 
 Device-code OAuth is not implemented. Browser authorization runs on the runner; a remote or headless runner may need manual browser access or port forwarding for its loopback callback.
 
-During startup, browser authorization must finish within the server's remaining 150-second startup budget (and the shorter tool-listing timeout if challenged while listing tools). Setting `callback_timeout` higher does not extend these limits. This leaves time to report healthy servers before Kodelet's three-minute extension initialization deadline.
+Interactive logins run one at a time within an MCP extension process, preventing overlapping browser prompts and conflicts between servers sharing a fixed callback port. The callback timeout starts when a login gets its turn. Separate extension processes do not share this coordination.
+
+During startup, waiting for another login and completing browser authorization must fit within the server's remaining 150-second startup budget (and the shorter tool-listing timeout if challenged while listing tools). Setting `callback_timeout` higher does not extend these limits. This leaves time to report healthy servers before Kodelet's three-minute extension initialization deadline.
 
 OAuth endpoints must use HTTPS, except for HTTP loopback endpoints used for local development. Callback URLs must be HTTP loopback URLs. MCP redirects and SSE message endpoints must stay on the configured server's origin.
 
