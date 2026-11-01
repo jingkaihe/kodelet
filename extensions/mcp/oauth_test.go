@@ -53,7 +53,12 @@ func TestOAuthFlowPersistenceAndRefresh(t *testing.T) {
 							return
 						}
 						w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer resource_metadata=%q`, serverURL+"/resource"))
-						w.WriteHeader(http.StatusUnauthorized)
+						if configured {
+							w.Header().Set("WWW-Authenticate", `Bearer error="insufficient_scope", scope="mcp.read"`)
+							w.WriteHeader(http.StatusForbidden)
+						} else {
+							w.WriteHeader(http.StatusUnauthorized)
+						}
 						return
 					}
 					fmt.Fprintln(w, `{"ok":true}`)
@@ -113,6 +118,7 @@ func TestOAuthFlowPersistenceAndRefresh(t *testing.T) {
 			if configured {
 				cfg.ClientID, cfg.ClientSecret = "client", "secret"
 				cfg.AuthServerMetadataURL = server.URL + "/custom-metadata"
+				cfg.Scopes = []string{"mcp.base"} // A scope challenge overrides configured defaults.
 			}
 			newClient := func() (*http.Client, *oauthTransport) {
 				client, closeClient, err := newOAuthClient("Test Server", server.URL+"/mcp", cfg)
@@ -169,6 +175,38 @@ func TestOAuthFlowPersistenceAndRefresh(t *testing.T) {
 			} else {
 				assert.EqualValues(t, 1, registrations.Load())
 			}
+		})
+	}
+}
+
+func TestOAuthPreservesOrdinaryForbiddenResponses(t *testing.T) {
+	for _, challenge := range []string{"", `Bearer error="invalid_token"`, `Basic error="insufficient_scope"`, `Bearer error="`} {
+		t.Run(challenge, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				w.Header().Set("WWW-Authenticate", challenge)
+				w.WriteHeader(http.StatusForbidden)
+				fmt.Fprint(w, "permission denied")
+			}))
+			defer server.Close()
+			client, cleanup, err := newOAuthClient("forbidden", server.URL, oauthConfig{Interactive: "always"})
+			require.NoError(t, err)
+			defer cleanup()
+			client.Transport.(*oauthTransport).openBrowser = func(string) error {
+				t.Error("ordinary permission failures must not open a browser")
+				return nil
+			}
+			response, err := client.Get(server.URL)
+			require.NoError(t, err)
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusForbidden, response.StatusCode)
+			assert.Equal(t, challenge, response.Header.Get("WWW-Authenticate"))
+			assert.Equal(t, "permission denied", string(body))
+			assert.EqualValues(t, 1, requests.Load(), "no discovery or authorization requests")
 		})
 	}
 }

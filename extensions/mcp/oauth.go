@@ -135,6 +135,14 @@ func (t *oauthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err != nil || (response.StatusCode != http.StatusUnauthorized && response.StatusCode != http.StatusForbidden) {
 		return response, err
 	}
+	if response.StatusCode == http.StatusForbidden {
+		challenges, err := oauthex.ParseWWWAuthenticate(response.Header.Values("WWW-Authenticate"))
+		if err != nil || !slices.ContainsFunc(challenges, func(challenge oauthex.Challenge) bool {
+			return challenge.Scheme == "bearer" && challenge.Params["error"] == "insufficient_scope"
+		}) {
+			return response, nil
+		}
+	}
 	// The SDK's HTTP and SSE transports use replayable request bodies.
 	if req.Body != nil && req.GetBody == nil {
 		return response, nil
@@ -146,8 +154,10 @@ func (t *oauthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	err = func() error {
 		defer func() { <-t.gate }()
 		if t.generation == generation {
-			// First try refreshing a rejected token without opening a browser.
-			token, err = t.token(ctx, true)
+			// Refresh rejected tokens, but scope escalation requires authorization.
+			if response.StatusCode == http.StatusUnauthorized {
+				token, err = t.token(ctx, true)
+			}
 			if err == nil && (token == nil || t.generation == generation || response.StatusCode == http.StatusForbidden) {
 				err = t.authorize(ctx, response.Header.Values("WWW-Authenticate"))
 			}
@@ -339,8 +349,8 @@ func (t *oauthTransport) discover(ctx context.Context, headers []string) (*oauth
 	for _, challenge := range challenges {
 		if challenge.Scheme == "bearer" {
 			resourceURL = challenge.Params["resource_metadata"]
-			if len(scopes) == 0 {
-				scopes = strings.Fields(challenge.Params["scope"])
+			if required := strings.Fields(challenge.Params["scope"]); len(required) > 0 {
+				scopes = required
 			}
 		}
 	}
