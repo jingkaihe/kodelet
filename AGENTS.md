@@ -2,9 +2,9 @@
 
 Kodelet is an agentic coding CLI: Go backend in `cmd/kodelet/` and `pkg/`, React/TypeScript UI in `pkg/webui/frontend/`.
 
-SDKs: TypeScript in `sdk/typescript/` (the npm package root) and Go in `sdk/go/`, a separate module (`github.com/jingkaihe/kodelet/sdk/go`) outside the root `./...`. Neither Go module imports the other, so the SDKs duplicate the wire types; keep them in step with `pkg/extensions` and `pkg/acp`.
+SDKs live in `sdk/typescript/` and `sdk/go/`. Keep their wire types aligned with `pkg/extensions` and `pkg/acp`.
 
-The native MCP extension lives in `extensions/mcp/`, a separate Go module using the Go SDK through a local replace. `mise run build` and `build-dev` also build `bin/kodelet-extension-mcp`; `mise run mcp-build` builds only the extension. Keep MCP dependencies out of the core and SDK modules. See [docs/mcp.md](docs/mcp.md) for configuration and migration.
+`sdk/go/` and `extensions/mcp/` are separate Go modules, excluded from root `./...` checks. Keep MCP dependencies out of the core and SDKs; see the [MCP guide](skills/kodelet/references/mcp.md).
 
 TUI audio uses `audio/` (Rust) and `pkg/audio/` (Go IPC); see [audio/README.md](audio/README.md) for local build/test tasks.
 
@@ -35,7 +35,7 @@ Use `mise` tasks. For code changes, run the relevant lint and tests:
 | Go SDK | `mise run sdk-go-lint` | `mise run sdk-go-test` |
 | MCP extension | `mise run mcp-lint` | `mise run mcp-test` |
 
-`mise run sdk-acceptance` runs the SDK process-boundary gates for TypeScript and Go, as CI does. Set `KODELET_TEST_EXTENSION_SDKS` to choose SDKs; `python` also needs `KODELET_PYTHON_SDK_PATH` set to a uv-synced checkout.
+`mise run sdk-acceptance` checks TypeScript and Go SDK process boundaries.
 
 ## Read as needed
 

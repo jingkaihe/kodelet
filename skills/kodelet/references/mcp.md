@@ -4,34 +4,11 @@ The MCP integration runs in the native Go executable `kodelet-extension-mcp`, se
 
 ## Installation
 
-The RPM/DEB packages and standalone installer include `kodelet-extension-mcp` alongside `kodelet`. Release downloads also provide `kodelet-extension-mcp-<os>-<arch>` for Linux/macOS on amd64/arm64; install it as `kodelet-extension-mcp` in a directory on the runner's PATH. If your Homebrew formula does not yet include the extension, install the matching standalone extension release asset separately.
+`kodelet-extension-mcp` is bundled with RPM/DEB packages, standalone installs, and Docker images, and discovered on the runner's PATH by default. If your Homebrew formula does not include it, install the matching `kodelet-extension-mcp-<os>-<arch>` release asset as `kodelet-extension-mcp` on PATH. Node.js is only needed for Node-based MCP servers.
 
-Install from a source checkout:
+Verify discovery with `kodelet extension inspect mcp`.
 
-```bash
-mise run mcp-build
-mkdir -p ~/.local/bin
-install -m 755 bin/kodelet-extension-mcp ~/.local/bin/kodelet-extension-mcp
-```
-
-The runner discovers the extension automatically when extensions and PATH discovery are enabled (the defaults). No Node.js or npm installation is required for the bridge. Individual MCP servers launched with `node` or `npx` still require Node.js on the runner.
-
-Verify discovery:
-
-```bash
-kodelet extension list
-kodelet extension inspect mcp
-```
-
-For existing npm installations, remove the old generated plugin wrapper after installing the native extension:
-
-```bash
-rm -rf "$HOME/.kodelet/plugins/kodelet@mcp"
-```
-
-Keep `~/.kodelet/mcp.json`, workspace `mcp.json` files, and `~/.kodelet/mcp/oauth/`; they remain the configuration and credential locations. The extension ID changes from `kodelet@mcp/mcp` to `mcp`. If you configured extension allow/deny rules, replace the plugin reference with the absolute installed executable path, such as `/usr/bin/kodelet-extension-mcp`. When the PATH replacement is eligible, Kodelet skips the legacy `kodelet@mcp/mcp` plugin with a migration warning to avoid duplicate tool registrations. The legacy plugin remains eligible if the PATH replacement is missing, denied, shadowed by an existing-root extension, or PATH discovery is disabled. Removing the obsolete wrapper is still recommended; Kodelet does not delete it automatically.
-
-Upgrade the extension together with Kodelet. Restart or reload running sessions after installing or upgrading. To disable only this extension, deny its absolute executable path in `extensions.deny`; `extensions.discover_path: false` disables all PATH-discovered extensions.
+**Migrating from npm:** After installing the native extension, remove `~/.kodelet/plugins/kodelet@mcp` but keep MCP configuration and OAuth credentials. Update MCP entries in extension allow/deny rules to the absolute executable path of `kodelet-extension-mcp`.
 
 ## Configuration
 
@@ -45,6 +22,8 @@ The extension reads MCP server configuration from JSON files, not from Kodelet's
 Both files use the standard `mcpServers` shape. The repository-local file overrides global servers by server name. See the [FastMCP MCP JSON configuration reference](https://gofastmcp.com/integrations/mcp-json-configuration) for the common `mcpServers` format.
 
 A missing, empty, or null `mcpServers` map contributes no overrides; it does not clear globally configured servers.
+
+After adding or changing MCP servers or tool filters in `mcp.json`, run `/reload` in the conversation or have the agent call `reload_resources` to refresh available tools. Do the same after installing or upgrading the extension.
 
 Example:
 
@@ -136,11 +115,3 @@ Interactive logins run one at a time within an MCP extension process, preventing
 During startup, waiting for another login and completing browser authorization must fit within the server's remaining 150-second startup budget (and the shorter tool-listing timeout if challenged while listing tools). Setting `callback_timeout` higher does not extend these limits. This leaves time to report healthy servers before Kodelet's three-minute extension initialization deadline.
 
 OAuth endpoints must use HTTPS, except for HTTP loopback endpoints used for local development. Callback URLs must be HTTP loopback URLs. MCP redirects and SSE message endpoints must stay on the configured server's origin.
-
-## Development checks
-
-```bash
-mise run mcp-lint
-mise run mcp-test
-mise run mcp-build
-```

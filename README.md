@@ -93,7 +93,7 @@ Start with project instructions, then add capabilities as you need them:
 | [Recipes](docs/FRAGMENTS.md) | Reusable prompts with arguments and shell substitutions for tasks you repeat. |
 | [Skills](docs/SKILLS.md) | Domain guidance the agent loads when relevant to the task. |
 | [Extensions](docs/extension-design.md) | Executable tools, commands, and lifecycle behavior that connect the agent to your workflows. |
-| [MCP tools](docs/mcp.md) | Tools from local or remote MCP servers, connected through the bundled native MCP extension. |
+| [MCP tools](skills/kodelet/references/mcp.md) | Tools from local or remote MCP servers, connected through the bundled native MCP extension. |
 | [Plugins](docs/SKILLS.md#managing-skills-with-plugins) | Bundles of skills, recipes, and extensions you can install and share. |
 
 For example, with an image-generation extension installed, a request in terminal chat can produce an image you open in the Web UI.
