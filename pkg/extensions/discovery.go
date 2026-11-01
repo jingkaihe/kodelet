@@ -1,11 +1,14 @@
 package extensions
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/plugins"
 	"github.com/pkg/errors"
@@ -194,6 +197,24 @@ func (d *Discovery) Discover() ([]Extension, error) {
 		}
 	}
 
+	// Only an eligible PATH replacement supersedes the old generated MCP plugin.
+	// Check after policy and precedence so a denied or shadowed native binary
+	// cannot disable an otherwise usable legacy installation.
+	if i := slices.IndexFunc(discovered, func(ext Extension) bool {
+		return ext.Kind == SourceKindPath && ext.ID == "mcp"
+	}); i >= 0 {
+		nativePath := discovered[i].ExecPath
+		discovered = slices.DeleteFunc(discovered, func(ext Extension) bool {
+			if ext.PluginRef != "kodelet@mcp/mcp" ||
+				(ext.Kind != SourceKindLocalPlugin && ext.Kind != SourceKindGlobalPlugin) {
+				return false
+			}
+			logger.G(context.Background()).WithField("extension", ext.ID).
+				WithField("path", ext.ExecPath).WithField("replacement", nativePath).
+				Warn("skipping legacy MCP plugin in favor of native PATH extension; remove the old kodelet@mcp plugin directory after upgrading (see RELEASE.md)")
+			return true
+		})
+	}
 	return discovered, nil
 }
 

@@ -203,6 +203,67 @@ exit 0
 	}
 }
 
+func TestDiscoveryNativeMCPReplacesOnlyEligibleLegacyPlugin(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		missing     bool
+		denied      bool
+		allowLegacy bool
+		disablePath bool
+		shadowed    bool
+		localLegacy bool
+		want        []string
+	}{
+		{name: "native replaces legacy, not other plugins", want: []string{"other@mcp/mcp", "mcp"}},
+		{name: "native replaces workspace legacy", localLegacy: true, want: []string{"other@mcp/mcp", "mcp"}},
+		{name: "native absent", missing: true, want: []string{"kodelet@mcp/mcp", "other@mcp/mcp"}},
+		{name: "native denied", denied: true, want: []string{"kodelet@mcp/mcp", "other@mcp/mcp"}},
+		{name: "only legacy allowed", allowLegacy: true, want: []string{"kodelet@mcp/mcp"}},
+		{name: "PATH discovery disabled", disablePath: true, want: []string{"kodelet@mcp/mcp", "other@mcp/mcp"}},
+		{name: "native shadowed by local extension", shadowed: true, want: []string{"mcp", "kodelet@mcp/mcp", "other@mcp/mcp"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workspace, home, binDir := t.TempDir(), t.TempDir(), t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("PATH", binDir)
+			const script = `#!/bin/sh
+exit 0
+`
+			legacyHome := home
+			if tc.localLegacy {
+				legacyHome = workspace
+			}
+			legacy := writeExecutable(t, filepath.Join(legacyHome, ".kodelet", "plugins", "kodelet@mcp", "extensions", "mcp", "kodelet-extension-mcp"), script)
+			writeExecutable(t, filepath.Join(home, ".kodelet", "plugins", "other@mcp", "extensions", "mcp", "kodelet-extension-mcp"), script)
+			native := filepath.Join(binDir, "kodelet-extension-mcp")
+			if !tc.missing {
+				writeExecutable(t, native, script)
+			}
+			if tc.shadowed {
+				writeExecutable(t, filepath.Join(workspace, ".kodelet", "extensions", "kodelet-extension-mcp"), script)
+			}
+			config := DefaultConfig()
+			config.DiscoverPath = !tc.disablePath
+			if tc.denied {
+				config.Deny = []string{native}
+			}
+			if tc.allowLegacy {
+				config.Allow = []string{"kodelet@mcp/mcp"}
+			}
+			discovery, err := NewDiscovery(WithConfig(config), WithWorkingDir(workspace))
+			require.NoError(t, err)
+			discovered, err := discovery.Discover()
+			require.NoError(t, err)
+			var ids []string
+			for _, ext := range discovered {
+				ids = append(ids, ext.ID)
+			}
+			assert.Equal(t, tc.want, ids)
+			assert.FileExists(t, legacy, "discovery never deletes the old plugin")
+		})
+	}
+}
+
 func TestDefaultRootsIncludeStandaloneAndPluginRoots(t *testing.T) {
 	t.Setenv("PATH", "")
 	workingDir := t.TempDir()

@@ -23,13 +23,13 @@ kodelet extension list
 kodelet extension inspect mcp
 ```
 
-For existing npm installations, remove the old generated plugin wrapper before loading the native extension:
+For existing npm installations, remove the old generated plugin wrapper after installing the native extension:
 
 ```bash
 rm -rf "$HOME/.kodelet/plugins/kodelet@mcp"
 ```
 
-Keep `~/.kodelet/mcp.json`, workspace `mcp.json` files, and `~/.kodelet/mcp/oauth/`; they remain the configuration and credential locations. The extension ID changes from `kodelet@mcp/mcp` to `mcp`. If you configured extension allow/deny rules, replace the plugin reference with the absolute installed executable path, such as `/usr/bin/kodelet-extension-mcp`. Leaving both installations active can cause duplicate tool registration errors.
+Keep `~/.kodelet/mcp.json`, workspace `mcp.json` files, and `~/.kodelet/mcp/oauth/`; they remain the configuration and credential locations. The extension ID changes from `kodelet@mcp/mcp` to `mcp`. If you configured extension allow/deny rules, replace the plugin reference with the absolute installed executable path, such as `/usr/bin/kodelet-extension-mcp`. When the PATH replacement is eligible, Kodelet skips the legacy `kodelet@mcp/mcp` plugin with a migration warning to avoid duplicate tool registrations. The legacy plugin remains eligible if the PATH replacement is missing, denied, shadowed by an existing-root extension, or PATH discovery is disabled. Removing the obsolete wrapper is still recommended; Kodelet does not delete it automatically.
 
 Upgrade the extension together with Kodelet. Restart or reload running sessions after installing or upgrading. To disable only this extension, deny its absolute executable path in `extensions.deny`; `extensions.discover_path: false` disables all PATH-discovered extensions.
 
