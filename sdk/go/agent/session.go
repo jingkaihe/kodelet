@@ -101,23 +101,43 @@ func (s *Session) Stream(ctx context.Context, opts RunOptions) iter.Seq2[Event, 
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		events := make(chan Event, 64)
+		// events is never closed, so a callback that outlives the run cannot
+		// panic; once nothing is receiving, stopped releases it instead.
+		stopped := make(chan struct{})
+		defer close(stopped)
 		done := make(chan error, 1)
 		go func() {
-			_, err := s.run(ctx, opts, func(event Event) { events <- event })
-			close(events)
+			_, err := s.run(ctx, opts, func(event Event) {
+				select {
+				case events <- event:
+				case <-stopped:
+				}
+			})
 			done <- err
 		}()
-		for event := range events {
-			if !yield(event, nil) {
-				cancel()
-				for range events {
+		receiving := true
+		for {
+			select {
+			case event := <-events:
+				if receiving && !yield(event, nil) {
+					receiving = false
+					cancel()
 				}
-				<-done
+			case err := <-done:
+				// run waits for its callbacks, so the buffer holds every remaining event.
+				for receiving {
+					select {
+					case event := <-events:
+						receiving = yield(event, nil)
+					default:
+						if err != nil {
+							yield(Event{}, err)
+						}
+						return
+					}
+				}
 				return
 			}
-		}
-		if err := <-done; err != nil {
-			yield(Event{}, err)
 		}
 	}
 }
@@ -271,13 +291,17 @@ func (s *Session) emit(state *runState, eventType string, data any, raw json.Raw
 }
 
 // flushEvents waits until subscribers have received every emitted event.
+// If Close has already stopped the queue, it waits for the callback in
+// progress, which may still deliver an event.
 func (s *Session) flushEvents() {
 	done := make(chan struct{})
-	if s.events.Submit(func() { close(done) }) {
-		select {
-		case <-done:
-		case <-s.events.Done():
-		}
+	if !s.events.Submit(func() { close(done) }) {
+		<-s.events.Done()
+		return
+	}
+	select {
+	case <-done:
+	case <-s.events.Done():
 	}
 }
 

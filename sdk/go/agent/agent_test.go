@@ -6,6 +6,7 @@ import (
 	"errors"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -272,6 +273,72 @@ func TestStreamYieldsEventsAndBreakingCancelsTheRun(t *testing.T) {
 	fake.prompt = nil
 	_, err = session.RunAndWait(t.Context(), RunOptions{Message: "next"})
 	require.NoError(t, err, "breaking waits for the cancelled run to settle")
+}
+
+func TestStreamWaitsForCallbacksWhenCloseStopsEvents(t *testing.T) {
+	fake := newFakeACP(t)
+	release := make(chan struct{})
+	fake.prompt = func(f *fakeACP, message jsonrpc.Message) {
+		f.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t1", "toolName": "bash", "rawInput": map[string]any{}})
+		<-release
+		f.respondError(message.ID, -32603, "connection closed")
+	}
+	session, err := fake.client(ClientOptions{}).CreateSession(t.Context(), SessionOptions{})
+	require.NoError(t, err)
+	inCallback := make(chan struct{})
+	var callbackDone atomic.Bool
+	session.Subscribe(func(event Event) {
+		if event.Type == EventToolCall {
+			close(inCallback)
+			time.Sleep(100 * time.Millisecond)
+			callbackDone.Store(true)
+		}
+	})
+	go func() {
+		<-inCallback
+		// Close stops the queue after the process; force it to win the race with
+		// the run's final flush while the callback is still running.
+		session.events.Stop()
+		close(release)
+	}()
+	var types []string
+	var runErr error
+	for event, err := range session.Stream(t.Context(), RunOptions{Message: "x"}) {
+		if err != nil {
+			runErr = err
+			continue
+		}
+		types = append(types, event.Type)
+	}
+	assert.True(t, callbackDone.Load(), "Stream must wait for the callback in progress")
+	assert.Equal(t, []string{EventAgentStart, EventUserMessage, EventToolCall}, types)
+	require.ErrorContains(t, runErr, "connection closed")
+}
+
+func TestClosingDuringAStreamDoesNotPanic(t *testing.T) {
+	for range 200 {
+		fake := newFakeACP(t)
+		fake.prompt = func(f *fakeACP, _ jsonrpc.Message) {
+			f.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t1", "toolName": "bash", "rawInput": map[string]any{}})
+		}
+		session, err := fake.client(ClientOptions{}).CreateSession(t.Context(), SessionOptions{})
+		require.NoError(t, err)
+		inCallback := make(chan struct{})
+		session.Subscribe(func(event Event) {
+			if event.Type == EventToolCall {
+				close(inCallback)
+				time.Sleep(time.Millisecond)
+			}
+		})
+		closed := make(chan error, 1)
+		go func() {
+			<-inCallback
+			closed <- session.Close()
+		}()
+		for range session.Stream(t.Context(), RunOptions{Message: "x"}) {
+		}
+		require.NoError(t, <-closed)
+	}
 }
 
 func TestSteerRequiresAnActiveRunAndSupport(t *testing.T) {
