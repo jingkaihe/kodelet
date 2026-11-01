@@ -122,8 +122,9 @@ func (s *Surface) activate() error {
 	return nil
 }
 
-// Update replaces the surface contents. Frames are coalesced so at most one
-// is in flight and only the latest pending frame is sent.
+// Update replaces the surface contents. Frames are coalesced: one is in
+// flight until the transport has written it, and only the latest pending
+// frame is sent next.
 func (s *Surface) Update(lines []FrameLine) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

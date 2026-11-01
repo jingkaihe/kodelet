@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -227,6 +230,70 @@ func TestSurfaceRetainsEventsUntilListenersAttach(t *testing.T) {
 	surface.OnResize(func(event extension.SurfaceResizeEvent) { resize = event })
 	assert.Equal(t, extension.SurfaceInputEvent{Sequence: 1, Kind: "focus"}, focus)
 	assert.Equal(t, extension.SurfaceResizeEvent{Sequence: 2, Width: 40, Height: 10}, resize)
+}
+
+func TestSurfaceFramesCoalesceWhileTheHostIsBlocked(t *testing.T) {
+	ext := extension.New(extension.Metadata{})
+	surfaces := make(chan *extension.Surface, 1)
+	extension.RegisterTool(ext, extension.Tool[struct{}]{Name: "open", Execute: func(ctx context.Context, _ struct{}, tc *extension.ToolContext) (extension.ToolResult, error) {
+		surface, err := tc.UI.OpenSurface(ctx, extension.SurfaceOptions{ID: "panel"})
+		surfaces <- surface
+		return extension.ToolResult{}, err
+	}})
+	gate := make(chan struct{})
+	var mu sync.Mutex
+	var frames []string
+	responses := make(chan struct{}, 4)
+	var rt *extension.Runtime
+	rt = extension.NewRuntime(ext, extension.TransportFunc(func(_ context.Context, data []byte) error {
+		var message struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params struct {
+				Frame struct {
+					Lines []string `json:"lines"`
+				} `json:"frame"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal(data, &message); err != nil {
+			return err
+		}
+		switch message.Method {
+		case "kodelet.ui.surface.open":
+			go rt.Receive([]byte(`{"jsonrpc":"2.0","id":` + string(message.ID) + `,"result":{"accepted":true}}`))
+		case "kodelet.ui.surface.frame":
+			mu.Lock()
+			frames = append(frames, strings.Join(message.Params.Frame.Lines, ","))
+			mu.Unlock()
+			<-gate
+		case "":
+			responses <- struct{}{}
+		}
+		return nil
+	}), &extension.RuntimeOptions{LogOutput: io.Discard})
+	t.Cleanup(func() { rt.Close(nil) })
+	require.NoError(t, rt.Receive([]byte(`{"jsonrpc":"2.0","id":1,"method":"extension.initialize","params":{"extension":{"id":"x"},"capabilities":{"ui":{"surfaces":true}}}}`)))
+	<-responses
+	require.NoError(t, rt.Receive([]byte(`{"jsonrpc":"2.0","id":2,"method":"extension.tool.execute","params":{"name":"open","input":{}}}`)))
+	surface := <-surfaces
+	require.NotNil(t, surface)
+	<-responses
+
+	for i := range 200 {
+		surface.Update([]extension.FrameLine{extension.Line(strconv.Itoa(i))})
+		time.Sleep(100 * time.Microsecond)
+	}
+	close(gate)
+	frameCount := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(frames)
+	}
+	require.Eventually(t, func() bool { return frameCount() == 2 }, time.Second, time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []string{"0", "199"}, frames, "only the frame in flight and the latest update are sent")
 }
 
 func TestRejectedSurfaceOpenReleasesTheID(t *testing.T) {

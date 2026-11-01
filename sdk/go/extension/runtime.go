@@ -207,21 +207,39 @@ func (r *Runtime) Close(cause error) {
 }
 
 func (r *Runtime) send(message jsonrpc.Message) {
+	r.enqueue(message, nil)
+}
+
+// enqueue queues a message for the transport. A non-nil sent channel, which
+// must be buffered, receives the write result.
+func (r *Runtime) enqueue(message jsonrpc.Message, sent chan<- error) {
+	report := func(err error) {
+		if sent != nil {
+			sent <- err
+		}
+	}
 	data, err := json.Marshal(message)
 	if err != nil {
+		report(err)
 		return
 	}
-	r.outbox.Submit(func() {
+	queued := r.outbox.Submit(func() {
 		r.mu.Lock()
 		closed := r.closed
 		r.mu.Unlock()
 		if closed {
+			report(ErrRuntimeClosed)
 			return
 		}
-		if err := r.transport.Send(r.baseCtx, data); err != nil {
+		err := r.transport.Send(r.baseCtx, data)
+		if err != nil {
 			go r.Close(err)
 		}
+		report(err)
 	})
+	if !queued {
+		report(ErrRuntimeClosed)
+	}
 }
 
 func (r *Runtime) handleResponse(msg jsonrpc.Message) {
@@ -521,6 +539,8 @@ func (r *Runtime) runLocal(ctx context.Context, message jsonrpc.Message) (value 
 	return r.local(ctx, message.Method, message.Params)
 }
 
+// notify sends a notification and waits until the transport has written it,
+// so callers such as surfaces can coalesce work behind a slow host.
 func (r *Runtime) notify(method string, params any) error {
 	encoded, err := jsonrpc.Marshal(params)
 	if err != nil {
@@ -532,8 +552,16 @@ func (r *Runtime) notify(method string, params any) error {
 	if closed {
 		return ErrRuntimeClosed
 	}
-	r.send(jsonrpc.NewNotification(method, encoded))
-	return nil
+	sent := make(chan error, 1)
+	r.enqueue(jsonrpc.NewNotification(method, encoded), sent)
+	select {
+	case err := <-sent:
+		return err
+	case <-r.outbox.Done():
+		return ErrRuntimeClosed
+	case <-r.closeDone:
+		return ErrRuntimeClosed
+	}
 }
 
 // handleNotification applies host notifications in arrival order and returns
