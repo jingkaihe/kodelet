@@ -6,7 +6,6 @@ import (
 	"errors"
 	"slices"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -95,14 +94,14 @@ func TestRunAndWaitTranslatesACPUpdatesIntoEvents(t *testing.T) {
 	fake := newFakeACP(t)
 	fake.prompt = func(f *fakeACP, message jsonrpc.Message) {
 		f.update(map[string]any{"sessionUpdate": "agent_thought_chunk", "content": map[string]any{"type": "text", "text": "thinking"}})
-		f.update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "Hello "}})
+		f.chunk("Hello ")
 		compaction := map[string]any{
 			"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": ""},
 			"_meta": map[string]any{"kodelet/contextCompacted": map[string]any{"compaction": map[string]any{"id": "c1", "method": "summary", "summary": "s", "createdAt": "now"}, "beforeCurrentUser": true}},
 		}
 		f.update(compaction)
 		f.update(compaction)
-		f.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t1", "toolName": "bash", "rawInput": map[string]any{"command": "ls"}})
+		f.toolCall("t1", "bash", map[string]any{"command": "ls"})
 		f.update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "in_progress"})
 		f.update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "in_progress", "content": []any{map[string]any{"type": "content", "content": map[string]any{"type": "text", "text": "a"}}}})
 		f.update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "in_progress", "content": []any{map[string]any{"type": "content", "content": map[string]any{"type": "text", "text": "ab"}}}})
@@ -114,8 +113,7 @@ func TestRunAndWaitTranslatesACPUpdatesIntoEvents(t *testing.T) {
 		f.update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "resource", "resource": map[string]any{"text": "world"}}})
 		f.respond(message.ID, map[string]any{"stopReason": "end_turn"})
 	}
-	session, err := fake.client(ClientOptions{}).CreateSession(t.Context(), SessionOptions{})
-	require.NoError(t, err)
+	session := fake.session(SessionOptions{})
 	var mu sync.Mutex
 	var seen []string
 	session.Subscribe(func(event Event) {
@@ -169,44 +167,20 @@ func TestRunsAreSequentialAndFailuresEmitErrors(t *testing.T) {
 		<-release
 		f.respondError(message.ID, -32603, "session requires its session extensions; reattach callbacks")
 	}
-	session, err := fake.client(ClientOptions{}).CreateSession(t.Context(), SessionOptions{})
-	require.NoError(t, err)
+	session := fake.session(SessionOptions{})
 	errs := make(chan error, 1)
 	go func() {
 		_, err := session.RunAndWait(t.Context(), RunOptions{Message: "first"})
 		errs <- err
 	}()
 	fake.nextRequest("session/prompt")
-	_, err = session.RunAndWait(t.Context(), RunOptions{Message: "second"})
+	_, err := session.RunAndWait(t.Context(), RunOptions{Message: "second"})
 	require.ErrorContains(t, err, "another run is in progress")
 	close(release)
 	err = <-errs
 	var rpcErr *RPCError
 	require.ErrorAs(t, err, &rpcErr)
 	assert.Contains(t, rpcErr.Message, "reattach")
-}
-
-func TestCancellingARunSendsSessionCancel(t *testing.T) {
-	fake := newFakeACP(t)
-	fake.prompt = func(f *fakeACP, message jsonrpc.Message) {
-		f.nextRequest("session/cancel")
-		f.respond(message.ID, map[string]any{"stopReason": "cancelled"})
-	}
-	session, err := fake.client(ClientOptions{}).CreateSession(t.Context(), SessionOptions{})
-	require.NoError(t, err)
-	ctx, cancel := context.WithCancel(t.Context())
-	var errorEvent Event
-	session.Subscribe(func(event Event) {
-		if event.Type == EventAgentStart {
-			cancel()
-		}
-		if event.Type == EventAgentError {
-			errorEvent = event
-		}
-	})
-	_, err = session.RunAndWait(ctx, RunOptions{Message: "long"})
-	require.ErrorIs(t, err, context.Canceled)
-	assert.Equal(t, AgentError{Message: "context canceled"}, errorEvent.Data)
 }
 
 func TestEarlyCancellationIsWrittenAfterThePrompt(t *testing.T) {
@@ -224,20 +198,21 @@ func TestEarlyCancellationIsWrittenAfterThePrompt(t *testing.T) {
 			}
 			return false
 		}
-		fake.prompt = func(f *fakeACP, message jsonrpc.Message) {
-			f.nextRequest("session/cancel")
-			f.respond(message.ID, map[string]any{"stopReason": "cancelled"})
-		}
-		session, err := fake.client(ClientOptions{}).CreateSession(t.Context(), SessionOptions{})
-		require.NoError(t, err)
+		fake.prompt = respondAfterCancel
+		session := fake.session(SessionOptions{})
 		ctx, cancel := context.WithCancel(t.Context())
+		var errorEvent Event
 		session.Subscribe(func(event Event) {
-			if event.Type == EventAgentStart {
+			switch event.Type {
+			case EventAgentStart:
 				cancel()
+			case EventAgentError:
+				errorEvent = event
 			}
 		})
-		_, err = session.RunAndWait(ctx, RunOptions{Message: "x"})
+		_, err := session.RunAndWait(ctx, RunOptions{Message: "x"})
 		require.ErrorIs(t, err, context.Canceled)
+		require.Equal(t, AgentError{Message: "context canceled"}, errorEvent.Data)
 		require.NoError(t, session.Close())
 		mu.Lock()
 		require.Equal(t, []string{"session/prompt", "session/cancel"}, order)
@@ -248,11 +223,10 @@ func TestEarlyCancellationIsWrittenAfterThePrompt(t *testing.T) {
 func TestStreamYieldsEventsAndBreakingCancelsTheRun(t *testing.T) {
 	fake := newFakeACP(t)
 	fake.prompt = func(f *fakeACP, message jsonrpc.Message) {
-		f.update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "chunk"}})
+		f.chunk("chunk")
 		f.respond(message.ID, map[string]any{"stopReason": "end_turn"})
 	}
-	session, err := fake.client(ClientOptions{}).CreateSession(t.Context(), SessionOptions{})
-	require.NoError(t, err)
+	session := fake.session(SessionOptions{})
 	var types []string
 	for event, err := range session.Stream(t.Context(), RunOptions{Message: "go"}) {
 		require.NoError(t, err)
@@ -261,9 +235,8 @@ func TestStreamYieldsEventsAndBreakingCancelsTheRun(t *testing.T) {
 	assert.Equal(t, []string{EventAgentStart, EventUserMessage, EventAssistantMessageDelta, EventContentEnd, EventAssistantMessage, EventAgentEnd}, types)
 
 	fake.prompt = func(f *fakeACP, message jsonrpc.Message) {
-		f.update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "chunk"}})
-		f.nextRequest("session/cancel")
-		f.respond(message.ID, map[string]any{"stopReason": "cancelled"})
+		f.chunk("chunk")
+		respondAfterCancel(f, message)
 	}
 	for event := range session.Stream(t.Context(), RunOptions{Message: "stop early"}) {
 		if event.Type == EventAssistantMessageDelta {
@@ -271,7 +244,7 @@ func TestStreamYieldsEventsAndBreakingCancelsTheRun(t *testing.T) {
 		}
 	}
 	fake.prompt = nil
-	_, err = session.RunAndWait(t.Context(), RunOptions{Message: "next"})
+	_, err := session.RunAndWait(t.Context(), RunOptions{Message: "next"})
 	require.NoError(t, err, "breaking waits for the cancelled run to settle")
 }
 
@@ -279,21 +252,12 @@ func TestStreamWaitsForCallbacksWhenCloseStopsEvents(t *testing.T) {
 	fake := newFakeACP(t)
 	release := make(chan struct{})
 	fake.prompt = func(f *fakeACP, message jsonrpc.Message) {
-		f.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t1", "toolName": "bash", "rawInput": map[string]any{}})
+		f.toolCall("t1", "bash", map[string]any{})
 		<-release
 		f.respondError(message.ID, -32603, "connection closed")
 	}
-	session, err := fake.client(ClientOptions{}).CreateSession(t.Context(), SessionOptions{})
-	require.NoError(t, err)
-	inCallback := make(chan struct{})
-	var callbackDone atomic.Bool
-	session.Subscribe(func(event Event) {
-		if event.Type == EventToolCall {
-			close(inCallback)
-			time.Sleep(100 * time.Millisecond)
-			callbackDone.Store(true)
-		}
-	})
+	session := fake.session(SessionOptions{})
+	inCallback, callbackDone := busyOnToolCall(session, 100*time.Millisecond)
 	go func() {
 		<-inCallback
 		// Close stops the queue after the process; force it to win the race with
@@ -319,17 +283,10 @@ func TestClosingDuringAStreamDoesNotPanic(t *testing.T) {
 	for range 200 {
 		fake := newFakeACP(t)
 		fake.prompt = func(f *fakeACP, _ jsonrpc.Message) {
-			f.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t1", "toolName": "bash", "rawInput": map[string]any{}})
+			f.toolCall("t1", "bash", map[string]any{})
 		}
-		session, err := fake.client(ClientOptions{}).CreateSession(t.Context(), SessionOptions{})
-		require.NoError(t, err)
-		inCallback := make(chan struct{})
-		session.Subscribe(func(event Event) {
-			if event.Type == EventToolCall {
-				close(inCallback)
-				time.Sleep(time.Millisecond)
-			}
-		})
+		session := fake.session(SessionOptions{})
+		inCallback, _ := busyOnToolCall(session, time.Millisecond)
 		closed := make(chan error, 1)
 		go func() {
 			<-inCallback
@@ -348,9 +305,8 @@ func TestSteerRequiresAnActiveRunAndSupport(t *testing.T) {
 		<-release
 		f.respond(message.ID, map[string]any{})
 	}
-	session, err := fake.client(ClientOptions{}).CreateSession(t.Context(), SessionOptions{})
-	require.NoError(t, err)
-	_, err = session.Steer(t.Context(), "focus")
+	session := fake.session(SessionOptions{})
+	_, err := session.Steer(t.Context(), "focus")
 	require.ErrorContains(t, err, "without an active run")
 	done := make(chan struct{})
 	go func() {
@@ -374,9 +330,8 @@ func TestProcessExitRejectsPendingRequestsWithStderr(t *testing.T) {
 	fake.prompt = func(f *fakeACP, _ jsonrpc.Message) {
 		f.proc.finish(processExit{Code: 3, Stderr: "daemon unreachable\n"})
 	}
-	session, err := fake.client(ClientOptions{}).CreateSession(t.Context(), SessionOptions{})
-	require.NoError(t, err)
-	_, err = session.RunAndWait(t.Context(), RunOptions{Message: "x"})
+	session := fake.session(SessionOptions{})
+	_, err := session.RunAndWait(t.Context(), RunOptions{Message: "x"})
 	var runErr *RunError
 	require.ErrorAs(t, err, &runErr)
 	assert.Equal(t, "daemon unreachable", runErr.Message)

@@ -20,13 +20,6 @@ type weatherInput struct {
 	Tags     []string `json:"tags,omitempty"`
 }
 
-func newHarness(t *testing.T, ext *extension.Extension, opts *extensiontest.Options) *extensiontest.Harness {
-	t.Helper()
-	h := extensiontest.New(ext, opts)
-	t.Cleanup(h.Close)
-	return h
-}
-
 func TestRegistersToolsCommandsEventsAndExecutesHandlers(t *testing.T) {
 	ctx := t.Context()
 	ext := extension.New(extension.Metadata{Name: "weather", Version: "0.1.0"})
@@ -301,9 +294,7 @@ func TestOutputHooksClearMachineDataBeforeLaterHandlers(t *testing.T) {
 func TestObservationalOutputHooksPreserveMachineData(t *testing.T) {
 	ext := extension.New(extension.Metadata{})
 	var observed map[string]any
-	extension.On(ext, extension.EventToolUpdate, func(context.Context, extension.ToolUpdateEvent, *extension.EventContext) (extension.EventResult, error) {
-		return extension.EventResult{}, nil
-	}, extension.WithPriority(1))
+	extension.On(ext, extension.EventToolUpdate, noop[extension.ToolUpdateEvent], extension.WithPriority(1))
 	extension.On(ext, extension.EventToolUpdate, func(_ context.Context, event extension.ToolUpdateEvent, _ *extension.EventContext) (extension.EventResult, error) {
 		return extension.EventResult{}, event.Tool.DecodeOutput(&observed)
 	})
@@ -383,17 +374,15 @@ func TestCommandValidationCanPassToTheNextRoute(t *testing.T) {
 }
 
 func TestInvalidAndDuplicateRegistrationsPanic(t *testing.T) {
-	noopTool := func(context.Context, struct{}, *extension.ToolContext) (extension.ToolResult, error) {
+	okTool := func(context.Context, *extension.ToolContext) (extension.ToolResult, error) {
 		return extension.ToolResult{}, nil
 	}
 	noopCommand := func(context.Context, map[string]any, *extension.CommandContext) (extension.CommandResult, error) {
 		return extension.Pass(), nil
 	}
 	ext := extension.New(extension.Metadata{})
-	extension.RegisterTool(ext, extension.Tool[struct{}]{Name: "tool", Execute: noopTool})
-	assert.PanicsWithValue(t, "extension: duplicate tool registration: tool", func() {
-		extension.RegisterTool(ext, extension.Tool[struct{}]{Name: "tool", Execute: noopTool})
-	})
+	addTool(ext, "tool", okTool)
+	assert.PanicsWithValue(t, "extension: duplicate tool registration: tool", func() { addTool(ext, "tool", okTool) })
 	assert.Panics(t, func() { extension.RegisterTool(ext, extension.Tool[struct{}]{Name: "no-handler"}) })
 	assert.Panics(t, func() {
 		extension.RegisterTool(ext, extension.Tool[struct{ C chan int }]{Name: "unsupported", Execute: func(context.Context, struct{ C chan int }, *extension.ToolContext) (extension.ToolResult, error) {
@@ -488,20 +477,11 @@ func TestTimeoutsPreserveExplicitZeroAndMergeEventOptions(t *testing.T) {
 	extension.RegisterCommand(ext, extension.Command[map[string]any]{Name: "wait", Timeout: extension.NoTimeout, Execute: func(context.Context, map[string]any, *extension.CommandContext) (extension.CommandResult, error) {
 		return extension.Pass(), nil
 	}})
-	handler := func(context.Context, extension.ToolCallEvent, *extension.EventContext) (extension.EventResult, error) {
-		return extension.EventResult{}, nil
-	}
-	extension.On(ext, extension.EventToolCall, handler, extension.WithTimeout(5*time.Second))
-	extension.On(ext, extension.EventToolCall, handler, extension.WithTimeout(10*time.Second), extension.WithPriority(-1))
-	extension.On(ext, extension.EventToolUpdate, func(context.Context, extension.ToolUpdateEvent, *extension.EventContext) (extension.EventResult, error) {
-		return extension.EventResult{}, nil
-	}, extension.WithTimeout(5*time.Second))
-	extension.On(ext, extension.EventToolUpdate, func(context.Context, extension.ToolUpdateEvent, *extension.EventContext) (extension.EventResult, error) {
-		return extension.EventResult{}, nil
-	}, extension.WithTimeout(extension.NoTimeout))
-	extension.On(ext, extension.EventTurnEnd, func(context.Context, extension.TurnEndEvent, *extension.EventContext) (extension.EventResult, error) {
-		return extension.EventResult{}, nil
-	})
+	extension.On(ext, extension.EventToolCall, noop[extension.ToolCallEvent], extension.WithTimeout(5*time.Second))
+	extension.On(ext, extension.EventToolCall, noop[extension.ToolCallEvent], extension.WithTimeout(10*time.Second), extension.WithPriority(-1))
+	extension.On(ext, extension.EventToolUpdate, noop[extension.ToolUpdateEvent], extension.WithTimeout(5*time.Second))
+	extension.On(ext, extension.EventToolUpdate, noop[extension.ToolUpdateEvent], extension.WithTimeout(extension.NoTimeout))
+	extension.On(ext, extension.EventTurnEnd, noop[extension.TurnEndEvent])
 	initialized, err := newHarness(t, ext, nil).Initialize(t.Context(), nil)
 	require.NoError(t, err)
 	assert.InDelta(t, 0, *initialized.Tools[0].TimeoutInSec, 0)

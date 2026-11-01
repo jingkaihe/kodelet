@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,28 +13,27 @@ import (
 
 	"github.com/jingkaihe/kodelet/sdk/go/extension"
 	"github.com/jingkaihe/kodelet/sdk/go/extension/extensiontest"
+	"github.com/jingkaihe/kodelet/sdk/go/internal/jsonrpc"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+type uiAction struct {
+	Action string `json:"action"`
+	ID     string `json:"id,omitempty"`
+}
+
 type uiFixture struct {
 	h       *extensiontest.Harness
-	host    *recordingHost
 	surface chan *extension.Surface
 }
 
-func newUIFixture(t *testing.T, ui map[string]any, responses map[string]func(extensiontest.HostCall) (any, error)) *uiFixture {
+// newUIFixture serves a "ui" tool that performs one persistent UI action per call.
+func newUIFixture(t *testing.T, ui map[string]any, hostReplies map[string]any) *uiFixture {
 	t.Helper()
-	fixture := &uiFixture{host: newRecordingHost(responses), surface: make(chan *extension.Surface, 4)}
+	fixture := &uiFixture{surface: make(chan *extension.Surface, 4)}
 	ext := extension.New(extension.Metadata{})
-	extension.RegisterTool(ext, extension.Tool[struct {
-		Action string `json:"action"`
-		ID     string `json:"id,omitempty"`
-	}]{Name: "ui", Execute: func(ctx context.Context, in struct {
-		Action string `json:"action"`
-		ID     string `json:"id,omitempty"`
-	}, tc *extension.ToolContext,
-	) (extension.ToolResult, error) {
+	extension.RegisterTool(ext, extension.Tool[uiAction]{Name: "ui", Execute: func(ctx context.Context, in uiAction, tc *extension.ToolContext) (extension.ToolResult, error) {
 		switch in.Action {
 		case "widget":
 			if err := tc.UI.SetWidget(ctx, "status", []extension.FrameLine{extension.Line("a"), extension.Styled(extension.StyledSpan{Text: "b", Style: &extension.Style{Bold: true}})}, ""); err != nil {
@@ -62,7 +60,7 @@ func newUIFixture(t *testing.T, ui map[string]any, responses map[string]func(ext
 		}
 		return extension.ToolResult{}, errors.New("unknown action")
 	}})
-	fixture.h = newHarness(t, ext, &extensiontest.Options{Host: fixture.host.serve})
+	fixture.h = newHarness(t, ext, &extensiontest.Options{Host: replies(hostReplies)})
 	initWith(t, fixture.h, func(params *extension.InitializeParams) {
 		if ui != nil {
 			params.Capabilities["ui"] = ui
@@ -83,39 +81,45 @@ func (f *uiFixture) openSurface(t *testing.T, id, scope string) *extension.Surfa
 	return <-f.surface
 }
 
+// acceptOnce rejects the first request and accepts the rest.
+func acceptOnce(rejection map[string]any) reply {
+	var rejected atomic.Bool
+	return func(extensiontest.HostCall) (any, error) {
+		if !rejected.Swap(true) {
+			return rejection, nil
+		}
+		return map[string]any{"accepted": true}, nil
+	}
+}
+
 func TestPersistentUIIsCapabilityGated(t *testing.T) {
-	fixture := newUIFixture(t, nil, nil)
+	fixture := newUIFixture(t, nil, map[string]any{
+		"kodelet.ui.widget.set": map[string]any{}, "kodelet.ui.widget.remove": map[string]any{},
+		"kodelet.ui.transcript.append": map[string]any{},
+	})
 	_, err := fixture.run(t, "widget", "", "scope")
 	require.NoError(t, err)
 	_, err = fixture.run(t, "transcript", "", "scope")
 	require.NoError(t, err)
 	_, err = fixture.run(t, "surface", "panel", "scope")
 	require.ErrorContains(t, err, "interactive extension surfaces are not available")
-	assert.Empty(t, fixture.host.methods())
+	assert.Empty(t, methods(fixture.h), "unsupported UI is never sent to the host")
 
 	require.NoError(t, fixture.h.Notify("kodelet.ui.capabilities", map[string]any{"widgets": true, "transcript": true}))
-	fixture.host.mu.Lock()
-	fixture.host.responses = map[string]func(extensiontest.HostCall) (any, error){
-		"kodelet.ui.widget.set": fixed(map[string]any{}), "kodelet.ui.widget.remove": fixed(map[string]any{}),
-		"kodelet.ui.transcript.append": fixed(map[string]any{}),
-	}
-	fixture.host.mu.Unlock()
 	_, err = fixture.run(t, "transcript", "", "scope")
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"message":"note","scopeId":"scope"}`, string(fixture.host.call("kodelet.ui.transcript.append").Params))
+	assert.JSONEq(t, `{"message":"note","scopeId":"scope"}`, string(firstCall(t, fixture.h, "kodelet.ui.transcript.append").Params))
 	_, err = fixture.run(t, "badid", "", "scope")
 	require.ErrorContains(t, err, "leading or trailing whitespace")
 }
 
 func TestWidgetsUseSequencesPlacementAndScope(t *testing.T) {
-	fixture := newUIFixture(t, map[string]any{"widgets": true}, map[string]func(extensiontest.HostCall) (any, error){
-		"kodelet.ui.widget.set": fixed(map[string]any{}), "kodelet.ui.widget.remove": fixed(map[string]any{}),
+	fixture := newUIFixture(t, map[string]any{"widgets": true}, map[string]any{
+		"kodelet.ui.widget.set": map[string]any{}, "kodelet.ui.widget.remove": map[string]any{},
 	})
 	_, err := fixture.run(t, "widget", "", "scope-1")
 	require.NoError(t, err)
-	fixture.host.mu.Lock()
-	calls := append([]extensiontest.HostCall(nil), fixture.host.calls...)
-	fixture.host.mu.Unlock()
+	calls := fixture.h.HostCalls()
 	require.Len(t, calls, 3)
 	assert.JSONEq(t, `{"id":"status","placement":"aboveComposer","scopeId":"scope-1","frame":{"sequence":1,"lines":["a",{"spans":[{"text":"b","style":{"bold":true}}]}]}}`, string(calls[0].Params))
 	assert.JSONEq(t, `{"id":"status","placement":"belowComposer","scopeId":"scope-1","frame":{"sequence":2,"lines":[]}}`, string(calls[1].Params))
@@ -123,13 +127,13 @@ func TestWidgetsUseSequencesPlacementAndScope(t *testing.T) {
 }
 
 func TestSurfacesRouteScopedEventsAndCloseOnce(t *testing.T) {
-	fixture := newUIFixture(t, map[string]any{"surfaces": true}, map[string]func(extensiontest.HostCall) (any, error){
-		"kodelet.ui.surface.open":  fixed(map[string]any{"accepted": true}),
-		"kodelet.ui.surface.close": fixed(map[string]any{"accepted": true}),
+	fixture := newUIFixture(t, map[string]any{"surfaces": true}, map[string]any{
+		"kodelet.ui.surface.open":  map[string]any{"accepted": true},
+		"kodelet.ui.surface.close": map[string]any{"accepted": true},
 	})
 	surface := fixture.openSurface(t, "panel", "scope-1")
 	assert.JSONEq(t, `{"id":"panel","scopeId":"scope-1","options":{"width":"50%","height":10,"anchor":"center","nonCapturing":true},"frame":{"sequence":1,"lines":["loading"]}}`,
-		string(fixture.host.call("kodelet.ui.surface.open").Params))
+		string(firstCall(t, fixture.h, "kodelet.ui.surface.open").Params))
 
 	inputs := make(chan extension.SurfaceInputEvent, 4)
 	surface.OnInput(func(event extension.SurfaceInputEvent) { inputs <- event })
@@ -138,9 +142,13 @@ func TestSurfacesRouteScopedEventsAndCloseOnce(t *testing.T) {
 	var closed atomic.Int32
 	surface.OnClose(func() { closed.Add(1) })
 
-	require.NoError(t, fixture.h.Notify("extension.ui.surface.input", map[string]any{"id": "panel", "scopeId": "other", "sequence": 9, "kind": "key", "key": "x"}))
-	require.NoError(t, fixture.h.Notify("extension.ui.surface.input", map[string]any{"id": "panel", "scopeId": "scope-1", "sequence": 5, "kind": "key", "key": "a"}))
-	require.NoError(t, fixture.h.Notify("extension.ui.surface.input", map[string]any{"id": "panel", "scopeId": "scope-1", "sequence": 4, "kind": "key", "key": "stale"}))
+	for _, event := range []map[string]any{
+		{"id": "panel", "scopeId": "other", "sequence": 9, "kind": "key", "key": "x"},
+		{"id": "panel", "scopeId": "scope-1", "sequence": 5, "kind": "key", "key": "a"},
+		{"id": "panel", "scopeId": "scope-1", "sequence": 4, "kind": "key", "key": "stale"},
+	} {
+		require.NoError(t, fixture.h.Notify("extension.ui.surface.input", event))
+	}
 	require.NoError(t, fixture.h.Notify("extension.ui.surface.resize", map[string]any{"id": "panel", "scopeId": "scope-1", "sequence": 6, "width": 80, "height": 20}))
 	assert.Equal(t, extension.SurfaceInputEvent{Sequence: 5, Kind: "key", Key: "a"}, <-inputs)
 	assert.Equal(t, extension.SurfaceResizeEvent{Sequence: 6, Width: 80, Height: 20}, <-resizes)
@@ -161,16 +169,14 @@ func TestSurfacesRouteScopedEventsAndCloseOnce(t *testing.T) {
 
 	require.NoError(t, surface.Close(t.Context()))
 	require.NoError(t, surface.Close(t.Context()))
-	assert.JSONEq(t, `{"id":"panel","scopeId":"scope-1","sequence":3}`, string(fixture.host.call("kodelet.ui.surface.close").Params))
+	assert.JSONEq(t, `{"id":"panel","scopeId":"scope-1","sequence":3}`, string(firstCall(t, fixture.h, "kodelet.ui.surface.close").Params))
 	assert.Equal(t, int32(1), closed.Load())
 	surface.OnClose(func() { closed.Add(1) })
 	assert.Equal(t, int32(2), closed.Load(), "OnClose after close runs immediately")
 }
 
 func TestSurfaceIDsAreScopedAndExclusiveUntilClosed(t *testing.T) {
-	fixture := newUIFixture(t, map[string]any{"surfaces": true}, map[string]func(extensiontest.HostCall) (any, error){
-		"kodelet.ui.surface.open": fixed(map[string]any{"accepted": true}),
-	})
+	fixture := newUIFixture(t, map[string]any{"surfaces": true}, map[string]any{"kodelet.ui.surface.open": map[string]any{"accepted": true}})
 	first := fixture.openSurface(t, "panel", "scope-1")
 	second := fixture.openSurface(t, "panel", "scope-2")
 	_, err := fixture.run(t, "surface", "panel", "scope-1")
@@ -189,40 +195,42 @@ func TestSurfaceIDsAreScopedAndExclusiveUntilClosed(t *testing.T) {
 	assert.Equal(t, "panel", second.ID())
 }
 
-func TestFailedSurfaceCloseKeepsOwnershipAndCanRetry(t *testing.T) {
-	var reject atomic.Bool
-	reject.Store(true)
-	fixture := newUIFixture(t, map[string]any{"surfaces": true}, map[string]func(extensiontest.HostCall) (any, error){
-		"kodelet.ui.surface.open": fixed(map[string]any{"accepted": true}),
-		"kodelet.ui.surface.close": func(extensiontest.HostCall) (any, error) {
-			if reject.Swap(false) {
-				return map[string]any{"accepted": false, "reason": "busy"}, nil
-			}
-			return map[string]any{"accepted": true}, nil
-		},
+func TestRejectedSurfaceOperationsCanBeRetried(t *testing.T) {
+	t.Run("open releases the ID", func(t *testing.T) {
+		fixture := newUIFixture(t, map[string]any{"surfaces": true}, map[string]any{
+			"kodelet.ui.surface.open": acceptOnce(map[string]any{"accepted": false}),
+		})
+		_, err := fixture.run(t, "surface", "panel", "")
+		require.ErrorContains(t, err, "the host rejected the interactive surface")
+		fixture.openSurface(t, "panel", "")
 	})
-	surface := fixture.openSurface(t, "dialog", "")
-	require.EqualError(t, surface.Close(t.Context()), "busy")
-	_, err := fixture.run(t, "surface", "dialog", "")
-	require.ErrorContains(t, err, "already open")
-	require.NoError(t, surface.Close(t.Context()))
-	fixture.openSurface(t, "dialog", "")
+	t.Run("close keeps ownership", func(t *testing.T) {
+		fixture := newUIFixture(t, map[string]any{"surfaces": true}, map[string]any{
+			"kodelet.ui.surface.open":  map[string]any{"accepted": true},
+			"kodelet.ui.surface.close": acceptOnce(map[string]any{"accepted": false, "reason": "busy"}),
+		})
+		surface := fixture.openSurface(t, "dialog", "")
+		require.EqualError(t, surface.Close(t.Context()), "busy")
+		_, err := fixture.run(t, "surface", "dialog", "")
+		require.ErrorContains(t, err, "already open")
+		require.NoError(t, surface.Close(t.Context()))
+		fixture.openSurface(t, "dialog", "")
+	})
 }
 
 func TestSurfaceRetainsEventsUntilListenersAttach(t *testing.T) {
-	var h *extensiontest.Harness
-	fixture := newUIFixture(t, map[string]any{"surfaces": true}, map[string]func(extensiontest.HostCall) (any, error){
-		"kodelet.ui.surface.open": func(call extensiontest.HostCall) (any, error) {
+	var fixture *uiFixture
+	fixture = newUIFixture(t, map[string]any{"surfaces": true}, map[string]any{
+		"kodelet.ui.surface.open": reply(func(call extensiontest.HostCall) (any, error) {
 			var params struct {
 				ScopeID string `json:"scopeId"`
 			}
 			_ = json.Unmarshal(call.Params, &params)
-			_ = h.Notify("extension.ui.surface.input", map[string]any{"id": "panel", "scopeId": params.ScopeID, "sequence": 1, "kind": "focus"})
-			_ = h.Notify("extension.ui.surface.resize", map[string]any{"id": "panel", "scopeId": params.ScopeID, "sequence": 2, "width": 40, "height": 10})
+			_ = fixture.h.Notify("extension.ui.surface.input", map[string]any{"id": "panel", "scopeId": params.ScopeID, "sequence": 1, "kind": "focus"})
+			_ = fixture.h.Notify("extension.ui.surface.resize", map[string]any{"id": "panel", "scopeId": params.ScopeID, "sequence": 2, "width": 40, "height": 10})
 			return map[string]any{"accepted": true}, nil
-		},
+		}),
 	})
-	h = fixture.h
 	surface := fixture.openSurface(t, "panel", "s")
 	var focus extension.SurfaceInputEvent
 	surface.OnInput(func(event extension.SurfaceInputEvent) { focus = event })
@@ -235,49 +243,40 @@ func TestSurfaceRetainsEventsUntilListenersAttach(t *testing.T) {
 func TestSurfaceFramesCoalesceWhileTheHostIsBlocked(t *testing.T) {
 	ext := extension.New(extension.Metadata{})
 	surfaces := make(chan *extension.Surface, 1)
-	extension.RegisterTool(ext, extension.Tool[struct{}]{Name: "open", Execute: func(ctx context.Context, _ struct{}, tc *extension.ToolContext) (extension.ToolResult, error) {
+	addTool(ext, "open", func(ctx context.Context, tc *extension.ToolContext) (extension.ToolResult, error) {
 		surface, err := tc.UI.OpenSurface(ctx, extension.SurfaceOptions{ID: "panel"})
 		surfaces <- surface
 		return extension.ToolResult{}, err
-	}})
+	})
 	gate := make(chan struct{})
 	var mu sync.Mutex
 	var frames []string
-	responses := make(chan struct{}, 4)
-	var rt *extension.Runtime
-	rt = extension.NewRuntime(ext, extension.TransportFunc(func(_ context.Context, data []byte) error {
-		var message struct {
-			ID     json.RawMessage `json:"id"`
-			Method string          `json:"method"`
-			Params struct {
+	w := runtimeWire(t, ext, extension.RuntimeOptions{}, func(w *wire, message jsonrpc.Message) bool {
+		switch message.Method {
+		case "kodelet.ui.surface.open":
+			go w.send(`{"jsonrpc":"2.0","id":` + string(message.ID) + `,"result":{"accepted":true}}`)
+			return true
+		case "kodelet.ui.surface.frame":
+			var params struct {
 				Frame struct {
 					Lines []string `json:"lines"`
 				} `json:"frame"`
-			} `json:"params"`
-		}
-		if err := json.Unmarshal(data, &message); err != nil {
-			return err
-		}
-		switch message.Method {
-		case "kodelet.ui.surface.open":
-			go rt.Receive([]byte(`{"jsonrpc":"2.0","id":` + string(message.ID) + `,"result":{"accepted":true}}`))
-		case "kodelet.ui.surface.frame":
+			}
+			_ = json.Unmarshal(message.Params, &params)
 			mu.Lock()
-			frames = append(frames, strings.Join(message.Params.Frame.Lines, ","))
+			frames = append(frames, strings.Join(params.Frame.Lines, ","))
 			mu.Unlock()
-			<-gate
-		case "":
-			responses <- struct{}{}
+			<-gate // the host stops reading
+			return true
 		}
-		return nil
-	}), &extension.RuntimeOptions{LogOutput: io.Discard})
-	t.Cleanup(func() { rt.Close(nil) })
-	require.NoError(t, rt.Receive([]byte(`{"jsonrpc":"2.0","id":1,"method":"extension.initialize","params":{"extension":{"id":"x"},"capabilities":{"ui":{"surfaces":true}}}}`)))
-	<-responses
-	require.NoError(t, rt.Receive([]byte(`{"jsonrpc":"2.0","id":2,"method":"extension.tool.execute","params":{"name":"open","input":{}}}`)))
-	surface := <-surfaces
+		return false
+	})
+	w.send(`{"jsonrpc":"2.0","id":1,"method":"extension.initialize","params":{"extension":{"id":"x"},"capabilities":{"ui":{"surfaces":true}}}}`)
+	w.next()
+	w.send(`{"jsonrpc":"2.0","id":2,"method":"extension.tool.execute","params":{"name":"open","input":{}}}`)
+	surface := receive(t, surfaces)
 	require.NotNil(t, surface)
-	<-responses
+	w.next()
 
 	for i := range 200 {
 		surface.Update([]extension.FrameLine{extension.Line(strconv.Itoa(i))})
@@ -294,20 +293,4 @@ func TestSurfaceFramesCoalesceWhileTheHostIsBlocked(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	assert.Equal(t, []string{"0", "199"}, frames, "only the frame in flight and the latest update are sent")
-}
-
-func TestRejectedSurfaceOpenReleasesTheID(t *testing.T) {
-	var reject atomic.Bool
-	reject.Store(true)
-	fixture := newUIFixture(t, map[string]any{"surfaces": true}, map[string]func(extensiontest.HostCall) (any, error){
-		"kodelet.ui.surface.open": func(extensiontest.HostCall) (any, error) {
-			if reject.Swap(false) {
-				return map[string]any{"accepted": false}, nil
-			}
-			return map[string]any{"accepted": true}, nil
-		},
-	})
-	_, err := fixture.run(t, "surface", "panel", "")
-	require.ErrorContains(t, err, "the host rejected the interactive surface")
-	fixture.openSurface(t, "panel", "")
 }

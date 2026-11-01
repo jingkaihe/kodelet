@@ -259,6 +259,49 @@ func (f *fakeACP) nextRequest(method string) jsonrpc.Message {
 	}
 }
 
+// session starts a session from a default client.
+func (f *fakeACP) session(opts SessionOptions) *Session {
+	f.t.Helper()
+	session, err := f.client(ClientOptions{}).CreateSession(f.t.Context(), opts)
+	require.NoError(f.t, err)
+	return session
+}
+
+// chunk streams assistant text.
+func (f *fakeACP) chunk(text string) {
+	f.update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": text}})
+}
+
+// toolCall reports that the agent called a tool.
+func (f *fakeACP) toolCall(id, name string, input map[string]any) {
+	f.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": id, "toolName": name, "rawInput": input})
+}
+
+// respondAfterCancel is a prompt handler that ends the turn once it is cancelled.
+func respondAfterCancel(f *fakeACP, message jsonrpc.Message) {
+	f.nextRequest("session/cancel")
+	f.respond(message.ID, map[string]any{"stopReason": "cancelled"})
+}
+
+// busyOnToolCall subscribes a callback that spends d handling the first
+// tool.call event. entered closes when it starts; finished reports its end.
+func busyOnToolCall(session *Session, d time.Duration) (entered <-chan struct{}, finished *atomic.Bool) {
+	started := make(chan struct{})
+	done := &atomic.Bool{}
+	var once sync.Once
+	session.Subscribe(func(event Event) {
+		if event.Type != EventToolCall {
+			return
+		}
+		once.Do(func() {
+			close(started)
+			time.Sleep(d)
+			done.Store(true)
+		})
+	})
+	return started, done
+}
+
 func waitFor(t *testing.T, done <-chan struct{}) {
 	t.Helper()
 	select {

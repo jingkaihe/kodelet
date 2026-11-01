@@ -3,64 +3,55 @@ package extension_test
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"testing"
 	"time"
 
 	"github.com/jingkaihe/kodelet/sdk/go/extension"
-	"github.com/jingkaihe/kodelet/sdk/go/internal/jsonrpc"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// runLocalTool executes a tool on a runtime whose host requests go to local.
-func runLocalTool(t *testing.T, local extension.LocalRequestFunc, execute func(context.Context, *extension.ToolContext) error) (*extension.Runtime, chan jsonrpc.Message) {
+// runLocalTool starts a "run" tool on a runtime whose host requests go to local first.
+func runLocalTool(t *testing.T, local extension.LocalRequestFunc, execute func(context.Context, *extension.ToolContext) error) *wire {
 	t.Helper()
 	ext := extension.New(extension.Metadata{})
-	extension.RegisterTool(ext, extension.Tool[struct{}]{Name: "run", Execute: func(ctx context.Context, _ struct{}, tc *extension.ToolContext) (extension.ToolResult, error) {
+	addTool(ext, "run", func(ctx context.Context, tc *extension.ToolContext) (extension.ToolResult, error) {
 		return extension.Text("done"), execute(ctx, tc)
-	}})
-	out := make(chan jsonrpc.Message, 16)
-	rt := extension.NewRuntime(ext, extension.TransportFunc(func(_ context.Context, data []byte) error {
-		var message jsonrpc.Message
-		if err := json.Unmarshal(data, &message); err != nil {
-			return err
-		}
-		out <- message
-		return nil
-	}), &extension.RuntimeOptions{LogOutput: io.Discard, LocalRequest: local})
-	t.Cleanup(func() { rt.Close(nil) })
-	require.NoError(t, rt.Receive([]byte(`{"jsonrpc":"2.0","id":1,"method":"extension.tool.execute","params":{"name":"run","input":{}}}`)))
-	return rt, out
+	})
+	w := runtimeWire(t, ext, extension.RuntimeOptions{LocalRequest: local}, nil)
+	w.send(`{"jsonrpc":"2.0","id":1,"method":"extension.tool.execute","params":{"name":"run","input":{}}}`)
+	return w
 }
 
-func receive[T any](t *testing.T, ch <-chan T) T {
-	t.Helper()
-	select {
-	case value := <-ch:
-		return value
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out")
-		var zero T
-		return zero
+// blockUntilCancelled is a local handler that reports its context error.
+func blockUntilCancelled(started chan<- struct{}, handlerErr chan<- error) extension.LocalRequestFunc {
+	return func(ctx context.Context, _ string, _ json.RawMessage) (any, bool, error) {
+		if started != nil {
+			close(started)
+		}
+		<-ctx.Done()
+		handlerErr <- ctx.Err()
+		return nil, true, ctx.Err()
+	}
+}
+
+// withDeadline calls request with a 50 ms deadline and reports its error.
+func withDeadline(errs chan<- error, request func(context.Context, *extension.ToolContext) error) func(context.Context, *extension.ToolContext) error {
+	return func(ctx context.Context, tc *extension.ToolContext) error {
+		short, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+		defer cancel()
+		errs <- request(short, tc)
+		return nil
 	}
 }
 
 func TestLocalRequestsHonorTheCallerContext(t *testing.T) {
 	t.Run("handler sees the caller deadline", func(t *testing.T) {
-		handlerErr := make(chan error, 1)
-		inputErr := make(chan error, 1)
-		runLocalTool(t, func(ctx context.Context, _ string, _ json.RawMessage) (any, bool, error) {
-			<-ctx.Done()
-			handlerErr <- ctx.Err()
-			return nil, true, ctx.Err()
-		}, func(ctx context.Context, tc *extension.ToolContext) error {
-			short, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
-			defer cancel()
-			_, _, err := tc.UI.Input(short, extension.InputRequest{Title: "x"})
-			inputErr <- err
-			return nil
-		})
+		handlerErr, inputErr := make(chan error, 1), make(chan error, 1)
+		runLocalTool(t, blockUntilCancelled(nil, handlerErr), withDeadline(inputErr, func(ctx context.Context, tc *extension.ToolContext) error {
+			_, _, err := tc.UI.Input(ctx, extension.InputRequest{Title: "x"})
+			return err
+		}))
 		require.ErrorIs(t, receive(t, inputErr), context.DeadlineExceeded)
 		require.ErrorIs(t, receive(t, handlerErr), context.DeadlineExceeded)
 	})
@@ -72,44 +63,35 @@ func TestLocalRequestsHonorTheCallerContext(t *testing.T) {
 		runLocalTool(t, func(context.Context, string, json.RawMessage) (any, bool, error) {
 			<-release
 			return nil, true, nil
-		}, func(ctx context.Context, tc *extension.ToolContext) error {
-			short, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
-			defer cancel()
-			_, err := tc.UI.Confirm(short, extension.ConfirmRequest{Title: "x"})
-			inputErr <- err
-			return nil
-		})
+		}, withDeadline(inputErr, func(ctx context.Context, tc *extension.ToolContext) error {
+			_, err := tc.UI.Confirm(ctx, extension.ConfirmRequest{Title: "x"})
+			return err
+		}))
 		require.ErrorIs(t, receive(t, inputErr), context.DeadlineExceeded)
 	})
 
 	t.Run("handler stops when the originating request is cancelled", func(t *testing.T) {
-		handlerErr := make(chan error, 1)
-		started := make(chan struct{})
-		rt, _ := runLocalTool(t, func(ctx context.Context, _ string, _ json.RawMessage) (any, bool, error) {
-			close(started)
-			<-ctx.Done()
-			handlerErr <- ctx.Err()
-			return nil, true, ctx.Err()
-		}, func(_ context.Context, tc *extension.ToolContext) error {
+		started, handlerErr := make(chan struct{}), make(chan error, 1)
+		w := runLocalTool(t, blockUntilCancelled(started, handlerErr), func(_ context.Context, tc *extension.ToolContext) error {
 			_, _, err := tc.UI.Select(context.Background(), extension.SelectRequest{Title: "x", Options: []string{"a"}})
 			return err
 		})
 		receive(t, started)
-		require.NoError(t, rt.Receive([]byte(`{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":1}}`)))
+		w.send(`{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":1}}`)
 		require.ErrorIs(t, receive(t, handlerErr), context.Canceled)
 	})
 
 	t.Run("declined requests are forwarded to the host", func(t *testing.T) {
-		rt, out := runLocalTool(t, func(context.Context, string, json.RawMessage) (any, bool, error) {
+		w := runLocalTool(t, func(context.Context, string, json.RawMessage) (any, bool, error) {
 			return nil, false, nil
 		}, func(ctx context.Context, tc *extension.ToolContext) error {
 			return tc.UI.Notify(ctx, extension.NotifyRequest{Message: "hello"})
 		})
-		forwarded := receive(t, out)
+		forwarded := w.next()
 		assert.Equal(t, "kodelet.ui.notify", forwarded.Method)
 		assert.JSONEq(t, "1", string(forwarded.ParentID))
-		require.NoError(t, rt.Receive([]byte(`{"jsonrpc":"2.0","id":`+string(forwarded.ID)+`,"result":{}}`)))
-		result := receive(t, out)
+		w.send(`{"jsonrpc":"2.0","id":` + string(forwarded.ID) + `,"result":{}}`)
+		result := w.next()
 		assert.JSONEq(t, "1", string(result.ID))
 		assert.JSONEq(t, `{"content":"done"}`, string(result.Result))
 	})
