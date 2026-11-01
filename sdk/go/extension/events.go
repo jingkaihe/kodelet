@@ -148,11 +148,13 @@ type EventBlock struct {
 	Reason string `json:"reason"`
 }
 
-// SystemPromptPatch changes the system prompt in agent.init.
+// SystemPromptPatch changes the system prompt in agent.init. Nil fields leave
+// the prompt alone, so an empty Replace clears it. Kodelet applies Replace,
+// then Prepend, then Append. Use Ptr to set a field.
 type SystemPromptPatch struct {
-	Append  string `json:"append,omitempty"`
-	Prepend string `json:"prepend,omitempty"`
-	Replace string `json:"replace,omitempty"`
+	Replace *string `json:"replace,omitempty"`
+	Prepend *string `json:"prepend,omitempty"`
+	Append  *string `json:"append,omitempty"`
 }
 
 // ToolListPatch changes the tool allowlist in agent.init.

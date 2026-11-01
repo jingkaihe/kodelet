@@ -80,7 +80,7 @@ extension.On(ext, extension.EventToolCall, func(ctx context.Context, event exten
 }, extension.WithPriority(10), extension.WithTimeout(5*time.Second))
 ```
 
-Handlers for one event run by descending priority and then registration order. A block stops the chain. `Input` and `Output` results replace what later handlers and the host see; for `tool.result` and `tool.update`, a replaced object output loses its machine `data` copy. Use `extension.CustomEvent(name)` for events the SDK does not model, and `extension.NoTimeout` to disable a host timeout.
+Handlers for one event run by descending priority and then registration order. A block stops the chain. `Input` and `Output` results replace what later handlers and the host see; for `tool.result` and `tool.update`, a replaced object output loses its machine `data` copy. `SystemPromptPatch` fields are pointers, so `Replace: extension.Ptr("")` clears the prompt while nil fields leave it alone. Use `extension.CustomEvent(name)` for events the SDK does not model, and `extension.NoTimeout` to disable a host timeout.
 
 `RegisterCommand` returns `extension.Respond(text)`, `extension.RunAgent(prompt)`, or the zero result to pass. `ext.RegisterShortcut("ctrl+g", ...)` accepts `ctrl+letter`, `alt+letter-or-digit`, `ctrl+alt+letter`, and `f1` to `f12`; return `extension.Submit(message)` to submit a message. `ext.RegisterProfile` declares a self-contained model profile with native snake_case `Settings` and returns its name for `agent.SessionOptions.Profile`.
 

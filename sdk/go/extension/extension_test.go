@@ -230,7 +230,7 @@ func TestBlockStopsTheChainAndAgentInitPatchesMerge(t *testing.T) {
 	})
 	extension.On(ext, extension.EventAgentInit, func(_ context.Context, event extension.AgentInitEvent, _ *extension.EventContext) (extension.EventResult, error) {
 		return extension.EventResult{
-			SystemPrompt: &extension.SystemPromptPatch{Append: "Prefer concise answers. " + strings.Join(event.AllowedTools, ",")},
+			SystemPrompt: &extension.SystemPromptPatch{Append: extension.Ptr("Prefer concise answers. " + strings.Join(event.AllowedTools, ","))},
 			Tools:        &extension.ToolListPatch{Disable: []string{"bash"}},
 		}, nil
 	})
@@ -246,9 +246,29 @@ func TestBlockStopsTheChainAndAgentInitPatchesMerge(t *testing.T) {
 
 	init, err := h.HandleEvent(t.Context(), "agent.init", map[string]any{"allowedTools": []string{"bash", "grep"}})
 	require.NoError(t, err)
-	assert.Equal(t, "Prefer concise answers. bash,grep", init.SystemPrompt.Append)
+	assert.Equal(t, "Prefer concise answers. bash,grep", *init.SystemPrompt.Append)
+	assert.Nil(t, init.SystemPrompt.Replace)
 	assert.Equal(t, []string{"bash"}, init.Tools.Disable)
 	assert.Equal(t, []string{"file_read"}, init.Tools.Enable)
+}
+
+func TestSystemPromptPatchesCanSetEmptyValues(t *testing.T) {
+	data, err := json.Marshal(extension.SystemPromptPatch{Replace: extension.Ptr(""), Append: extension.Ptr("Only this.")})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"replace":"","append":"Only this."}`, string(data), "an empty replacement must reach the host")
+	data, err = json.Marshal(extension.SystemPromptPatch{})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{}`, string(data))
+
+	ext := extension.New(extension.Metadata{})
+	extension.On(ext, extension.EventAgentInit, func(context.Context, extension.AgentInitEvent, *extension.EventContext) (extension.EventResult, error) {
+		return extension.EventResult{SystemPrompt: &extension.SystemPromptPatch{Replace: extension.Ptr("")}}, nil
+	})
+	result, err := newHarness(t, ext, nil).HandleEvent(t.Context(), "agent.init", map[string]any{"systemPrompt": "original"})
+	require.NoError(t, err)
+	require.NotNil(t, result.SystemPrompt.Replace)
+	assert.Empty(t, *result.SystemPrompt.Replace)
+	assert.Nil(t, result.SystemPrompt.Append)
 }
 
 func TestOutputHooksClearMachineDataBeforeLaterHandlers(t *testing.T) {

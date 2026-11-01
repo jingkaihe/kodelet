@@ -74,7 +74,7 @@ func main() {
 	}, extension.WithTimeout(5*time.Second))
 
 	extension.On(ext, extension.EventAgentInit, func(context.Context, extension.AgentInitEvent, *extension.EventContext) (extension.EventResult, error) {
-		return extension.EventResult{SystemPrompt: &extension.SystemPromptPatch{Append: "Report temperatures with their units."}}, nil
+		return extension.EventResult{SystemPrompt: &extension.SystemPromptPatch{Append: extension.Ptr("Report temperatures with their units.")}}, nil
 	})
 
 	ext.Main()

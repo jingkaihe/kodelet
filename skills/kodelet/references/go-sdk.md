@@ -56,11 +56,11 @@ ext.RegisterShortcut("ctrl+g", extension.Shortcut{Description: "Greet", Handler:
 }})
 profile := ext.RegisterProfile(extension.ProfileRegistration{Name: "code-search", Provider: "openai", Model: "gpt-5", Hidden: true, Settings: map[string]any{"max_tokens": 512}})
 extension.On(ext, extension.EventAgentInit, func(ctx context.Context, ev extension.AgentInitEvent, ec *extension.EventContext) (extension.EventResult, error) {
-	return extension.EventResult{SystemPrompt: &extension.SystemPromptPatch{Append: "Be concise."}}, nil
+	return extension.EventResult{SystemPrompt: &extension.SystemPromptPatch{Append: extension.Ptr("Be concise.")}}, nil
 }, extension.WithPriority(10))
 ```
 
-Command results are `Respond`, `RunAgent`, or the zero value to pass; struct inputs that fail validation also pass. Event keys (`EventToolCall`, `EventToolResult`, `EventUserMessage`, `EventAgentFinished`, ...) decode typed payloads; `CustomEvent(name)` covers others. A zero `EventResult` means no change; `Block` stops the chain; `Input`/`Output` replace values for later handlers.
+Command results are `Respond`, `RunAgent`, or the zero value to pass; struct inputs that fail validation also pass. Event keys (`EventToolCall`, `EventToolResult`, `EventUserMessage`, `EventAgentFinished`, ...) decode typed payloads; `CustomEvent(name)` covers others. A zero `EventResult` means no change; `Block` stops the chain; `Input`/`Output` replace values for later handlers. `SystemPromptPatch` fields are pointers (`extension.Ptr`), so an empty `Replace` clears the prompt.
 
 Call contexts carry `CWD`, `ConversationID`, `RunnerID`, and other metadata, plus `Log` (`*slog.Logger` writing JSON to stderr), `Storage`, `ResolveWorkspacePath`, `UI` (`Input`, `Confirm`, `Select`, `Notify`, `AppendTranscript`, `SetWidget`, `RemoveWidget`, `OpenSurface`), `AcquireBackgroundTask`, and on tools `Update`, `ForkConversation`, and `AcquireBrowser`. The handler `ctx` is cancelled with the request. Use the standard library for files and processes.
 

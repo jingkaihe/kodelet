@@ -324,7 +324,7 @@ func main() {
 	})
 	prompt := extension.New(extension.Metadata{Name: "search-prompt"})
 	extension.On(prompt, extension.EventAgentInit, func(context.Context, extension.AgentInitEvent, *extension.EventContext) (extension.EventResult, error) {
-		return extension.EventResult{SystemPrompt: &extension.SystemPromptPatch{Replace: %q}}, nil
+		return extension.EventResult{SystemPrompt: &extension.SystemPromptPatch{Replace: extension.Ptr(%q)}}, nil
 	})
 	extension.RegisterTool(ext, extension.Tool[struct{}]{
 		Name:        "code_search",

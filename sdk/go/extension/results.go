@@ -19,6 +19,11 @@ type ToolResult struct {
 	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
+// Ptr returns a pointer to v, for optional fields such as SystemPromptPatch.Replace.
+func Ptr[T any](v T) *T {
+	return &v
+}
+
 // Text returns a ToolResult with only content.
 func Text(content string) ToolResult {
 	return ToolResult{Content: content}
