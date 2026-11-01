@@ -1541,31 +1541,13 @@ exec kodelet-extension-node ./dist/index.js
 
 ### Go SDK
 
-The Go module `github.com/jingkaihe/kodelet/sdk/go` provides the same two halves: the `agent` package runs daemon-backed sessions through `kodelet acp`, including inline extensions, and the `extension` package builds extensions whose tool and command schemas are inferred from Go types. A Go extension is a single compiled executable, so no wrapper is needed:
-
-```go
-ext := extension.New(extension.Metadata{Name: "weather", Version: "0.1.0"})
-extension.RegisterTool(ext, extension.Tool[weatherInput]{
-	Name:        "get_weather",
-	Description: "Get the current weather for a location",
-	Execute: func(ctx context.Context, in weatherInput, tc *extension.ToolContext) (extension.ToolResult, error) {
-		return extension.Text("18°C, cloudy in " + in.Location), nil
-	},
-})
-ext.Main()
-```
-
-```bash
-go build -o .kodelet/extensions/weather/kodelet-extension-weather .
-```
-
-See the [Go SDK guide](../sdk/go/README.md) for sessions, events, UI helpers, testing, and examples.
+The [Go SDK](../sdk/go/README.md) provides daemon-backed agent sessions, inline extensions, and standalone extensions with schemas inferred from Go types. Standalone extensions compile to a single `kodelet-extension-<name>` executable; no wrapper is needed.
 
 ### Streaming Extension Tool Progress
 
 Long-running extension tools can publish an accumulated snapshot with `ctx.update(content, data)`. Kodelet replaces the previous snapshot for that tool call in the TUI, Web UI, ACP, and TypeScript SDK; the tool handler's eventual return value remains the authoritative result sent to the model and stored in the conversation.
 
-The TypeScript and Python SDKs provide `TaskProgress`, and the Go SDK provides the `taskprogress` package, for bounded multi-activity progress. It uses the generic `data.taskRun` shape, supports direct activities for any kind of task, and can attach to a child Kodelet session to translate its tool lifecycle events automatically.
+For bounded multi-activity progress, use `TaskProgress` (TypeScript/Python) or `taskprogress` (Go). These helpers publish `data.taskRun` snapshots for direct activities or a child session's tool lifecycle.
 
 ```typescript
 import { TaskProgress } from "kodelet";
@@ -1736,6 +1718,10 @@ Within each extension root, Kodelet loads either direct or nested executables:
 
 The executable filename must be `kodelet-extension-xxx`. Kodelet derives the extension ID/name as `xxx` for a direct executable, or as the parent directory name for a nested executable. Plugin extension IDs are addressed as `org@repo/extension`. Standalone extensions are matched by directory or executable path in allow/deny config.
 
+Kodelet also loads extensions from absolute directories in the selected runner's `PATH` by default; set `extensions.discover_path: false` to opt out. Existing extension roots take priority; otherwise, the first matching executable wins. Executable symlinks are supported. Empty or relative PATH entries, missing or unreadable directories, subdirectories, empty extension names, and the SDK launcher `kodelet-extension-node` are excluded.
+
+PATH extensions must implement Kodelet's extension protocol and may start as soon as the runtime loads. Use trusted runners, restrict discovery with `allow` using absolute executable or directory paths, or disable PATH discovery. Allow/deny filtering never falls back to a shadowed PATH executable. Inspection reports these extensions with source `path` and the filename suffix as their ID. Like other direct extensions, they start in the directory containing the discovered executable; the workspace is supplied through initialization and `KODELET_EXTENSION_WORKSPACE_CWD`.
+
 Inspect installed extensions on the selected runner without starting them:
 
 ```bash
@@ -1881,6 +1867,7 @@ extensions:
   enabled: true
   global_dir: ~/.kodelet/extensions
   local_dir: ./.kodelet/extensions
+  discover_path: true # Set false to skip extensions on the runner's PATH
   max_output_size: 102400
 
   allow:
