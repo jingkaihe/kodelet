@@ -813,6 +813,7 @@ KODELET_TEST_ACP_EXTENSION=1 exec %q -test.run '^TestDaemonACPSearchExtensionPro
 		"deep": deep,
 	})
 	viper.Set("extensions.enabled", true)
+	viper.Set("extensions.discover_path", false)
 	viper.Set("skills.enabled", false)
 	viper.Set("allowed_tools", []string{"file_read", "web_fetch", "grep_tool", "glob_tool", "code_search", "bash"})
 	t.Setenv("KODELET_TEST_PROVIDER_KEY", "daemon-only-key")
@@ -834,7 +835,7 @@ KODELET_TEST_ACP_EXTENSION=1 exec %q -test.run '^TestDaemonACPSearchExtensionPro
 		"tool_mode":              "full",
 		"enable_fs_search_tools": true,
 		"allowed_tools":          []string{"file_read", "web_fetch", "grep_tool", "glob_tool", "code_search", "bash"},
-		"extensions":             map[string]any{"enabled": true},
+		"extensions":             map[string]any{"enabled": true, "discover_path": false},
 		"skills":                 map[string]any{"enabled": false},
 	}
 	if placement == "embedded" {
@@ -1005,7 +1006,10 @@ func testDaemonDelegation(t *testing.T, f *daemonRunFixture) {
 	// The parent hides read/search tools. Explicit ACP options must select them
 	// independently instead of inheriting the parent's presentation filters.
 	configPath := filepath.Join(f.workspace, "kodelet-config.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte("tool_mode: patch\n"), 0o600))
+	require.NoError(t, os.WriteFile(configPath, []byte(`tool_mode: patch
+extensions:
+  discover_path: false
+`), 0o600))
 	process := f.command(t, "run", "--result-only", "--profile=deep", "delegate code search")
 	var stdout, stderr bytes.Buffer
 	process.Stdout, process.Stderr = &stdout, &stderr

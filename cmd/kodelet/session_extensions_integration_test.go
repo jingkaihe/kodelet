@@ -71,6 +71,7 @@ func TestSessionExtensionsAcrossProcessBoundary(t *testing.T) {
 				},
 			})
 			viper.Set("extensions.enabled", true)
+			viper.Set("extensions.discover_path", false)
 			viper.Set("skills.enabled", false)
 			viper.Set("allowed_tools", []string{"sdk_echo"})
 			require.NoError(t, db.RunMigrations(ctx, migrations.All()))
@@ -83,7 +84,7 @@ func TestSessionExtensionsAcrossProcessBoundary(t *testing.T) {
 			}
 			settings := map[string]any{
 				"allowed_tools": []string{"sdk_echo"},
-				"extensions":    map[string]any{"enabled": true},
+				"extensions":    map[string]any{"enabled": true, "discover_path": false},
 				"skills":        map[string]any{"enabled": false},
 			}
 			if placement == "embedded" {

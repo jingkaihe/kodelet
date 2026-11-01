@@ -30,6 +30,15 @@ func TestWorkspaceInspectionAcrossRunnerPlacements(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 35*time.Second)
 			defer cancel()
 			root := t.TempDir()
+			pathBin := t.TempDir()
+			pathMarker := filepath.Join(root, "path-extension-started")
+			poison := fmt.Sprintf(`#!/bin/sh
+printf started > %q
+exit 73
+`, pathMarker)
+			require.NoError(t, os.WriteFile(filepath.Join(pathBin, "kodelet-extension-poison"), []byte(poison), 0o700))
+			t.Setenv("PATH", pathBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Cleanup(func() { assert.NoFileExists(t, pathMarker, "host PATH extensions must never execute") })
 			t.Setenv("HOME", root)
 			t.Setenv("KODELET_BASE_PATH", filepath.Join(root, "server-state"))
 			startup, workspace := filepath.Join(root, "startup"), filepath.Join(root, "selected")
@@ -66,7 +75,17 @@ KODELET_TEST_CHAT_EXTENSION=1 KODELET_TEST_INSPECTION_RECIPES=1 exec %q -test.ru
 			viper.Set("provider", "openai")
 			viper.Set("model", "gpt-4o")
 			viper.Set("extensions.enabled", true)
+			viper.Set("extensions.discover_path", false)
 			viper.Set("skills.enabled", false)
+			settings := map[string]any{
+				"extensions": map[string]any{"enabled": true, "discover_path": false},
+				"skills":     map[string]any{"enabled": false},
+			}
+			settingsData, err := json.Marshal(settings)
+			require.NoError(t, err)
+			for _, cwd := range []string{startup, workspace} {
+				require.NoError(t, os.WriteFile(filepath.Join(cwd, "kodelet-config.yaml"), settingsData, 0o600))
+			}
 			require.NoError(t, db.RunMigrations(ctx, migrations.All()))
 			config := &controlplane.ServerConfig{
 				Host:            "127.0.0.1",
@@ -77,7 +96,7 @@ KODELET_TEST_CHAT_EXTENSION=1 KODELET_TEST_INSPECTION_RECIPES=1 exec %q -test.ru
 			if placement == "embedded" {
 				store, err := localstate.NewStore()
 				require.NoError(t, err)
-				config.EmbeddedRunner = &controlplane.EmbeddedRunnerConfig{Workspace: startup, Store: store}
+				config.EmbeddedRunner = &controlplane.EmbeddedRunnerConfig{Workspace: startup, Settings: settings, Store: store}
 			}
 			frontend, err := webui.NewHandler()
 			require.NoError(t, err)

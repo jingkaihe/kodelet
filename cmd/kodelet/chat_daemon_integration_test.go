@@ -390,6 +390,7 @@ exit 1
 		"work": daemonTestModelProfile(provider.URL, "KODELET_TEST_CHAT_PROVIDER_KEY"),
 	})
 	viper.Set("extensions.enabled", true)
+	viper.Set("extensions.discover_path", false)
 	viper.Set("skills.enabled", false)
 	viper.Set("allowed_tools", []string{"pty_prompt", "pty_background"})
 	t.Setenv("KODELET_TEST_CHAT_PROVIDER_KEY", "daemon-only-pty-key")
@@ -397,7 +398,7 @@ exit 1
 	require.NoError(t, db.RunMigrations(ctx, migrations.All()))
 	settings := map[string]any{
 		"allowed_tools": []string{"pty_prompt", "pty_background"},
-		"extensions":    map[string]any{"enabled": true},
+		"extensions":    map[string]any{"enabled": true, "discover_path": false},
 		"skills":        map[string]any{"enabled": false},
 	}
 	settingsData, err := json.Marshal(settings)
