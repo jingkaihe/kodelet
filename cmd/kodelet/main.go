@@ -80,6 +80,7 @@ func init() {
 	viper.SetDefault("compact_ratio", llmtypes.DefaultCompactRatio)
 
 	viper.SetDefault("extensions.enabled", true)
+	viper.SetDefault("extensions.discover_path", true)
 	viper.SetDefault("extensions.global_dir", "~/.kodelet/extensions")
 	viper.SetDefault("extensions.local_dir", "./.kodelet/extensions")
 	viper.SetDefault("extensions.max_output_size", 102400)

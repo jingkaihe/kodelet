@@ -77,6 +77,7 @@ func assertEmbeddedConfigEnvironment(t *testing.T, config llmtypes.Config, cwd s
 	require.NoError(t, err)
 	assert.Equal(t, extensions.Config{
 		Enabled:       true,
+		DiscoverPath:  true,
 		Allow:         []string{"inspect", "format"},
 		Deny:          []string{"unsafe"},
 		GlobalDir:     filepath.Join(cwd, "global-extensions"),

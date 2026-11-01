@@ -26,6 +26,7 @@ func TestLoadConfigFromViperLoadsExtensionConfig(t *testing.T) {
 	viper.Reset()
 	viper.Set("extensions", map[string]any{
 		"enabled":         false,
+		"discover_path":   false,
 		"local_dir":       "./local-ext",
 		"global_dir":      "~/global-ext",
 		"timeout":         "1s",
@@ -46,6 +47,7 @@ func TestLoadConfigFromViperLoadsExtensionConfig(t *testing.T) {
 	config := LoadConfigFromViper()
 
 	assert.False(t, config.Enabled)
+	assert.False(t, config.DiscoverPath)
 	assert.Equal(t, "./local-ext", config.LocalDir)
 	assert.Equal(t, "~/global-ext", config.GlobalDir)
 	assert.Equal(t, 2048, config.MaxOutputSize)

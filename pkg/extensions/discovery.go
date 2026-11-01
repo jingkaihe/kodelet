@@ -21,6 +21,7 @@ const (
 	SourceKindLocalPlugin      SourceKind = "local_plugin"
 	SourceKindGlobalStandalone SourceKind = "global_standalone"
 	SourceKindGlobalPlugin     SourceKind = "global_plugin"
+	SourceKindPath             SourceKind = "path"
 	SourceKindSession          SourceKind = "session"
 )
 
@@ -118,6 +119,20 @@ func (d *Discovery) defaultRoots() ([]Root, error) {
 	roots = append(roots, pluginExtensionRoots(normalizePath(filepath.Join(".kodelet", "plugins"), d.workingDir), SourceKindLocalPlugin)...)
 	roots = append(roots, Root{Dir: d.config.GlobalDir, Kind: SourceKindGlobalStandalone})
 	roots = append(roots, pluginExtensionRoots(filepath.Join(homeDir, ".kodelet", "plugins"), SourceKindGlobalPlugin)...)
+	if d.config.DiscoverPath {
+		seen := map[string]bool{}
+		for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+			// Automatic discovery must not implicitly trust the current directory.
+			if !filepath.IsAbs(dir) {
+				continue
+			}
+			dir = filepath.Clean(dir)
+			if !seen[dir] {
+				roots = append(roots, Root{Dir: dir, Kind: SourceKindPath})
+				seen[dir] = true
+			}
+		}
+	}
 	return roots, nil
 }
 
@@ -157,7 +172,7 @@ func (d *Discovery) Discover() ([]Extension, error) {
 	for _, root := range d.roots {
 		extensions, err := d.discoverRoot(root)
 		if err != nil {
-			if os.IsNotExist(errors.Cause(err)) {
+			if root.Kind == SourceKindPath || os.IsNotExist(errors.Cause(err)) {
 				continue
 			}
 			return nil, err
@@ -165,6 +180,11 @@ func (d *Discovery) Discover() ([]Extension, error) {
 		for _, ext := range extensions {
 			if _, ok := seen[ext.ID]; ok {
 				continue
+			}
+			if ext.Kind == SourceKindPath {
+				// Do not fall back to a shadowed PATH executable when policy
+				// denies the first match.
+				seen[ext.ID] = struct{}{}
 			}
 			if denyMatcher.matches(ext) || !allowMatcher.allows(ext) {
 				continue
@@ -178,7 +198,10 @@ func (d *Discovery) Discover() ([]Extension, error) {
 }
 
 func (d *Discovery) discoverRoot(root Root) ([]Extension, error) {
-	rootDir := normalizePath(root.Dir, d.workingDir)
+	rootDir := root.Dir
+	if root.Kind != SourceKindPath {
+		rootDir = normalizePath(root.Dir, d.workingDir)
+	}
 	entries, err := os.ReadDir(rootDir)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to read extension root %s", rootDir)
@@ -186,16 +209,17 @@ func (d *Discovery) discoverRoot(root Root) ([]Extension, error) {
 
 	var extensions []Extension
 	for _, entry := range entries {
-		entryPath := filepath.Join(rootDir, entry.Name())
-		if entry.IsDir() {
-			nested, err := discoverNestedExtension(root, rootDir, entry.Name(), entryPath)
-			if err == nil {
-				extensions = append(extensions, nested)
-			}
+		// PATH contains only direct extensions, not the SDK's module launcher.
+		if root.Kind == SourceKindPath && (entry.IsDir() || entry.Name() == "kodelet-extension-node") {
 			continue
 		}
-
-		ext, err := discoverDirectExtension(root, rootDir, entry.Name(), entryPath)
+		entryPath := filepath.Join(rootDir, entry.Name())
+		var ext Extension
+		if entry.IsDir() {
+			ext, err = discoverNestedExtension(root, rootDir, entry.Name(), entryPath)
+		} else {
+			ext, err = discoverDirectExtension(root, rootDir, entry.Name(), entryPath)
+		}
 		if err == nil {
 			extensions = append(extensions, ext)
 		}
@@ -205,7 +229,7 @@ func (d *Discovery) discoverRoot(root Root) ([]Extension, error) {
 }
 
 func discoverDirectExtension(root Root, rootDir, name, path string) (Extension, error) {
-	if !strings.HasPrefix(name, extensionExecutablePrefix) {
+	if !strings.HasPrefix(name, extensionExecutablePrefix) || name == extensionExecutablePrefix {
 		return Extension{}, errors.New("not an extension executable")
 	}
 	if !isExecutable(path) {
@@ -253,7 +277,7 @@ func buildExtension(root Root, rootDir, extDir, execPath, name string) Extension
 
 func isExecutable(path string) bool {
 	info, err := os.Stat(path)
-	if err != nil || info.IsDir() {
+	if err != nil || !info.Mode().IsRegular() {
 		return false
 	}
 	return plugins.IsExecutableFile(fileInfoDirEntry{info: info})

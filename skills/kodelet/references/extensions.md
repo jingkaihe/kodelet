@@ -180,6 +180,10 @@ Within each root, both forms are supported:
 
 The executable filename must be `kodelet-extension-xxx`. Kodelet derives the extension ID/name as `xxx` for a direct executable, or as the parent directory name for a nested executable. Plugin extension IDs are addressed as `org@repo/extension`; standalone extensions are matched by directory or executable path in allow/deny config.
 
+PATH discovery is enabled by default; set `extensions.discover_path: false` to opt out. Kodelet scans direct entries in absolute directories on the selected runner's `PATH`, after the existing roots. Executable symlinks are supported. Empty or relative PATH entries, missing or unreadable directories, subdirectories, empty extension names, and the SDK launcher `kodelet-extension-node` are skipped.
+
+PATH extensions have source `path` and use the filename suffix as their ID. Existing roots take priority for the same ID; within PATH, the first executable wins, even if policy excludes it. Allow/deny rules match absolute executable or directory paths and apply before execution. Discovery automatically starts eligible extensions when the runtime loads, so use a trusted PATH or an allowlist, or disable PATH discovery. Executables must implement the extension protocol. They start in the directory containing the discovered executable, with the workspace supplied through initialization and `KODELET_EXTENSION_WORKSPACE_CWD`.
+
 Inspect installation paths in the selected workspace. These commands contact the runner without starting extensions:
 
 ```bash
@@ -196,6 +200,7 @@ extensions:
   enabled: true
   global_dir: ~/.kodelet/extensions
   local_dir: ./.kodelet/extensions
+  discover_path: true
   max_output_size: 102400
 
   allow:
@@ -220,6 +225,7 @@ extensions:
 Config semantics:
 
 - `enabled`: disables all extension discovery and execution when false.
+- `discover_path`: also discovers extension executables on the runner's PATH when true; enabled by default.
 - `global_dir` / `local_dir`: standalone extension roots.
 - `max_output_size`: maximum assistant-facing extension tool output.
 - `allow` / `deny`: extension allow/deny lists; deny wins when both match.

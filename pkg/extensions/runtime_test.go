@@ -91,10 +91,12 @@ func TestRuntimeExtensionCountUsesInitializedProcessesNotRegistrations(t *testin
 	assert.Zero(t, runtime.ExtensionCount())
 }
 
-func TestRuntimePassesWorkingDirToExtensionProcessEnvironment(t *testing.T) {
+func TestRuntimePassesWorkingDirToPATHExtensionProcessEnvironment(t *testing.T) {
 	rootDir := t.TempDir()
 	extDir := filepath.Join(rootDir, "env")
 	writeExecutable(t, filepath.Join(extDir, "kodelet-extension-env"), helperEnvExtensionScript(t))
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", extDir)
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	t.Setenv(workspaceCWDEnvKey, "/stale/workspace")
 
@@ -102,10 +104,10 @@ func TestRuntimePassesWorkingDirToExtensionProcessEnvironment(t *testing.T) {
 		context.Background(),
 		WithConfig(DefaultConfig()),
 		WithWorkingDir(rootDir),
-		WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone}),
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, runtime.Close()) })
+	require.NoError(t, runtime.InitializationError())
 
 	tools := runtime.Tools()
 	require.Len(t, tools, 1)

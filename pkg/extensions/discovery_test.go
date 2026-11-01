@@ -1,8 +1,10 @@
 package extensions
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -115,7 +117,94 @@ func TestDiscoveryDisabledConfigSkipsDiscovery(t *testing.T) {
 	assert.Empty(t, discovered)
 }
 
+func TestDiscoveryPATHFiltersEntriesWithoutExecuting(t *testing.T) {
+	workingDir := t.TempDir()
+	binDir := filepath.Join(t.TempDir(), "bin with spaces ")
+	t.Chdir(workingDir)
+	t.Setenv("HOME", t.TempDir())
+	marker := filepath.Join(workingDir, "executed")
+	script := fmt.Sprintf(`#!/bin/sh
+echo executed > %q
+`, marker)
+	target := writeExecutable(t, filepath.Join(workingDir, "weather"), script)
+	link := filepath.Join(binDir, "kodelet-extension-weather")
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
+	require.NoError(t, os.Symlink(target, link))
+	require.NoError(t, os.Symlink(filepath.Join(workingDir, "missing"), filepath.Join(binDir, "kodelet-extension-broken")))
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, "kodelet-extension-disabled"), []byte(script), 0o644))
+	for _, name := range []string{"kodelet-extension-", "kodelet-extension-node", "other-command"} {
+		writeExecutable(t, filepath.Join(binDir, name), script)
+	}
+	writeExecutable(t, filepath.Join(binDir, "nested", "kodelet-extension-nested"), script)
+	writeExecutable(t, filepath.Join(workingDir, "kodelet-extension-cwd"), script)
+	writeExecutable(t, filepath.Join(workingDir, "relative", "kodelet-extension-relative"), script)
+	t.Setenv("PATH", strings.Join([]string{
+		"", ".", "relative", filepath.Join(workingDir, "missing"), target, binDir, binDir,
+	}, string(os.PathListSeparator)))
+
+	discovery, err := NewDiscovery(WithWorkingDir(workingDir))
+	require.NoError(t, err)
+	discovered, err := discovery.Discover()
+	require.NoError(t, err)
+	require.Len(t, discovered, 1)
+	assert.Equal(t, "weather", discovered[0].ID)
+	assert.Equal(t, SourceKindPath, discovered[0].Kind)
+	assert.Equal(t, normalizePath(link, ""), discovered[0].ExecPath)
+	assert.Equal(t, filepath.Dir(discovered[0].ExecPath), discovered[0].Dir)
+	assert.NoFileExists(t, marker)
+}
+
+func TestDiscoveryPATHPrecedenceAndConfig(t *testing.T) {
+	workingDir := t.TempDir()
+	firstDir := t.TempDir()
+	secondDir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", firstDir+string(os.PathListSeparator)+secondDir)
+	const script = `#!/bin/sh
+exit 0
+`
+	local := writeExecutable(t, filepath.Join(workingDir, ".kodelet", "extensions", "kodelet-extension-local"), script)
+	writeExecutable(t, filepath.Join(firstDir, "kodelet-extension-local"), script)
+	first := writeExecutable(t, filepath.Join(firstDir, "kodelet-extension-weather"), script)
+	second := writeExecutable(t, filepath.Join(secondDir, "kodelet-extension-weather"), script)
+
+	for _, tc := range []struct {
+		name        string
+		disablePath bool
+		disabled    bool
+		allow       []string
+		deny        []string
+		want        []string
+	}{
+		{name: "default root and PATH order", want: []string{local, first}},
+		{name: "PATH disabled", disablePath: true, want: []string{local}},
+		{name: "extensions disabled", disabled: true},
+		{name: "deny does not select shadowed executable", deny: []string{first}, want: []string{local}},
+		{name: "allow does not select shadowed executable", allow: []string{second}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := DefaultConfig()
+			if tc.disablePath {
+				config.DiscoverPath = false
+			}
+			config.Enabled = !tc.disabled
+			config.Allow = tc.allow
+			config.Deny = tc.deny
+			discovery, err := NewDiscovery(WithConfig(config), WithWorkingDir(workingDir))
+			require.NoError(t, err)
+			discovered, err := discovery.Discover()
+			require.NoError(t, err)
+			var paths []string
+			for _, ext := range discovered {
+				paths = append(paths, ext.ExecPath)
+			}
+			assert.Equal(t, tc.want, paths)
+		})
+	}
+}
+
 func TestDefaultRootsIncludeStandaloneAndPluginRoots(t *testing.T) {
+	t.Setenv("PATH", "")
 	workingDir := t.TempDir()
 	originalWD, err := os.Getwd()
 	require.NoError(t, err)
@@ -143,6 +232,7 @@ func TestDefaultRootsIncludeStandaloneAndPluginRoots(t *testing.T) {
 }
 
 func TestDefaultRootsResolveLocalPluginsAgainstWorkingDir(t *testing.T) {
+	t.Setenv("PATH", "")
 	processDir := t.TempDir()
 	workingDir := t.TempDir()
 	originalWD, err := os.Getwd()

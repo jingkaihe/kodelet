@@ -19,6 +19,7 @@ type ToolConfig struct {
 // Config contains extension runtime configuration.
 type Config struct {
 	Enabled       bool                  `mapstructure:"enabled" json:"enabled" yaml:"enabled"`
+	DiscoverPath  bool                  `mapstructure:"discover_path" json:"discover_path" yaml:"discover_path"`
 	GlobalDir     string                `mapstructure:"global_dir" json:"global_dir" yaml:"global_dir"`
 	LocalDir      string                `mapstructure:"local_dir" json:"local_dir" yaml:"local_dir"`
 	MaxOutputSize int                   `mapstructure:"max_output_size" json:"max_output_size" yaml:"max_output_size"`
@@ -31,6 +32,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		Enabled:       true,
+		DiscoverPath:  true,
 		GlobalDir:     "~/.kodelet/extensions",
 		LocalDir:      "./.kodelet/extensions",
 		MaxOutputSize: 102400,
