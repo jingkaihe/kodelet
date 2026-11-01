@@ -184,6 +184,8 @@ PATH discovery is enabled by default; set `extensions.discover_path: false` to o
 
 PATH extensions have source `path` and use the filename suffix as their ID. Existing roots take priority for the same ID; within PATH, the first executable wins, even if policy excludes it. Allow/deny rules match absolute executable or directory paths and apply before execution. Discovery automatically starts eligible extensions when the runtime loads, so use a trusted PATH or an allowlist, or disable PATH discovery. Executables must implement the extension protocol. They start in the directory containing the discovered executable, with the workspace supplied through initialization and `KODELET_EXTENSION_WORKSPACE_CWD`.
 
+Absolute PATH entries are not necessarily trusted: `npm run`/`npx` can add a project's `node_modules/.bin`, and mise or direnv can add project-controlled directories. Matching executables there are eligible to start automatically, including executables installed by project dependencies.
+
 Inspect installation paths in the selected workspace. These commands contact the runner without starting extensions:
 
 ```bash
