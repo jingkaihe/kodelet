@@ -2,17 +2,15 @@
 
 ## 0.8.19-beta
 
-Added the [Go SDK](sdk/go/README.md) at `github.com/jingkaihe/kodelet/sdk/go` for daemon-backed agent sessions, streaming, steering, inline extensions, and standalone extension executables. It includes schemas inferred from Go types, typed lifecycle events, UI helpers, an in-memory test host, and task progress snapshots. Requires Go 1.24+ on Linux or macOS.
+Added a [Go SDK](sdk/go/README.md) for agent sessions and extensions, with streaming, steering, inferred schemas, and task progress. Requires Go 1.24+.
 
-Moved the TypeScript SDK from `sdk/` to `sdk/typescript/`; the npm package remains `kodelet`. Updated build, test, and release workflows for the new layout and added Go SDK lint, tests, and process-boundary acceptance coverage.
+Moved the TypeScript SDK to `sdk/typescript/`; the npm package remains `kodelet`.
 
-Enabled automatic discovery of `kodelet-extension-<name>` executables in absolute directories on the runner's PATH. Existing extension roots take priority, and `kodelet-extension-node` is excluded. PATH extensions may start when the runtime loads; trust those directories, restrict discovery with absolute paths in extension allow/deny rules, or set `extensions.discover_path: false` to opt out.
+Enabled automatic discovery of `kodelet-extension-<name>` executables on the runner's PATH. Use trusted PATH directories or disable discovery with `extensions.discover_path: false`.
 
-MCP now runs in the native Go `kodelet-extension-mcp` executable, included in RPM/DEB packages, standalone installs, and Docker images and discovered on the runner's PATH. The TypeScript SDK no longer contains the MCP adapter, `kodelet-mcp-install`, or the npm postinstall hook. Node.js is no longer required for the bridge; servers launched through `node` or `npx` still need it.
+Replaced the npm MCP adapter with native `kodelet-extension-mcp`, bundled in RPM/DEB packages, standalone installs, and Docker images. The bridge no longer requires Node.js; Node-based MCP servers still do.
 
-MCP servers initialize concurrently with bounded startup time, preserving tools from healthy servers when another fails. Interactive OAuth logins are serialized within each extension process to avoid overlapping browser prompts and callback-port conflicts.
-
-**MCP migration:** After installing the native extension, remove the old generated plugin wrapper with `rm -rf "$HOME/.kodelet/plugins/kodelet@mcp"`. Keep `~/.kodelet/mcp.json`, workspace `mcp.json` files, and `~/.kodelet/mcp/oauth/`. The extension ID changes from `kodelet@mcp/mcp` to `mcp`; update extension allow/deny entries to use the absolute native executable path, such as `/usr/bin/kodelet-extension-mcp`. Restart or reload sessions, then verify with `kodelet extension inspect mcp`. When an eligible native `mcp` extension is discovered on PATH, Kodelet skips the legacy `kodelet@mcp/mcp` plugin with a migration warning to prevent duplicate tool registrations; removing the old wrapper is still recommended. The legacy plugin remains eligible if the PATH replacement is absent, excluded by allow/deny rules, shadowed by an existing-root extension, or PATH discovery is disabled. This safeguard applies only to the native PATH replacement, not arbitrary MCP installations. If your Homebrew formula does not yet include the binary, install the matching `kodelet-extension-mcp-<os>-<arch>` release asset on PATH. See the [MCP guide](docs/mcp.md).
+**MCP migration:** Install the native extension, remove the old `~/.kodelet/plugins/kodelet@mcp` wrapper, and update MCP entries in extension allow/deny rules to the absolute executable path of `kodelet-extension-mcp`. Keep existing MCP configuration and OAuth credentials. Restart or reload sessions, then verify with `kodelet extension inspect mcp`. See the [MCP guide](docs/mcp.md) for details and Homebrew installation.
 
 ## 0.8.18-beta
 
