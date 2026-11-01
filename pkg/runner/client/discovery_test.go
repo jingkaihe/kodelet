@@ -83,7 +83,10 @@ func TestRunnerDirectoryHintsResolveOnRunnerHost(t *testing.T) {
 func TestRunnerDiscoveryRestrictionsPreventExtensionStartup(t *testing.T) {
 	service, workspace := newBackgroundTestService(t, "profiles")
 	service.configLoader = func(string) (llmtypes.Config, error) {
-		return llmtypes.Config{Skills: &llmtypes.SkillsConfig{Enabled: true}}, nil
+		return llmtypes.Config{
+			Skills:            &llmtypes.SkillsConfig{Enabled: true},
+			ExtensionSettings: map[string]any{"discover_path": false},
+		}, nil
 	}
 	skillDirectory := filepath.Join(workspace, ".kodelet", "skills", "local-skill")
 	require.NoError(t, os.MkdirAll(skillDirectory, 0o700))

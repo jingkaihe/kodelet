@@ -39,7 +39,10 @@ func newBackgroundTestService(t *testing.T, mode string) (*Service, string) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "kodelet-extension-lifetime"), []byte(script), 0o700))
 	service, err := NewService(t.Context(), workspace, ServiceOptions{
 		ConfigLoader: func(string) (llmtypes.Config, error) {
-			return llmtypes.Config{Skills: &llmtypes.SkillsConfig{Enabled: false}}, nil
+			return llmtypes.Config{
+				Skills:            &llmtypes.SkillsConfig{Enabled: false},
+				ExtensionSettings: map[string]any{"discover_path": false},
+			}, nil
 		},
 	})
 	require.NoError(t, err)
@@ -425,7 +428,7 @@ func TestBackgroundRetainedSettingsRequireExplicitRelease(t *testing.T) {
 	resources := service.backgrounds["conversation"]
 	require.NoError(t, service.closeRun(t.Context(), "one"))
 	service.configLoader = func(string) (llmtypes.Config, error) {
-		return llmtypes.Config{ExtensionSettings: map[string]any{"deny": []string{"lifetime"}}}, nil
+		return llmtypes.Config{ExtensionSettings: map[string]any{"discover_path": false, "deny": []string{"lifetime"}}}, nil
 	}
 	_, err = service.openRun(t.Context(), protocol.RunOpenParams{RunID: "changed", ConversationID: "conversation"})
 	require.ErrorContains(t, err, "release background leases first")

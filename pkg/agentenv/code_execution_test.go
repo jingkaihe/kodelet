@@ -117,8 +117,10 @@ func TestCodeExecutionArtifactSelectionSurvivesHooksSaveAndRestart(t *testing.T)
 	workspace := t.TempDir()
 	manager := extensions.NewRuntimeManager()
 	t.Cleanup(func() { require.NoError(t, manager.Close()) })
+	config := extensions.DefaultConfig()
+	config.DiscoverPath = false
 	runtime, release, err := manager.RuntimeWithAttachmentsForIsolatedLease(
-		t.Context(), t.Context(), workspace, extensions.DefaultConfig(), extensions.ExtensionCallContext{},
+		t.Context(), t.Context(), workspace, config, extensions.ExtensionCallContext{},
 		[]extensions.Attachment{{ID: "prune", Transport: local}},
 	)
 	require.NoError(t, err)

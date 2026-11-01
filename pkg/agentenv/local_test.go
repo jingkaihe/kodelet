@@ -455,8 +455,10 @@ func TestLocalEnvironmentCloseWithOutcome(t *testing.T) {
 	}()
 	manager := extensions.NewRuntimeManager()
 	t.Cleanup(func() { require.NoError(t, manager.Close()) })
+	config := extensions.DefaultConfig()
+	config.DiscoverPath = false
 	runtime, release, err := manager.RuntimeWithAttachmentsForIsolatedLease(
-		t.Context(), t.Context(), workspace, extensions.DefaultConfig(), extensions.ExtensionCallContext{},
+		t.Context(), t.Context(), workspace, config, extensions.ExtensionCallContext{},
 		[]extensions.Attachment{{ID: "lifecycle", Transport: local}},
 	)
 	require.NoError(t, err)

@@ -130,6 +130,11 @@ func newSessionTestService(t *testing.T, config llmtypes.Config) (*Service, *ses
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	config = config.Clone()
+	if config.ExtensionSettings == nil {
+		config.ExtensionSettings = map[string]any{}
+	}
+	config.ExtensionSettings["discover_path"] = false
 	service := newRegisteredTestService(t, t.TempDir(), ServiceOptions{
 		ConfigLoader: func(string) (llmtypes.Config, error) { return config, nil },
 	})

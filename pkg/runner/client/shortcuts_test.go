@@ -73,7 +73,10 @@ func TestRunnerShortcutDiscoveryMatchesIdleRunWithTools(t *testing.T) {
 	require.NoError(t, err)
 	script := fmt.Sprintf("#!/bin/sh\nKODELET_RUNNER_SHORTCUT_HELPER=1 exec %q -test.run '^TestRunnerShortcutHelper$'\n", executable)
 	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kodelet", "extensions", "kodelet-extension-shortcut"), []byte(script), 0o700))
-	loader, err := NewEmbeddedConfigLoader(map[string]any{"skills": map[string]any{"enabled": false}}, nil)
+	loader, err := NewEmbeddedConfigLoader(map[string]any{
+		"skills":     map[string]any{"enabled": false},
+		"extensions": map[string]any{"discover_path": false},
+	}, nil)
 	require.NoError(t, err)
 	service.profileConfigLoader = loader
 	probe, err := service.ProbeManifestForCWD(t.Context(), workspace, "")

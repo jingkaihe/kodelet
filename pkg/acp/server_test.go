@@ -744,6 +744,7 @@ func TestServer_Shutdown_WithUnavailableStorage(t *testing.T) {
 }
 
 func TestServer_SessionSteeringReturnsPromptRequiredWhenIdleAndQueuesDuringPrompt(t *testing.T) {
+	restoreViperExtensionsForTest(t)
 	basePath := t.TempDir()
 	t.Setenv("KODELET_BASE_PATH", basePath)
 	require.NoError(t, db.RunMigrations(context.Background(), migrations.All()))
@@ -1121,6 +1122,7 @@ func TestServer_ExtensionRespondCommandBypassesAgent(t *testing.T) {
 }
 
 func TestServer_RenameCommandPersistsWithoutCallingAgent(t *testing.T) {
+	restoreViperExtensionsForTest(t)
 	basePath := t.TempDir()
 	t.Setenv("KODELET_BASE_PATH", basePath)
 	sqlDB, err := db.Open(context.Background(), filepath.Join(basePath, "storage.db"))
@@ -1511,6 +1513,7 @@ func restoreViperExtensionsForTest(t *testing.T) {
 	})
 	viper.Reset()
 	viper.Set("extensions.enabled", true)
+	viper.Set("extensions.discover_path", false)
 	viper.Set("extensions.local_dir", "./.kodelet/extensions")
 	viper.Set("extensions.global_dir", filepath.Join(t.TempDir(), "global-extensions"))
 	viper.Set("extensions.max_output_size", 102400)
