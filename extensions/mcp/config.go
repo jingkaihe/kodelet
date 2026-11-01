@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -49,7 +50,7 @@ func workspaceCWD() (string, error) {
 }
 
 func loadConfig(cwd string) (mcpConfig, error) {
-	var config mcpConfig
+	config := mcpConfig{Servers: map[string]serverConfig{}}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return config, errors.Wrap(err, "resolve home directory")
@@ -62,10 +63,14 @@ func loadConfig(cwd string) (mcpConfig, error) {
 		if err != nil {
 			return config, errors.Wrapf(err, "read MCP config %s", path)
 		}
-		// JSON decoding merges OAuth fields and replaces servers by name.
-		if err := json.Unmarshal(data, &config); err != nil {
+		// Inherit OAuth fields, but merge only actual server entries: a missing
+		// or null server map must not erase servers from an earlier file.
+		fileConfig := mcpConfig{OAuth: config.OAuth}
+		if err := json.Unmarshal(data, &fileConfig); err != nil {
 			return config, errors.Wrapf(err, "decode MCP config %s", path)
 		}
+		config.OAuth = fileConfig.OAuth
+		maps.Copy(config.Servers, fileConfig.Servers)
 	}
 	return config, nil
 }

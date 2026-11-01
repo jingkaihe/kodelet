@@ -224,6 +224,18 @@ func TestLoadConfig(t *testing.T) {
 	assert.False(t, *config.OAuth.OpenBrowser)
 	assert.Equal(t, []string{"global"}, config.OAuth.Scopes)
 
+	for _, local := range []string{
+		`{}`, `{"mcpServers": null}`, `{"mcpServers": {}}`,
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(cwd, "mcp.json"), []byte(local), 0o600))
+		config, err = loadConfig(cwd)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]serverConfig{
+			"global": {Command: "global"}, "override": {Command: "old"},
+		}, config.Servers, "empty local configuration preserves global servers")
+		assert.Equal(t, "never", config.OAuth.Interactive)
+	}
+
 	// Malformed user config is an error, not an empty installation.
 	require.NoError(t, os.WriteFile(filepath.Join(cwd, "mcp.json"), []byte(`{`), 0o600))
 	_, err = loadConfig(cwd)

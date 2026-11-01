@@ -44,6 +44,8 @@ The extension reads MCP server configuration from JSON files, not from Kodelet's
 
 Both files use the standard `mcpServers` shape. The repository-local file overrides global servers by server name. See the [FastMCP MCP JSON configuration reference](https://gofastmcp.com/integrations/mcp-json-configuration) for the common `mcpServers` format.
 
+A missing, empty, or null `mcpServers` map contributes no overrides; it does not clear globally configured servers.
+
 Example:
 
 ```json
