@@ -39,7 +39,7 @@ func run(ctx context.Context) error {
 		return err
 	}
 	ext := extension.New(extension.Metadata{Name: "kodelet-mcp", Version: version})
-	closeServers := registerMCP(ctx, ext, config, cwd)
+	closeServers := registerMCP(ctx, ext, config, cwd, serverStartupTimeout)
 	defer closeServers()
 	return ext.Run(ctx)
 }

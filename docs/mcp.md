@@ -35,6 +35,8 @@ Upgrade the extension together with Kodelet. Restart or reload running sessions 
 
 ## Configuration
 
+Servers initialize concurrently, with a 150-second budget per server for connecting, OAuth authorization, and tool discovery. Listing tools is additionally limited to 30 seconds. A server that fails or exceeds these limits is skipped without discarding tools from healthy servers. Successful connections remain open after startup; tool calls retain their separate 10-minute timeout.
+
 The extension reads MCP server configuration from JSON files, not from Kodelet's core `config.yaml` or `kodelet-config.yaml`:
 
 1. `~/.kodelet/mcp.json`
@@ -126,6 +128,8 @@ String values support `$VAR` and `${VAR}` environment expansion.
 To force reauthorization for a server, remove its cached credentials from `~/.kodelet/mcp/oauth/`.
 
 Device-code OAuth is not implemented. Browser authorization runs on the runner; a remote or headless runner may need manual browser access or port forwarding for its loopback callback.
+
+During startup, browser authorization must finish within the server's remaining 150-second startup budget (and the shorter tool-listing timeout if challenged while listing tools). Setting `callback_timeout` higher does not extend these limits. This leaves time to report healthy servers before Kodelet's three-minute extension initialization deadline.
 
 OAuth endpoints must use HTTPS, except for HTTP loopback endpoints used for local development. Callback URLs must be HTTP loopback URLs. MCP redirects and SSE message endpoints must stay on the configured server's origin.
 

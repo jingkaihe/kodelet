@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -88,7 +89,7 @@ func TestBridgeTransports(t *testing.T) {
 			ext := extension.New(extension.Metadata{Name: "mcp"})
 			closeServers := registerMCP(t.Context(), ext, mcpConfig{Servers: map[string]serverConfig{
 				"fixture": config, "broken": {Type: "invalid"},
-			}}, cwd)
+			}}, cwd, serverStartupTimeout)
 			t.Cleanup(closeServers)
 			host := extensiontest.New(ext, nil)
 			t.Cleanup(host.Close)
@@ -121,6 +122,69 @@ func TestBridgeTransports(t *testing.T) {
 			closeServers() // Session-end and process cleanup are idempotent.
 		})
 	}
+}
+
+func TestStartupRetainsHealthyServersWhenOthersStall(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	config := mcpConfig{Servers: map[string]serverConfig{}}
+	var started sync.WaitGroup
+	started.Add(3)
+	allStarted := make(chan struct{})
+	go func() { started.Wait(); close(allStarted) }()
+	release := make(chan struct{})
+	defer close(release)
+	for _, fixture := range []struct{ name, stall string }{
+		{"a-connect", "initialize"}, {"b-list", "tools/list"}, {"healthy", ""},
+	} {
+		server := testServer()
+		server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+			return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+				if method == fixture.stall || (fixture.stall == "" && method == "initialize") {
+					started.Done()
+					select {
+					case <-allStarted:
+					case <-ctx.Done():
+						t.Error("all servers must start before any startup deadline expires")
+						return nil, ctx.Err()
+					case <-release:
+						return nil, context.Canceled
+					}
+					if fixture.stall != "" {
+						select {
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						case <-release:
+							return nil, context.Canceled
+						}
+					}
+				}
+				return next(ctx, method, req)
+			}
+		})
+		getServer := func(*http.Request) *mcp.Server { return server }
+		var handler http.Handler = mcp.NewStreamableHTTPHandler(getServer, nil)
+		kind := "http"
+		if fixture.stall != "initialize" {
+			kind = "sse"
+			handler = mcp.NewSSEHandler(getServer, nil)
+		}
+		httpServer := httptest.NewServer(handler)
+		t.Cleanup(httpServer.Close)
+		config.Servers[fixture.name] = serverConfig{Type: kind, URL: httpServer.URL, ToolWhiteList: []string{"echo"}}
+	}
+	ext := extension.New(extension.Metadata{Name: "mcp"})
+	closeServers := registerMCP(t.Context(), ext, config, t.TempDir(), time.Second)
+	t.Cleanup(closeServers)
+	host := extensiontest.New(ext, nil)
+	t.Cleanup(host.Close)
+	registration, err := host.Initialize(t.Context(), nil)
+	require.NoError(t, err)
+	require.Len(t, registration.Tools, 1)
+	assert.Equal(t, "mcp__healthy_echo", registration.Tools[0].Name)
+	result, err := host.ExecuteTool(t.Context(), "mcp__healthy_echo", map[string]any{})
+	require.NoError(t, err, "the healthy SSE connection must outlive its startup deadline")
+	assert.Empty(t, result.Error)
+	assert.Equal(t, "echo[image:image/png]", result.Content)
 }
 
 func TestLoadConfig(t *testing.T) {

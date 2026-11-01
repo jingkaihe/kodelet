@@ -19,30 +19,76 @@ import (
 	"github.com/pkg/errors"
 )
 
-const toolTimeout = 10 * time.Minute
+const (
+	toolTimeout          = 10 * time.Minute
+	serverStartupTimeout = 150 * time.Second
+	listToolsTimeout     = 30 * time.Second
+)
 
-func registerMCP(ctx context.Context, ext *extension.Extension, config mcpConfig, cwd string) func() {
+func registerMCP(ctx context.Context, ext *extension.Extension, config mcpConfig, cwd string, startupTimeout time.Duration) func() {
+	names := slices.Sorted(maps.Keys(config.Servers))
+	initialized := make([]struct {
+		session *mcp.ClientSession
+		tools   []*mcp.Tool
+		close   func()
+	}, len(names))
+	var group sync.WaitGroup
+	for i, name := range names {
+		group.Go(func() {
+			startupCtx, cancelStartup := context.WithTimeout(ctx, startupTimeout)
+			defer cancelStartup()
+			serverCtx, cancelServer := context.WithCancel(ctx)
+			// SSE retains the connection context. Detach the startup deadline
+			// after initialization so a healthy connection remains usable.
+			stop := context.AfterFunc(startupCtx, cancelServer)
+			defer stop()
+			server := config.Servers[name]
+			session, closeServer, err := connectServer(serverCtx, name, server, config.OAuth, cwd)
+			if err != nil {
+				cancelServer()
+				slog.Warn("failed to initialize MCP server", "server", name, "error", err)
+				return
+			}
+			var tools []*mcp.Tool
+			listCtx, cancelList := context.WithTimeout(startupCtx, listToolsTimeout)
+			for tool, listErr := range session.Tools(listCtx, nil) {
+				if listErr != nil {
+					err = listErr
+					break
+				}
+				if len(server.ToolWhiteList) == 0 || slices.Contains(server.ToolWhiteList, tool.Name) {
+					tools = append(tools, tool)
+				}
+			}
+			cancelList()
+			stop()
+			if err == nil {
+				err = startupCtx.Err()
+			}
+			if err != nil {
+				cancelServer()
+				closeServer()
+				slog.Warn("failed to list MCP tools", "server", name, "error", err)
+				return
+			}
+			initialized[i].session = session
+			initialized[i].tools = tools
+			initialized[i].close = func() {
+				defer cancelServer()
+				closeServer()
+			}
+		})
+	}
+	group.Wait()
 	var closers []func()
-	for _, name := range slices.Sorted(maps.Keys(config.Servers)) {
-		server := config.Servers[name]
-		session, closeServer, err := connectServer(ctx, name, server, config.OAuth, cwd)
-		if err != nil {
-			slog.Warn("failed to initialize MCP server", "server", name, "error", err)
+	for i, server := range initialized {
+		if server.session == nil {
 			continue
 		}
-		closers = append(closers, closeServer)
-		listCtx, cancel := context.WithTimeout(ctx, toolTimeout)
-		for tool, err := range session.Tools(listCtx, nil) {
-			if err != nil {
-				slog.Warn("failed to list MCP tools", "server", name, "error", err)
-				break
-			}
-			if len(server.ToolWhiteList) > 0 && !slices.Contains(server.ToolWhiteList, tool.Name) {
-				continue
-			}
-			registerTool(ext, session, name, tool)
+		closers = append(closers, server.close)
+		for _, tool := range server.tools {
+			registerTool(ext, server.session, names[i], tool)
 		}
-		cancel()
 	}
 	closeServers := sync.OnceFunc(func() {
 		var group sync.WaitGroup
@@ -64,10 +110,6 @@ func connectServer(ctx context.Context, name string, config serverConfig, global
 		return nil, nil, err
 	}
 	serverCtx, cancel := context.WithCancel(ctx)
-	// SSE keeps the connection context after initialization. Stop the startup
-	// timer, rather than canceling that context when Connect returns.
-	timer := time.AfterFunc(3*time.Minute, cancel)
-	defer timer.Stop()
 	cleanup := cancel
 	var transport mcp.Transport
 	if kind == "stdio" {
