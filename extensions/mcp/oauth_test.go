@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -23,7 +24,7 @@ import (
 )
 
 func TestOAuthFlowPersistenceAndRefresh(t *testing.T) {
-	for _, mode := range []string{"dynamic", "configured", "root resource"} {
+	for _, mode := range []string{"dynamic", "configured", "root resource", "occupied callback"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
 			configured := mode == "configured"
@@ -174,6 +175,13 @@ func TestOAuthFlowPersistenceAndRefresh(t *testing.T) {
 			assert.EqualValues(t, 1, refreshes.Load())
 			assert.EqualValues(t, 1, authorizations.Load())
 			// Force a new authorization using the persisted client registration.
+			if mode == "occupied callback" {
+				callback, err := url.Parse(registeredRedirect.Load().(string))
+				require.NoError(t, err)
+				listener, err := net.Listen("tcp", callback.Host)
+				require.NoError(t, err)
+				defer listener.Close()
+			}
 			transport.credentials.Tokens = nil
 			require.NoError(t, transport.save())
 			cfg.Interactive = "always"
@@ -182,6 +190,8 @@ func TestOAuthFlowPersistenceAndRefresh(t *testing.T) {
 			assert.EqualValues(t, 2, authorizations.Load())
 			if configured {
 				assert.Zero(t, registrations.Load())
+			} else if mode == "occupied callback" {
+				assert.EqualValues(t, 2, registrations.Load(), "the replacement callback must be registered")
 			} else {
 				assert.EqualValues(t, 1, registrations.Load())
 			}
@@ -328,6 +338,67 @@ func TestOAuthCallbackLifecycle(t *testing.T) {
 	listener, err = net.Listen("tcp", address)
 	require.NoError(t, err, "cleanup must release the callback listener")
 	listener.Close()
+}
+
+func TestOAuthOccupiedCallbackPreservesExistingRegistration(t *testing.T) {
+	for _, mode := range []string{"explicit redirect", "configured client", "registration failure"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			require.NoError(t, err)
+			defer listener.Close()
+			redirectURI := "http://" + listener.Addr().String() + "/callback"
+			var registrations atomic.Int32
+			var serverURL string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/metadata":
+					json.NewEncoder(w).Encode(oauthex.AuthServerMeta{
+						Issuer: serverURL, AuthorizationEndpoint: serverURL + "/authorize",
+						TokenEndpoint: serverURL + "/token", RegistrationEndpoint: serverURL + "/register",
+					})
+				case "/register":
+					registrations.Add(1)
+					http.Error(w, "registration unavailable", http.StatusServiceUnavailable)
+				default:
+					t.Errorf("unexpected OAuth request: %s", r.URL.Path)
+				}
+			}))
+			defer server.Close()
+			serverURL = server.URL
+			config := oauthConfig{Interactive: "always", AuthServerMetadataURL: server.URL + "/metadata"}
+			switch mode {
+			case "explicit redirect":
+				config.RedirectURI = redirectURI
+			case "configured client":
+				config.ClientID = "configured-client"
+			}
+			client, cleanup, err := newOAuthClient("occupied", server.URL, config)
+			require.NoError(t, err)
+			defer cleanup()
+			transport := client.Transport.(*oauthTransport)
+			registration := &oauthex.ClientRegistrationResponse{
+				ClientID: "old-client", ClientSecret: "old-secret",
+				ClientRegistrationMetadata: oauthex.ClientRegistrationMetadata{RedirectURIs: []string{redirectURI}},
+			}
+			transport.credentials.ClientInformation = registration
+			require.NoError(t, transport.save())
+			before, err := os.ReadFile(transport.credentialPath)
+			require.NoError(t, err)
+			err = transport.authorize(t.Context(), nil)
+			if mode == "registration failure" {
+				require.ErrorContains(t, err, "register MCP OAuth client")
+				assert.EqualValues(t, 1, registrations.Load())
+			} else {
+				require.ErrorIs(t, err, syscall.EADDRINUSE)
+				assert.Zero(t, registrations.Load(), "explicit settings must not be changed")
+			}
+			assert.Equal(t, registration, transport.credentials.ClientInformation)
+			after, err := os.ReadFile(transport.credentialPath)
+			require.NoError(t, err)
+			assert.Equal(t, before, after, "failed replacement must not overwrite stored credentials")
+		})
+	}
 }
 
 func TestOAuthRejectsInsecureRegistrationEndpoint(t *testing.T) {

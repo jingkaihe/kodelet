@@ -19,6 +19,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
@@ -288,11 +289,18 @@ func (t *oauthTransport) authorize(ctx context.Context, headers []string) error 
 		redirectURI = t.credentials.ClientInformation.RedirectURIs[0]
 	}
 	redirect, results, closeCallback, err := startOAuthCallback(redirectURI)
+	replaceRegistration := false
+	if err != nil && t.config.RedirectURI == "" && t.config.ClientID == "" && redirectURI != "" && errors.Is(err, syscall.EADDRINUSE) {
+		// Only an implicitly reused dynamic registration may move to a new port.
+		// Keep the old credentials until registration of the new URI succeeds.
+		redirect, results, closeCallback, err = startOAuthCallback("")
+		replaceRegistration = true
+	}
 	if err != nil {
 		return err
 	}
 	defer closeCallback()
-	if t.config.ClientID == "" && (t.credentials.ClientInformation == nil ||
+	if t.config.ClientID == "" && (replaceRegistration || t.credentials.ClientInformation == nil ||
 		(!t.credentials.ClientInformation.ClientSecretExpiresAt.IsZero() && time.Now().After(t.credentials.ClientInformation.ClientSecretExpiresAt))) {
 		if metadata.RegistrationEndpoint == "" {
 			return errors.New("OAuth server does not support dynamic registration; configure oauth.client_id")
