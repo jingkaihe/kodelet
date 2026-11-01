@@ -42,7 +42,8 @@ func (f TransportFunc) Send(ctx context.Context, message []byte) error {
 }
 
 // LocalRequestFunc serves a host RPC request in-process. Return handled=false
-// to forward the request to the host.
+// to forward the request to the host. It runs on its own goroutine with a
+// context that ends with the caller's context or the originating request.
 type LocalRequestFunc func(ctx context.Context, method string, params json.RawMessage) (result any, handled bool, err error)
 
 // RuntimeOptions configures NewRuntime.
@@ -453,32 +454,15 @@ func (r *Runtime) call(ctx context.Context, owner *activeRequest, method string,
 	r.pending[id] = call
 	r.mu.Unlock()
 
-	handled := false
-	if r.local != nil {
-		localCtx := r.baseCtx
-		if owner != nil {
-			localCtx = owner.ctx
-		}
-		value, ok, localErr := r.local(localCtx, method, encoded)
-		if ok {
-			handled = true
-			var result json.RawMessage
-			if localErr == nil {
-				result, localErr = json.Marshal(value)
-			}
-			r.mu.Lock()
-			if r.pending[id] == call {
-				delete(r.pending, id)
-				call.result <- callResult{result: result, err: localErr}
-			}
-			r.mu.Unlock()
-		}
+	message := jsonrpc.NewRequest(jsonrpc.IntRaw(id), method, encoded)
+	if owner != nil {
+		message.ParentID = owner.id
 	}
-	if !handled {
-		message := jsonrpc.NewRequest(jsonrpc.IntRaw(id), method, encoded)
-		if owner != nil {
-			message.ParentID = owner.id
-		}
+	if r.local != nil {
+		// Off the caller's goroutine, so the caller can give up at its deadline
+		// even if the local handler ignores cancellation.
+		go r.serveLocal(ctx, owner, id, call, message)
+	} else {
 		r.send(message)
 	}
 	select {
@@ -492,6 +476,49 @@ func (r *Runtime) call(ctx context.Context, owner *activeRequest, method string,
 		r.mu.Unlock()
 		return nil, ctx.Err()
 	}
+}
+
+// serveLocal answers a host request in-process, or forwards it to the host
+// when the local handler declines. The handler's context ends with either the
+// caller's context or the originating request.
+func (r *Runtime) serveLocal(ctx context.Context, owner *activeRequest, id int64, call *pendingCall, message jsonrpc.Message) {
+	scope := r.baseCtx
+	if owner != nil {
+		scope = owner.ctx
+	}
+	localCtx, cancel := context.WithCancelCause(ctx)
+	stop := context.AfterFunc(scope, func() { cancel(context.Cause(scope)) })
+	defer func() {
+		stop()
+		cancel(nil)
+	}()
+	value, handled, err := r.runLocal(localCtx, message)
+	r.mu.Lock()
+	waiting := r.pending[id] == call
+	if handled && waiting {
+		delete(r.pending, id)
+	}
+	r.mu.Unlock()
+	switch {
+	case !waiting:
+	case !handled:
+		r.send(message)
+	default:
+		var result json.RawMessage
+		if err == nil {
+			result, err = json.Marshal(value)
+		}
+		call.result <- callResult{result: result, err: err}
+	}
+}
+
+func (r *Runtime) runLocal(ctx context.Context, message jsonrpc.Message) (value any, handled bool, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			value, handled, err = nil, true, fmt.Errorf("local %s handler panicked: %v", message.Method, recovered)
+		}
+	}()
+	return r.local(ctx, message.Method, message.Params)
 }
 
 func (r *Runtime) notify(method string, params any) error {
