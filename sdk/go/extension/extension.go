@@ -1,10 +1,12 @@
 package extension
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"regexp"
 	"slices"
@@ -471,7 +473,7 @@ func (e *Extension) handleEvent(ctx context.Context, env *callEnv, params handle
 
 	payload := map[string]any{}
 	if jsonrpc.HasValue(params.Payload) {
-		if err := json.Unmarshal(params.Payload, &payload); err != nil {
+		if err := unmarshalPreservingNumbers(params.Payload, &payload); err != nil {
 			return nil, fmt.Errorf("invalid payload for event %s: %w", params.Event, err)
 		}
 		if payload == nil {
@@ -562,8 +564,22 @@ func toJSONValue(value any) (any, error) {
 		return nil, err
 	}
 	var decoded any
-	err = json.Unmarshal(data, &decoded)
+	err = unmarshalPreservingNumbers(data, &decoded)
 	return decoded, err
+}
+
+// unmarshalPreservingNumbers decodes like json.Unmarshal but keeps numbers as
+// json.Number, so integers above 2^53 survive a round trip through any.
+func unmarshalPreservingNumbers(data []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return errors.New("invalid data after the top-level JSON value")
+	}
+	return nil
 }
 
 func normalizeCommandName(name string) string {

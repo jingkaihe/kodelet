@@ -170,6 +170,36 @@ func TestReverseResponsesCannotCompleteForwardRequestsWithTheSameID(t *testing.T
 	assert.JSONEq(t, `{"content":"Ada"}`, string(result.Result))
 }
 
+func TestEventHandlingPreservesLargeIntegers(t *testing.T) {
+	ext := extension.New(extension.Metadata{})
+	var first, second, output string
+	extension.On(ext, extension.EventToolCall, func(_ context.Context, event extension.ToolCallEvent, _ *extension.EventContext) (extension.EventResult, error) {
+		first = string(event.Tool.Input)
+		return extension.EventResult{Input: json.RawMessage(`{"id":9007199254740995}`)}, nil
+	}, extension.WithPriority(1))
+	extension.On(ext, extension.EventToolCall, func(_ context.Context, event extension.ToolCallEvent, _ *extension.EventContext) (extension.EventResult, error) {
+		second = string(event.Tool.Input)
+		return extension.EventResult{}, nil
+	})
+	extension.On(ext, extension.EventToolResult, func(_ context.Context, event extension.ToolResultEvent, _ *extension.EventContext) (extension.EventResult, error) {
+		output = string(event.Tool.Output)
+		return extension.EventResult{Output: json.RawMessage(`{"content":"redacted","count":9007199254740997}`)}, nil
+	})
+	host := serveExtension(t, ext)
+
+	host.send(`{"jsonrpc":"2.0","id":1,"method":"extension.event.handle","params":{"id":"e1","event":"tool.call","payload":{"tool":{"name":"lookup","input":{"id":9007199254740993}}}}}`)
+	call := host.next()
+	// JSONEq compares through float64, so compare the exact bytes.
+	assert.Equal(t, `{"id":9007199254740993}`, first)
+	assert.Equal(t, `{"id":9007199254740995}`, second)
+	assert.Contains(t, string(call.Result), `"input":{"id":9007199254740995}`)
+
+	host.send(`{"jsonrpc":"2.0","id":2,"method":"extension.event.handle","params":{"id":"e2","event":"tool.result","payload":{"tool":{"name":"lookup","input":{},"output":{"content":"x","count":9007199254740999}}}}}`)
+	result := host.next()
+	assert.Equal(t, `{"content":"x","count":9007199254740999}`, output)
+	assert.Contains(t, string(result.Result), `"count":9007199254740997`)
+}
+
 func TestHandlerPanicsAndRPCErrorsBecomeErrorResponses(t *testing.T) {
 	ext := extension.New(extension.Metadata{})
 	extension.RegisterTool(ext, extension.Tool[struct{}]{Name: "panic", Execute: func(context.Context, struct{}, *extension.ToolContext) (extension.ToolResult, error) {
