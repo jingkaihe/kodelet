@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -422,6 +423,41 @@ func TestRemoteACPNewSessionAndPrompt(t *testing.T) {
 	assert.Equal(t, "workspace", requests[1].EnvironmentProfile)
 	assert.Equal(t, workspace, requests[0].CWD)
 	assert.Equal(t, workspace, requests[1].CWD)
+}
+
+func TestRemoteACPPromptFinishesBeforeResponse(t *testing.T) {
+	workspace := t.TempDir()
+	buffer := bytes.NewBuffer(nil)
+	server := newRemoteACPTestServer(t, workspace, &fakeRemoteChatClient{}, buffer)
+	sessionID := createRemoteACPSession(t, server, buffer, workspace)
+
+	// Deliver the response, but block the write from returning so deferred
+	// cleanup cannot race the assertions.
+	output := make(extensionACPOutput, 1)
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	server.output = io.MultiWriter(output, writer)
+	prompt := acptypes.PromptRequest{
+		SessionID: sessionID,
+		Prompt:    []acptypes.ContentBlock{{Type: acptypes.ContentTypeText, Text: "work"}},
+	}
+	req := &acptypes.Request{ID: json.RawMessage(`2`), Params: mustJSONRawMessage(t, prompt)}
+	done := make(chan error, 1)
+	go func() { done <- server.handleSessionPrompt(req) }()
+	assert.NotEmpty(t, output.next(t)["result"])
+
+	server.activePromptsMu.Lock()
+	assert.NotContains(t, server.activePrompts, sessionID)
+	server.activePromptsMu.Unlock()
+	server.remoteSessions.mu.Lock()
+	assert.False(t, server.remoteSessions.sessions[sessionID].active)
+	assert.True(t, server.remoteSessions.sessions[sessionID].started)
+	server.remoteSessions.mu.Unlock()
+
+	var written acptypes.Response
+	require.NoError(t, json.NewDecoder(reader).Decode(&written))
+	require.NoError(t, <-done)
 }
 
 func TestOrderedRemoteCancelCannotRacePromptRegistration(t *testing.T) {

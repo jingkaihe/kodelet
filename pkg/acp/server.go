@@ -730,17 +730,25 @@ func (s *Server) registerActivePrompt(sessionID acptypes.SessionID) (context.Con
 }
 
 func (s *Server) handlePreparedSessionPrompt(promptCtx context.Context, active *activePrompt, req *acptypes.Request, params acptypes.PromptRequest) error {
-	defer func() {
+	finish := func() {
 		active.cancel()
 		s.activePromptsMu.Lock()
 		if s.activePrompts[params.SessionID] == active {
 			delete(s.activePrompts, params.SessionID)
 		}
 		s.activePromptsMu.Unlock()
-	}()
-	if s.remoteSessions != nil {
-		return s.handleRemoteSessionPrompt(promptCtx, active, req, params)
 	}
+	if s.remoteSessions != nil {
+		stopReason, err := s.handleRemoteSessionPrompt(promptCtx, active, params)
+		// Release both session and prompt ownership before the client can send
+		// its next prompt in response to this result.
+		finish()
+		if err != nil {
+			return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
+		}
+		return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: stopReason})
+	}
+	defer finish()
 
 	sess, err := s.sessionManager.GetSession(params.SessionID)
 	if err != nil {
@@ -830,10 +838,10 @@ func (s *Server) handlePreparedSessionPrompt(promptCtx context.Context, active *
 	return s.sendResult(req.ID, result)
 }
 
-func (s *Server) handleRemoteSessionPrompt(promptCtx context.Context, active *activePrompt, req *acptypes.Request, params acptypes.PromptRequest) error {
+func (s *Server) handleRemoteSessionPrompt(promptCtx context.Context, active *activePrompt, params acptypes.PromptRequest) (acptypes.StopReason, error) {
 	firstPrompt, err := s.remoteSessions.beginPrompt(params.SessionID)
 	if err != nil {
-		return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
+		return "", err
 	}
 	succeeded := false
 	defer func() {
@@ -845,12 +853,12 @@ func (s *Server) handleRemoteSessionPrompt(promptCtx context.Context, active *ac
 	if !started {
 		cancelled := s.remotePromptCancellationConfirmed(params.SessionID)
 		if err := s.sessionExtensionPromptError(params.SessionID); err != nil {
-			return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
+			return "", err
 		}
 		if cancelled {
-			return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonCancelled})
+			return acptypes.StopReasonCancelled, nil
 		}
-		return s.sendError(req.ID, acptypes.ErrCodeInternalError, "ACP detached before submission; no turn was started", nil)
+		return "", errors.New("ACP detached before submission; no turn was started")
 	}
 	defer s.closePromptSteering(active)
 	message, images := bridge.ContentBlocksToMessage(params.Prompt)
@@ -867,14 +875,14 @@ func (s *Server) handleRemoteSessionPrompt(promptCtx context.Context, active *ac
 	_, err = client.Run(promptCtx, request, sink)
 	cancelled := s.remotePromptCancellationConfirmed(params.SessionID) || sink.cancelled
 	if err := s.sessionExtensionPromptError(params.SessionID); err != nil {
-		return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
+		return "", err
 	}
 	if cancelled {
 		// A scoped stop can be acknowledged before submission is admitted.
 		// Only a terminal stream event confirms that first-turn configuration
 		// reached the daemon; otherwise retain it for the next prompt.
 		succeeded = sink.done
-		return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonCancelled})
+		return acptypes.StopReasonCancelled, nil
 	}
 	if err != nil || promptCtx.Err() != nil {
 		if !sink.done {
@@ -888,17 +896,17 @@ func (s *Server) handleRemoteSessionPrompt(promptCtx context.Context, active *ac
 		} else if err == nil {
 			err = promptCtx.Err()
 		}
-		return s.sendError(req.ID, acptypes.ErrCodeInternalError, fmt.Sprintf("the request failed or the connection was interrupted; before sending it again, check 'kodelet conversation turn %s %s': %v", params.SessionID, turnID, err), nil)
+		return "", pkgerrors.Wrapf(err, "the request failed or the connection was interrupted; before sending it again, check 'kodelet conversation turn %s %s'", params.SessionID, turnID)
 	}
 	succeeded = true
 	if sink.resourcesReloaded {
 		// Discover only after the stream succeeds, outside session and prompt
 		// locks. A failed or cancelled reload must not refresh the command list.
 		if err := s.sendRemoteAvailableCommands(params.SessionID); err != nil {
-			return err
+			return "", err
 		}
 	}
-	return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonEndTurn})
+	return acptypes.StopReasonEndTurn, nil
 }
 
 func (s *Server) cancelRemotePrompt(sessionID acptypes.SessionID) {
