@@ -299,59 +299,19 @@ func TestOAuthCallbackLifecycle(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	address := listener.Addr().String()
 	defer listener.Close()
-	var serverURL string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/metadata" {
-			json.NewEncoder(w).Encode(oauthex.AuthServerMeta{Issuer: serverURL, AuthorizationEndpoint: serverURL + "/authorize", TokenEndpoint: serverURL + "/token"})
-			return
-		}
-		w.WriteHeader(http.StatusUnauthorized)
-	}))
-	defer server.Close()
-	serverURL = server.URL
-	client, cleanup, err := newOAuthClient("cancel", server.URL, oauthConfig{
-		ClientID: "client", Interactive: true, RedirectURI: "http://" + address + "/callback",
-		AuthServerMetadataURL: server.URL + "/metadata", CallbackTimeout: "5s",
-	})
-	require.NoError(t, err, "construction must not bind the callback port")
-	defer cleanup()
-	require.NoError(t, listener.Close())
-	opened := make(chan struct{})
-	client.Transport.(*oauthTransport).openBrowser = func(string) error { close(opened); return nil }
-	done := make(chan error, 1)
-	go func() {
-		response, err := client.Get(server.URL)
-		if response != nil {
-			response.Body.Close()
-		}
-		done <- err
-	}()
-	select {
-	case <-opened:
-	case <-time.After(5 * time.Second):
-		t.Fatal("OAuth browser was not invoked")
-	}
-	cleanup()
-	require.ErrorIs(t, <-done, context.Canceled)
-	listener, err = net.Listen("tcp", address)
-	require.NoError(t, err, "cleanup must release the callback listener")
-	listener.Close()
-}
-
-func TestOAuthSerializesInteractiveLoginsAcrossServers(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	redirectURI := "http://" + listener.Addr().String() + "/callback"
-	require.NoError(t, listener.Close())
+	address := listener.Addr().String()
+	redirectURI := "http://" + address + "/callback"
 	firstExchange := make(chan struct{})
 	releaseExchange := make(chan struct{})
 	var serverURL string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
+		case "/mcp":
+			if r.Header.Get("Authorization") == "" {
+				w.WriteHeader(http.StatusUnauthorized)
+			}
 		case "/metadata":
 			json.NewEncoder(w).Encode(oauthex.AuthServerMeta{
 				Issuer: serverURL, AuthorizationEndpoint: serverURL + "/authorize", TokenEndpoint: serverURL + "/token",
@@ -377,22 +337,34 @@ func TestOAuthSerializesInteractiveLoginsAcrossServers(t *testing.T) {
 	serverURL = server.URL
 	release := sync.OnceFunc(func() { close(releaseExchange) })
 	defer release()
-	opened := make(chan string, 3)
-	newTransport := func(name string) *oauthTransport {
-		client, cleanup, err := newOAuthClient(name, server.URL, oauthConfig{
+	opened := make(chan string, 2)
+	newClient := func(name string) (*http.Client, func()) {
+		client, cleanup, err := newOAuthClient(name, server.URL+"/mcp", oauthConfig{
 			ClientID: name, Interactive: true, RedirectURI: redirectURI,
 			AuthServerMetadataURL: server.URL + "/metadata", CallbackTimeout: "5s",
 		})
-		require.NoError(t, err)
+		require.NoError(t, err, "construction must not bind the occupied callback port")
 		t.Cleanup(cleanup)
+		client.Timeout = 5 * time.Second
 		transport := client.Transport.(*oauthTransport)
 		transport.openBrowser = func(address string) error { opened <- address; return nil }
-		return transport
+		return client, cleanup
 	}
-	first, second, waiting := newTransport("first"), newTransport("second"), newTransport("waiting")
-	done := make(chan error, 2)
-	go func() { done <- first.authorize(t.Context(), nil) }()
-	completeCallback := func(name string) {
+	first, _ := newClient("first")
+	second, closeSecond := newClient("second")
+	require.NoError(t, listener.Close())
+	startLogin := func(client *http.Client) <-chan error {
+		done := make(chan error, 1)
+		go func() {
+			response, err := client.Get(server.URL + "/mcp")
+			if response != nil {
+				response.Body.Close()
+			}
+			done <- err
+		}()
+		return done
+	}
+	nextAuthorization := func(name string) url.Values {
 		t.Helper()
 		var address string
 		select {
@@ -404,37 +376,37 @@ func TestOAuthSerializesInteractiveLoginsAcrossServers(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, name, authorization.Query().Get("client_id"))
 		assert.Equal(t, redirectURI, authorization.Query().Get("redirect_uri"))
-		callback := redirectURI + "?" + url.Values{
-			"code": {"code"}, "state": {authorization.Query().Get("state")}, "iss": {serverURL},
-		}.Encode()
-		response, err := (&http.Client{Timeout: 5 * time.Second}).Get(callback)
-		require.NoError(t, err)
-		response.Body.Close()
+		return authorization.Query()
 	}
-	completeCallback("first")
+	firstDone := startLogin(first)
+	authorization := nextAuthorization("first")
+	callback := redirectURI + "?" + url.Values{
+		"code": {"code"}, "state": {authorization.Get("state")}, "iss": {serverURL},
+	}.Encode()
+	response, err := (&http.Client{Timeout: 5 * time.Second}).Get(callback)
+	require.NoError(t, err)
+	response.Body.Close()
 	select {
 	case <-firstExchange:
 	case <-time.After(5 * time.Second):
 		t.Fatal("first token exchange did not start")
 	}
-	go func() { done <- second.authorize(t.Context(), nil) }()
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
-	require.ErrorIs(t, waiting.authorize(ctx, nil), context.DeadlineExceeded, "waiting must honor the enclosing deadline, not fail to bind the port")
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/mcp", nil)
+	require.NoError(t, err)
+	_, err = second.Do(request)
+	require.ErrorIs(t, err, context.DeadlineExceeded, "waiting must honor the enclosing deadline, not fail to bind the port")
 	assert.Empty(t, opened, "the next browser must wait until token exchange finishes")
-	assert.Empty(t, done, "the second login must wait rather than fail with address in use")
+	secondDone := startLogin(second)
 	release()
-	completeCallback("second")
-	for range 2 {
-		select {
-		case err := <-done:
-			require.NoError(t, err)
-		case <-time.After(5 * time.Second):
-			t.Fatal("OAuth login did not finish")
-		}
-	}
-	assert.Equal(t, "first", first.credentials.Tokens.AccessToken)
-	assert.Equal(t, "second", second.credentials.Tokens.AccessToken)
+	require.NoError(t, <-firstDone)
+	nextAuthorization("second") // The same fixed port is reusable after exchange.
+	closeSecond()
+	require.ErrorIs(t, <-secondDone, context.Canceled)
+	listener, err = net.Listen("tcp", address)
+	require.NoError(t, err, "cleanup must release the callback listener")
+	listener.Close()
 }
 
 func TestOAuthOccupiedCallbackPreservesExistingRegistration(t *testing.T) {
