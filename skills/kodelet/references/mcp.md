@@ -4,7 +4,7 @@ The MCP integration runs in the native Go executable `kodelet-extension-mcp`, se
 
 ## Installation
 
-`kodelet-extension-mcp` is bundled with RPM/DEB packages, standalone installs, and Docker images, and discovered on the runner's PATH by default. If your Homebrew formula does not include it, install the matching `kodelet-extension-mcp-<os>-<arch>` release asset as `kodelet-extension-mcp` on PATH. Node.js is only needed for Node-based MCP servers.
+`kodelet-extension-mcp` is bundled with RPM/DEB packages and standalone installs, and discovered on the runner's PATH by default. If your Homebrew formula does not include it, install the matching `kodelet-extension-mcp-<os>-<arch>` release asset as `kodelet-extension-mcp` on PATH. Node.js is only needed for Node-based MCP servers.
 
 Verify discovery with `kodelet extension inspect mcp`.
 

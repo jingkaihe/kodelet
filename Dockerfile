@@ -39,8 +39,6 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 COPY cmd/ ./cmd/
 COPY pkg/ ./pkg/
-COPY sdk/go/ ./sdk/go/
-COPY extensions/mcp/ ./extensions/mcp/
 COPY --from=codemode-runtime /src/pkg/codemode/runtime_quickjs.wasm ./pkg/codemode/runtime_quickjs.wasm
 COPY --from=frontend /src/pkg/webui/dist/ ./pkg/webui/dist/
 
@@ -51,13 +49,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go build -buildvcs=false -trimpath \
     -ldflags="-s -w -X '${VERSION_PKG}.Version=${VERSION}' -X '${VERSION_PKG}.GitCommit=${GIT_COMMIT}' -X '${VERSION_PKG}.BuildTime=${BUILD_TIME}'" \
     -o /out/kodelet ./cmd/kodelet
-
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" \
-    go -C extensions/mcp build -buildvcs=false -trimpath \
-    -ldflags="-s -w -X main.version=${VERSION}" \
-    -o /out/kodelet-extension-mcp .
 
 # Pre-create the state directory so Docker named volumes inherit non-root ownership.
 RUN mkdir -p /out/home/nonroot/.kodelet && \
@@ -92,7 +83,6 @@ ENV HOME=/home/nonroot \
 
 COPY --from=build --chown=65532:65532 /out/home/nonroot/ /home/nonroot/
 COPY --from=build --chown=65532:65532 /out/kodelet /kodelet
-COPY --from=build --chown=65532:65532 /out/kodelet-extension-mcp /usr/bin/kodelet-extension-mcp
 COPY --from=runtime-dependencies --chown=65532:65532 /src/.build/package-binaries/linux-${TARGETARCH}/ /usr/libexec/kodelet/
 
 WORKDIR /home/nonroot

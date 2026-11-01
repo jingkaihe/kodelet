@@ -8,7 +8,7 @@ Moved the TypeScript SDK to `sdk/typescript/`; the npm package remains `kodelet`
 
 Enabled automatic discovery of `kodelet-extension-<name>` executables on the runner's PATH. Use trusted PATH directories or disable discovery with `extensions.discover_path: false`.
 
-Replaced the npm MCP adapter with native `kodelet-extension-mcp`, bundled in RPM/DEB packages, standalone installs, and Docker images. The bridge no longer requires Node.js; Node-based MCP servers still do.
+Replaced the npm MCP adapter with native `kodelet-extension-mcp`, bundled in RPM/DEB packages and standalone installs for use on runners. The bridge no longer requires Node.js; Node-based MCP servers still do.
 
 **MCP migration:** Install the native extension, remove the old `~/.kodelet/plugins/kodelet@mcp` wrapper, and update MCP entries in extension allow/deny rules to the absolute executable path of `kodelet-extension-mcp`. Keep existing MCP configuration and OAuth credentials. Restart or reload sessions, then verify with `kodelet extension inspect mcp`. See the [MCP guide](skills/kodelet/references/mcp.md) for details and Homebrew installation.
 

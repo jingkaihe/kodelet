@@ -9,9 +9,9 @@ Dockerfile
 /dist/
 /docs/
 /examples/
+/extensions/
 /recipes/
-/sdk/*
-!/sdk/go/
+/sdk/
 /skills/
 /*.md
 
