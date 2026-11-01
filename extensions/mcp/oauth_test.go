@@ -23,14 +23,15 @@ import (
 )
 
 func TestOAuthFlowPersistenceAndRefresh(t *testing.T) {
-	for _, configured := range []bool{false, true} {
-		t.Run(fmt.Sprintf("configured=%t", configured), func(t *testing.T) {
+	for _, mode := range []string{"dynamic", "configured", "root resource"} {
+		t.Run(mode, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
+			configured := mode == "configured"
 			var registrations, authorizations, refreshes, challenges atomic.Int32
 			var registeredRedirect, proof atomic.Value
 			registeredRedirect.Store("")
 			firstChallenges := make(chan struct{})
-			var serverURL string
+			var serverURL, resourceURI string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				if r.URL.Path != "/mcp" {
@@ -57,13 +58,16 @@ func TestOAuthFlowPersistenceAndRefresh(t *testing.T) {
 							w.Header().Set("WWW-Authenticate", `Bearer error="insufficient_scope", scope="mcp.read"`)
 							w.WriteHeader(http.StatusForbidden)
 						} else {
+							if mode == "root resource" {
+								w.Header().Set("WWW-Authenticate", "Bearer")
+							}
 							w.WriteHeader(http.StatusUnauthorized)
 						}
 						return
 					}
 					fmt.Fprintln(w, `{"ok":true}`)
-				case "/resource":
-					json.NewEncoder(w).Encode(oauthex.ProtectedResourceMetadata{Resource: serverURL + "/mcp", AuthorizationServers: []string{serverURL}})
+				case "/resource", "/.well-known/oauth-protected-resource":
+					json.NewEncoder(w).Encode(oauthex.ProtectedResourceMetadata{Resource: resourceURI, AuthorizationServers: []string{serverURL}})
 				case "/.well-known/oauth-authorization-server", "/custom-metadata":
 					json.NewEncoder(w).Encode(oauthex.AuthServerMeta{
 						Issuer: serverURL, AuthorizationEndpoint: serverURL + "/authorize", TokenEndpoint: serverURL + "/token",
@@ -83,7 +87,7 @@ func TestOAuthFlowPersistenceAndRefresh(t *testing.T) {
 					assert.Equal(t, "client", query.Get("client_id"))
 					assert.Equal(t, "mcp.read", query.Get("scope"))
 					assert.Equal(t, "S256", query.Get("code_challenge_method"))
-					assert.Equal(t, serverURL+"/mcp", query.Get("resource"))
+					assert.Equal(t, resourceURI, query.Get("resource"))
 					proof.Store(query.Get("code_challenge"))
 					if !configured {
 						assert.Equal(t, registeredRedirect.Load(), query.Get("redirect_uri"), "reuse the registered callback port")
@@ -97,6 +101,7 @@ func TestOAuthFlowPersistenceAndRefresh(t *testing.T) {
 				case "/token":
 					assert.NoError(t, r.ParseForm())
 					assert.Equal(t, "client", r.Form.Get("client_id"))
+					assert.Equal(t, resourceURI, r.Form.Get("resource"), "token exchange and refresh use the discovered resource")
 					if configured {
 						assert.Equal(t, "secret", r.Form.Get("client_secret"))
 					}
@@ -114,6 +119,10 @@ func TestOAuthFlowPersistenceAndRefresh(t *testing.T) {
 			}))
 			defer server.Close()
 			serverURL = server.URL
+			resourceURI = server.URL + "/mcp"
+			if mode == "root resource" {
+				resourceURI = server.URL
+			}
 			cfg := oauthConfig{Interactive: "always", Scopes: []string{"mcp.read"}, CallbackTimeout: "5s"}
 			if configured {
 				cfg.ClientID, cfg.ClientSecret = "client", "secret"
@@ -160,6 +169,7 @@ func TestOAuthFlowPersistenceAndRefresh(t *testing.T) {
 			require.NoError(t, transport.save())
 			cfg.Interactive = "never"
 			client, transport = newClient()
+			assert.Equal(t, resourceURI, transport.credentials.DiscoveryState.ResourceURI, "validated resource survives reload")
 			request(client)
 			assert.EqualValues(t, 1, refreshes.Load())
 			assert.EqualValues(t, 1, authorizations.Load())
@@ -227,6 +237,7 @@ func TestOAuthLegacyCredentialsAndOriginScoping(t *testing.T) {
 		case "/token":
 			assert.Empty(t, r.Header.Get("Authorization"))
 			assert.NoError(t, r.ParseForm())
+			assert.Equal(t, serverURL, r.Form.Get("resource"), "legacy credentials fall back to the configured server URL")
 			assert.Equal(t, "refresh_token", r.Form.Get("grant_type"))
 			assert.Equal(t, "old-refresh", r.Form.Get("refresh_token"))
 			assert.Equal(t, "old-client", r.Form.Get("client_id"))

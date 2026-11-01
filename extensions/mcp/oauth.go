@@ -43,8 +43,9 @@ type oauthToken struct {
 }
 
 type oauthDiscoveryState struct {
-	ServerURL string                  `json:"authorizationServerUrl"`
-	Metadata  *oauthex.AuthServerMeta `json:"authorizationServerMetadata"`
+	ServerURL   string                  `json:"authorizationServerUrl"`
+	Metadata    *oauthex.AuthServerMeta `json:"authorizationServerMetadata"`
+	ResourceURI string                  `json:"resource,omitempty"`
 }
 
 type oauthTransport struct {
@@ -198,11 +199,11 @@ func (t *oauthTransport) token(ctx context.Context, forceRefresh bool) (*oauth2.
 		return nil, nil //nolint:nilnil // No usable token; wait for an OAuth challenge.
 	}
 	if t.config.AuthServerMetadataURL != "" || t.credentials.DiscoveryState == nil || t.credentials.DiscoveryState.Metadata == nil {
-		metadata, _, err := t.discover(ctx, nil)
+		state, _, err := t.discover(ctx, nil)
 		if err != nil {
 			return nil, err
 		}
-		t.credentials.DiscoveryState = &oauthDiscoveryState{ServerURL: metadata.Issuer, Metadata: metadata}
+		t.credentials.DiscoveryState = state
 	}
 	if err := validateOAuthMetadata(t.credentials.DiscoveryState.Metadata); err != nil {
 		return nil, err
@@ -211,10 +212,18 @@ func (t *oauthTransport) token(ctx context.Context, forceRefresh bool) (*oauth2.
 	if cfg.ClientID == "" {
 		return nil, nil //nolint:nilnil // No usable client; authorization may register one.
 	}
-	expired := token.Token
-	expired.Expiry = time.Unix(1, 0)
+	resourceURI := t.credentials.DiscoveryState.ResourceURI
+	if resourceURI == "" {
+		resourceURI = t.serverURL // Older credential files did not store the resource.
+	}
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, t.client)
-	refreshed, err := cfg.TokenSource(ctx, &expired).Token()
+	// Exchange accepts grant parameters, unlike TokenSource. An empty code is
+	// ignored per RFC 6749, as in the SDK's other token exchange helpers.
+	refreshed, err := cfg.Exchange(ctx, "",
+		oauth2.SetAuthURLParam("grant_type", "refresh_token"),
+		oauth2.SetAuthURLParam("refresh_token", token.RefreshToken),
+		oauth2.SetAuthURLParam("resource", resourceURI),
+	)
 	if err != nil {
 		var rejected *oauth2.RetrieveError
 		if errors.As(err, &rejected) && (rejected.ErrorCode == "invalid_grant" || rejected.ErrorCode == "invalid_client") {
@@ -225,6 +234,9 @@ func (t *oauthTransport) token(ctx context.Context, forceRefresh bool) (*oauth2.
 			return nil, t.save()
 		}
 		return nil, errors.Wrap(err, "refresh MCP OAuth token")
+	}
+	if refreshed.RefreshToken == "" {
+		refreshed.RefreshToken = token.RefreshToken
 	}
 	t.challengeErr = nil
 	return refreshed, t.saveToken(refreshed)
@@ -259,10 +271,11 @@ func (t *oauthTransport) authorize(ctx context.Context, headers []string) error 
 	if strings.HasPrefix(strings.ToLower(t.config.Flow), "device") {
 		return errors.New("MCP OAuth device flow is not supported")
 	}
-	metadata, scopes, err := t.discover(ctx, headers)
+	discovery, scopes, err := t.discover(ctx, headers)
 	if err != nil {
 		return err
 	}
+	metadata := discovery.Metadata
 	if !oauthInteractiveAllowed(t.config.Interactive) {
 		return errors.New("OAuth authorization requires an interactive session or oauth.interactive: always")
 	}
@@ -294,14 +307,14 @@ func (t *oauthTransport) authorize(ctx context.Context, headers []string) error 
 		}
 		t.credentials.ClientInformation = registration
 	}
-	t.credentials.DiscoveryState = &oauthDiscoveryState{ServerURL: metadata.Issuer, Metadata: metadata}
+	t.credentials.DiscoveryState = discovery
 	if err := t.save(); err != nil {
 		return err
 	}
 	cfg := t.oauthConfig(metadata)
 	cfg.RedirectURL, cfg.Scopes = redirect, scopes
 	state, verifier := rand.Text(), oauth2.GenerateVerifier()
-	authorizationURL := cfg.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier), oauth2.SetAuthURLParam("resource", t.serverURL))
+	authorizationURL := cfg.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier), oauth2.SetAuthURLParam("resource", discovery.ResourceURI))
 	slog.Info("MCP server requires OAuth authorization; open this URL", "server", t.name, "url", authorizationURL)
 	if t.config.OpenBrowser == nil || *t.config.OpenBrowser {
 		if err := t.openBrowser(authorizationURL); err != nil {
@@ -325,7 +338,7 @@ func (t *oauthTransport) authorize(ctx context.Context, headers []string) error 
 			return errors.New("OAuth callback did not include an authorization code")
 		}
 		ctx = context.WithValue(ctx, oauth2.HTTPClient, t.client)
-		token, err := cfg.Exchange(ctx, result.Get("code"), oauth2.VerifierOption(verifier), oauth2.SetAuthURLParam("resource", t.serverURL))
+		token, err := cfg.Exchange(ctx, result.Get("code"), oauth2.VerifierOption(verifier), oauth2.SetAuthURLParam("resource", discovery.ResourceURI))
 		if err != nil {
 			return errors.Wrap(err, "exchange MCP OAuth authorization code")
 		}
@@ -333,12 +346,13 @@ func (t *oauthTransport) authorize(ctx context.Context, headers []string) error 
 	}
 }
 
-func (t *oauthTransport) discover(ctx context.Context, headers []string) (*oauthex.AuthServerMeta, []string, error) {
+func (t *oauthTransport) discover(ctx context.Context, headers []string) (*oauthDiscoveryState, []string, error) {
 	challenges, err := oauthex.ParseWWWAuthenticate(headers)
 	if err != nil {
 		return nil, nil, err
 	}
 	scopes := t.config.Scopes
+	state := &oauthDiscoveryState{ResourceURI: t.serverURL}
 	metadataURL := t.config.AuthServerMetadataURL
 	if metadataURL == "" {
 		metadataURL = t.credentials.MetadataURL
@@ -356,6 +370,9 @@ func (t *oauthTransport) discover(ctx context.Context, headers []string) (*oauth
 	}
 	if metadataURL != "" {
 		// An explicit metadata URL need not encode its issuer in its path.
+		if previous := t.credentials.DiscoveryState; previous != nil && previous.ResourceURI != "" {
+			state.ResourceURI = previous.ResourceURI
+		}
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, metadataURL, nil)
 		if err != nil {
 			return nil, nil, err
@@ -373,7 +390,8 @@ func (t *oauthTransport) discover(ctx context.Context, headers []string) (*oauth
 		if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&metadata); err != nil {
 			return nil, nil, errors.Wrap(err, "decode OAuth metadata")
 		}
-		return &metadata, scopes, validateOAuthMetadata(&metadata)
+		state.ServerURL, state.Metadata = metadata.Issuer, &metadata
+		return state, scopes, validateOAuthMetadata(&metadata)
 	}
 	resourceURLs := []string{issuer + "/.well-known/oauth-protected-resource" + endpoint.Path, issuer + "/.well-known/oauth-protected-resource"}
 	if resourceURL != "" {
@@ -395,6 +413,7 @@ func (t *oauthTransport) discover(ctx context.Context, headers []string) (*oauth
 			return nil, nil, errors.New("MCP resource metadata has no authorization servers")
 		}
 		issuer = resource.AuthorizationServers[0]
+		state.ResourceURI = resource.Resource
 		if len(scopes) == 0 {
 			scopes = resource.ScopesSupported
 		}
@@ -407,7 +426,8 @@ func (t *oauthTransport) discover(ctx context.Context, headers []string) (*oauth
 	if metadata == nil {
 		metadata = &oauthex.AuthServerMeta{Issuer: issuer, AuthorizationEndpoint: issuer + "/authorize", TokenEndpoint: issuer + "/token", RegistrationEndpoint: issuer + "/register"}
 	}
-	return metadata, scopes, validateOAuthMetadata(metadata)
+	state.ServerURL, state.Metadata = metadata.Issuer, metadata
+	return state, scopes, validateOAuthMetadata(metadata)
 }
 
 func validateOAuthMetadata(metadata *oauthex.AuthServerMeta) error {
