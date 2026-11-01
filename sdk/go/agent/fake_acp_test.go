@@ -135,8 +135,10 @@ func (f *fakeACP) serve() {
 			}
 			continue
 		}
+		// Run the hook before publishing so waiters see its recorded state.
+		handled := f.handle != nil && f.handle(f, message)
 		f.requests <- message
-		if f.handle != nil && f.handle(f, message) {
+		if handled {
 			continue
 		}
 		f.dispatch(message)

@@ -234,6 +234,7 @@ run = [
 
 [tasks.sdk-go-test]
 description = "Run Go SDK vet and race-enabled tests"
+env = { CGO_ENABLED = "1" }
 run = [
   "echo 'Running Go SDK checks...'",
   "cd sdk/go && go vet ./... && go test -race ./...",
@@ -249,6 +250,7 @@ run = ["CGO_ENABLED=0 go -C extensions/mcp build -ldflags=\"-s -w -X main.versio
 
 [tasks.mcp-test]
 description = "Vet and test the native MCP extension"
+env = { CGO_ENABLED = "1" }
 run = ["go -C extensions/mcp vet ./...", "go -C extensions/mcp test -race ./..."]
 
 [tasks.mcp-lint]
