@@ -153,28 +153,25 @@ func (s *Session) run(ctx context.Context, opts RunOptions, listener func(Event)
 	s.emit(state, EventAgentStart, AgentStart{Message: opts.Message}, nil)
 	s.emit(state, EventUserMessage, UserMessage{Content: opts.Message}, nil)
 
-	type outcome struct {
-		stopReason string
-		err        error
-	}
-	settled := make(chan outcome, 1)
-	go func() {
-		stopReason, err := s.conn.prompt(context.Background(), s.id, promptBlocks(opts))
-		settled <- outcome{stopReason, err}
-	}()
-	var result outcome
-	select {
-	case result = <-settled:
-	case <-ctx.Done():
-		s.conn.cancel(s.id)
+	// Queue the prompt before watching ctx. Writes are ordered, so a cancel
+	// always reaches Kodelet after the prompt it cancels; the host ignores a
+	// cancel for a prompt it has not seen.
+	settled, err := s.conn.startPrompt(s.id, promptBlocks(opts))
+	result := rpcResult{err: err}
+	if err == nil {
 		select {
-		case <-settled:
-		case <-time.After(cancelGrace):
+		case result = <-settled:
+		case <-ctx.Done():
+			s.conn.cancel(s.id)
+			select {
+			case <-settled:
+			case <-time.After(cancelGrace):
+			}
+			unsubscribe()
+			s.emit(state, EventAgentError, AgentError{Message: ctx.Err().Error()}, nil)
+			s.flushEvents()
+			return nil, ctx.Err()
 		}
-		unsubscribe()
-		s.emit(state, EventAgentError, AgentError{Message: ctx.Err().Error()}, nil)
-		s.flushEvents()
-		return nil, ctx.Err()
 	}
 	unsubscribe()
 	if result.err != nil {
@@ -199,7 +196,7 @@ func (s *Session) run(ctx context.Context, opts RunOptions, listener func(Event)
 		Content:        content,
 		ConversationID: s.id,
 		Events:         append([]Event(nil), state.events...),
-		StopReason:     result.stopReason,
+		StopReason:     stopReason(result.result),
 	}
 	state.mu.Unlock()
 	s.emit(state, EventAgentEnd, *response, nil)

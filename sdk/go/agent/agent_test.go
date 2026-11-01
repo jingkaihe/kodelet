@@ -208,6 +208,42 @@ func TestCancellingARunSendsSessionCancel(t *testing.T) {
 	assert.Equal(t, AgentError{Message: "context canceled"}, errorEvent.Data)
 }
 
+func TestEarlyCancellationIsWrittenAfterThePrompt(t *testing.T) {
+	// Cancelling as soon as a run starts used to race the prompt write, and
+	// Kodelet ignores a cancel for a prompt it has not seen yet.
+	for range 100 {
+		fake := newFakeACP(t)
+		var mu sync.Mutex
+		var order []string
+		fake.handle = func(_ *fakeACP, message jsonrpc.Message) bool {
+			if message.Method == "session/prompt" || message.Method == "session/cancel" {
+				mu.Lock()
+				order = append(order, message.Method)
+				mu.Unlock()
+			}
+			return false
+		}
+		fake.prompt = func(f *fakeACP, message jsonrpc.Message) {
+			f.nextRequest("session/cancel")
+			f.respond(message.ID, map[string]any{"stopReason": "cancelled"})
+		}
+		session, err := fake.client(ClientOptions{}).CreateSession(t.Context(), SessionOptions{})
+		require.NoError(t, err)
+		ctx, cancel := context.WithCancel(t.Context())
+		session.Subscribe(func(event Event) {
+			if event.Type == EventAgentStart {
+				cancel()
+			}
+		})
+		_, err = session.RunAndWait(ctx, RunOptions{Message: "x"})
+		require.ErrorIs(t, err, context.Canceled)
+		require.NoError(t, session.Close())
+		mu.Lock()
+		require.Equal(t, []string{"session/prompt", "session/cancel"}, order)
+		mu.Unlock()
+	}
+}
+
 func TestStreamYieldsEventsAndBreakingCancelsTheRun(t *testing.T) {
 	fake := newFakeACP(t)
 	fake.prompt = func(f *fakeACP, message jsonrpc.Message) {

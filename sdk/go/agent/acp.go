@@ -228,16 +228,18 @@ func (c *acpConn) closedError() error {
 	return errConnectionClosed
 }
 
-func (c *acpConn) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
+// start registers a request and queues it for writing. Writes are ordered,
+// so any message queued after start returns reaches kodelet acp after it.
+func (c *acpConn) start(method string, params any) (int64, <-chan rpcResult, error) {
 	encoded, err := jsonrpc.Marshal(params)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	c.mu.Lock()
 	if c.closed {
 		err := c.closedError()
 		c.mu.Unlock()
-		return nil, err
+		return 0, nil, err
 	}
 	c.nextID++
 	id := c.nextID
@@ -245,6 +247,14 @@ func (c *acpConn) request(ctx context.Context, method string, params any) (json.
 	c.pending[id] = ch
 	c.mu.Unlock()
 	c.write(jsonrpc.NewRequest(jsonrpc.IntRaw(id), method, encoded))
+	return id, ch, nil
+}
+
+func (c *acpConn) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	id, ch, err := c.start(method, params)
+	if err != nil {
+		return nil, err
+	}
 	select {
 	case result := <-ch:
 		return result.result, result.err
@@ -356,16 +366,18 @@ func (c *acpConn) loadSession(ctx context.Context, sessionID, cwd string) error 
 	return err
 }
 
-func (c *acpConn) prompt(ctx context.Context, sessionID string, prompt []map[string]any) (string, error) {
-	raw, err := c.request(ctx, "session/prompt", map[string]any{"sessionId": sessionID, "prompt": prompt})
-	if err != nil {
-		return "", err
-	}
+// startPrompt queues session/prompt and returns its pending result.
+func (c *acpConn) startPrompt(sessionID string, prompt []map[string]any) (<-chan rpcResult, error) {
+	_, result, err := c.start("session/prompt", map[string]any{"sessionId": sessionID, "prompt": prompt})
+	return result, err
+}
+
+func stopReason(raw json.RawMessage) string {
 	var result struct {
 		StopReason string `json:"stopReason"`
 	}
 	_ = json.Unmarshal(raw, &result)
-	return result.StopReason, nil
+	return result.StopReason
 }
 
 func (c *acpConn) steer(ctx context.Context, sessionID, message string) (SteerResult, error) {
