@@ -39,7 +39,7 @@ depends = ["code-generation", "mcp-build"]
 run = [
   "mkdir -p bin",
   "echo 'Building kodelet binary...'",
-  "CGO_ENABLED=0 go build -ldflags=\"-X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet ./cmd/kodelet/",
+  "CGO_ENABLED=0 go build -trimpath -ldflags=\"-X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet ./cmd/kodelet/",
 ]
 
 [tasks.build-dev]
@@ -48,7 +48,7 @@ depends = ["codemode-generation", "mcp-build"]
 run = [
   "mkdir -p bin",
   "echo 'Building kodelet binary (without frontend)...'",
-  "CGO_ENABLED=0 go build -ldflags=\"-X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet ./cmd/kodelet/",
+  "CGO_ENABLED=0 go build -trimpath -ldflags=\"-X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet ./cmd/kodelet/",
 ]
 
 [tasks.code-generation]
@@ -246,7 +246,7 @@ run = ["cd sdk/go && golangci-lint run --config ../../.golangci.yml ./..."]
 
 [tasks.mcp-build]
 description = "Build the native MCP extension"
-run = ["CGO_ENABLED=0 go -C extensions/mcp build -ldflags=\"-s -w -X main.version=$VERSION\" -o ../../bin/kodelet-extension-mcp ."]
+run = ["CGO_ENABLED=0 go -C extensions/mcp build -trimpath -ldflags=\"-s -w -X main.version=$VERSION\" -o ../../bin/kodelet-extension-mcp ."]
 
 [tasks.mcp-test]
 description = "Vet and test the native MCP extension"
@@ -292,10 +292,10 @@ run = [
   "mkdir -p bin",
   "rm -f ./bin/kodelet-windows-amd64.exe",
   "echo 'Cross-compiling for multiple platforms...'",
-  "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags=\"-s -w -X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet-linux-amd64 ./cmd/kodelet/",
-  "CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags=\"-s -w -X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet-linux-arm64 ./cmd/kodelet/",
-  "CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags=\"-s -w -X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet-darwin-amd64 ./cmd/kodelet/",
-  "CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags=\"-s -w -X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet-darwin-arm64 ./cmd/kodelet/",
+  "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags=\"-s -w -X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet-linux-amd64 ./cmd/kodelet/",
+  "CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags=\"-s -w -X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet-linux-arm64 ./cmd/kodelet/",
+  "CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags=\"-s -w -X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet-darwin-amd64 ./cmd/kodelet/",
+  "CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags=\"-s -w -X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet-darwin-arm64 ./cmd/kodelet/",
 ]
 
 [tasks.docker-build]
