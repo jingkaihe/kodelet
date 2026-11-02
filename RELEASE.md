@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.8.20-beta
+
+Updated local and release builds of Kodelet and the native MCP extension to use Go's `-trimpath`, removing build-machine filesystem paths from the compiled binaries.
+
 ## 0.8.19-beta
 
 Added a [Go SDK](sdk/go/README.md) for agent sessions and extensions, with streaming, steering, inferred schemas, and task progress. Requires Go 1.24+.
