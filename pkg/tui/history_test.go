@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	convdb "github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
+	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -30,6 +32,54 @@ type remoteMessageHistoryRunner struct {
 	appendTarget chat.WorkspaceTarget
 	entry        messagehistory.Entry
 	historyErr   error
+}
+
+func TestRestoredExtensionHistory(t *testing.T) {
+	record := convtypes.ConversationRecord{
+		Provider: "openai",
+		Metadata: map[string]any{"extension_messages": map[string]any{
+			"0": map[string]string{"extensionId": "reminders", "visibility": "hidden"},
+			"1": map[string]string{"extensionId": "reminders", "visibility": "visible"},
+		}},
+		CompactionHistory: &convtypes.CompactionHistory{
+			ActiveDisplayStart: 1,
+			Segments: []convtypes.CompactedSegment{{
+				RawMessages: json.RawMessage(`[
+					{"role":"user","content":"same words"},
+					{"role":"user","content":"extension notice"}
+				]`),
+				Marker: llmtypes.CompactionMarker{ID: "checkpoint", Method: "api"},
+			}},
+		},
+		RawMessages: json.RawMessage(`[
+			{"role":"user","content":"bootstrap"},
+			{"role":"user","content":"same words"}
+		]`),
+	}
+	messages, err := llm.ExtractConversationRecordEntries(record)
+	require.NoError(t, err)
+	source := &conversationSourceRunner{history: chat.ConversationHistory{ID: "extensions", Messages: messages}}
+	history := loadConversationHistoryFromSource(t.Context(), "key", "extensions", source)().(initialHistoryMsg)
+	require.NoError(t, history.err)
+	require.Len(t, history.entries, 3)
+	assert.Equal(t, "reminders", history.entries[0].extensionID)
+	assert.Equal(t, "checkpoint", history.entries[1].blocks[0].compaction.ID)
+	assert.Empty(t, history.entries[2].extensionID)
+	assert.Equal(t, []string{"same words"}, userMessagesFromEntries(history.entries))
+	m := newModel(t.Context(), Config{})
+	t.Cleanup(m.cancel)
+	m.width, m.height = 100, 30
+	m.entries = history.entries
+	transcript, _ := m.renderTranscript()
+	assert.Contains(t, xansi.Strip(transcript), "Extension: reminders")
+	assert.NotContains(t, transcript, "bootstrap")
+	// Live acknowledgements must not deduplicate against, or replace, extension input.
+	m.entries = history.entries[:1]
+	assert.False(t, m.hasLastUserEntry("extension notice"))
+	m.replaceLastUserEntry("extension notice")
+	require.Len(t, m.entries, 2)
+	assert.Empty(t, m.entries[1].extensionID)
+	assert.Equal(t, "reminders", m.entries[0].extensionID)
 }
 
 func TestEntriesFromHistoryPreservesRepeatedCompaction(t *testing.T) {

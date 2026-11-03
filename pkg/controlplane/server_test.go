@@ -1071,6 +1071,100 @@ func TestServer_handleListConversations(t *testing.T) {
 	assert.False(t, response.Conversations[1].IsRunning)
 }
 
+func TestServerExtensionMessagePresentation(t *testing.T) {
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	for _, compacted := range []bool{false, true} {
+		t.Run(fmt.Sprint("compacted=", compacted), func(t *testing.T) {
+			archive := json.RawMessage(`[
+				{"role":"assistant","content":[{"type":"tool_use","id":"call","name":"bash","input":{}}]},
+				{"role":"user","content":[{"type":"tool_result","tool_use_id":"call","content":"ok"}]},
+				{"role":"user","content":[{"type":"text","text":"same words"}]},
+				{"role":"user","content":[{"type":"text","text":"visible notice"}]}
+			]`)
+			tail := json.RawMessage(`[
+				{"role":"user","content":[{"type":"text","text":"hidden reminder"}]},
+				{"role":"user","content":[{"type":"text","text":"same words"}]}
+			]`)
+			record := &conversations.GetConversationResponse{
+				ID: "extensions", Provider: "anthropic",
+				Metadata: map[string]any{"extension_messages": map[string]any{
+					"1": map[string]any{"extensionId": "reminders", "visibility": "hidden"},
+					"2": map[string]any{"extensionId": "reminders", "visibility": "visible"},
+					"3": map[string]any{"extensionId": "reminders", "visibility": "hidden"},
+				}},
+			}
+			var items, current []json.RawMessage
+			require.NoError(t, json.Unmarshal(archive, &items))
+			require.NoError(t, json.Unmarshal(tail, &current))
+			var err error
+			if compacted {
+				record.CompactionHistory = &convtypes.CompactionHistory{
+					ActiveDisplayStart: 1,
+					Segments: []convtypes.CompactedSegment{{
+						RawMessages: archive,
+						Marker:      llmtypes.CompactionMarker{ID: "checkpoint", Method: "api"},
+					}},
+				}
+				record.RawMessages, err = json.Marshal(append([]json.RawMessage{
+					json.RawMessage(`{"role":"user","content":[{"type":"text","text":"bootstrap"}]}`),
+				}, current...))
+			} else {
+				record.RawMessages, err = json.Marshal(append(items, current...))
+			}
+			require.NoError(t, err)
+			before, err := json.Marshal(record)
+			require.NoError(t, err)
+			server := &Server{
+				conversationService: &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+					return record, nil
+				}},
+				activeChats: map[string]*activeChatRun{"extensions": newActiveChatRun(func() {})},
+			}
+			for _, format := range []string{"", "stream", "raw"} {
+				request := mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/api/conversations/extensions?format="+format, nil), map[string]string{"id": "extensions"})
+				response := httptest.NewRecorder()
+				server.handleGetConversation(response, request)
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				if format == "raw" {
+					var raw convtypes.ConversationRecord
+					require.NoError(t, json.Unmarshal(response.Body.Bytes(), &raw))
+					assert.JSONEq(t, string(record.RawMessages), string(raw.RawMessages))
+					assert.Equal(t, record.Metadata, raw.Metadata)
+					assert.Contains(t, response.Body.String(), "hidden reminder")
+					continue
+				}
+				assert.NotContains(t, response.Body.String(), "hidden reminder")
+				if format == "" {
+					var web WebConversationResponse
+					require.NoError(t, json.Unmarshal(response.Body.Bytes(), &web))
+					assert.True(t, web.IsRunning, "live snapshots use the same projection as saved history")
+					assert.Equal(t, 1, strings.Count(response.Body.String(), "same words"))
+					assert.Equal(t, "reminders", web.Messages[1].ExtensionID)
+					assert.Empty(t, web.Messages[len(web.Messages)-1].ExtensionID)
+				} else {
+					var history conversationHistoryResponse
+					require.NoError(t, json.Unmarshal(response.Body.Bytes(), &history))
+					var visible []string
+					var human []string
+					for _, entry := range history.Entries {
+						if entry.ExtensionID != "" {
+							visible = append(visible, entry.ExtensionID)
+						}
+						if entry.Kind == "text" && entry.Role == "user" && entry.ExtensionID == "" {
+							human = append(human, entry.Content)
+						}
+					}
+					assert.Equal(t, []string{"reminders"}, visible)
+					assert.Equal(t, []string{"same words"}, human)
+				}
+			}
+			after, err := json.Marshal(record)
+			require.NoError(t, err)
+			assert.Equal(t, before, after)
+		})
+	}
+}
+
 func TestServer_handleGetConversation(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)

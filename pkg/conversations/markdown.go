@@ -18,6 +18,8 @@ type StreamableMessage struct {
 	// Display identities and coding-message positions from the Web transcript.
 	ID     string `json:"id,omitempty"`
 	Anchor *int   `json:"anchor,omitempty"`
+	// ExtensionID is trusted host attribution for visible extension input.
+	ExtensionID string `json:"extensionId,omitempty"`
 
 	ResourceReloadID string                     `json:"resourceReloadId,omitempty"`
 	Compaction       *llmtypes.CompactionMarker `json:"compaction,omitempty"`
@@ -192,6 +194,9 @@ func RenderMarkdown(
 		}
 
 		heading := markdownRoleHeading(msg.Role, msg.Kind)
+		if msg.ExtensionID != "" {
+			heading = "Extension: " + inlineMarkdownCode(msg.ExtensionID)
+		}
 		fmt.Fprintf(&output, "### %s\n\n", heading)
 
 		switch msg.Kind {

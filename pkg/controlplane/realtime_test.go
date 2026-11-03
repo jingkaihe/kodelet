@@ -311,10 +311,14 @@ func TestRealtimeProjectionIdentityAndCompaction(t *testing.T) {
 	record := &conversations.GetConversationResponse{
 		ID: "saved", Provider: "openai",
 		Metadata: map[string]any{
-			"delegated_user_sources": map[string]string{"0": "voice:handoff", "2": "voice:steer"},
+			"delegated_user_sources": map[string]string{"0": "voice:handoff", "3": "voice:steer"},
+			"extension_messages": map[string]any{
+				"1": map[string]string{"extensionId": "reminders", "visibility": "hidden"},
+			},
 		},
 		CompactionHistory: &convtypes.CompactionHistory{ActiveDisplayStart: 1, Segments: []convtypes.CompactedSegment{{RawMessages: json.RawMessage(`[
-			{"role":"user","content":"same words"},{"role":"assistant","content":"coding result"}]`)}}},
+			{"role":"user","content":"same words"},{"role":"user","content":"hidden reminder"},
+			{"role":"assistant","content":"coding result"}]`)}}},
 		RawMessages: json.RawMessage(`[
 			{"role":"user","content":"bootstrap"},{"role":"user","content":"same words"},
 			{"role":"user","content":"spoken steer"},

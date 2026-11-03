@@ -29,6 +29,20 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+func TestNormalizeExtensionTranscriptSource(t *testing.T) {
+	entries, err := normalizeControlPlaneConversationMessages([]controlPlaneConversationMessage{
+		{Role: "user", Content: json.RawMessage(`"same words"`), ExtensionID: "reminders"},
+		{Role: "user", Content: json.RawMessage(`"same words"`)},
+	}, nil)
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+	assert.Equal(t, "reminders", entries[0].ExtensionID)
+	assert.Empty(t, entries[1].ExtensionID)
+	assert.Equal(t, 0, *entries[0].Anchor)
+	assert.Equal(t, 1, *entries[1].Anchor)
+	assert.Equal(t, entries[0].Content, entries[1].Content)
+}
+
 func TestClientRunTraceLifetimeAndParentage(t *testing.T) {
 	recorder, _ := telemetrytest.NewRecorder(t, false)
 

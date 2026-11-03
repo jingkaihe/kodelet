@@ -196,7 +196,7 @@ func (m *model) replaceLastUserEntry(content string) {
 		if m.entries[index].kind == entryInfo || m.entries[index].realtimeID != "" {
 			continue
 		}
-		if m.entries[index].kind == entryUser {
+		if m.entries[index].kind == entryUser && m.entries[index].extensionID == "" {
 			m.entries[index].content = content
 			return
 		}
@@ -295,7 +295,7 @@ func (m model) hasLastUserEntry(content string) bool {
 		if m.entries[i].kind == entryInfo || m.entries[i].realtimeID != "" {
 			continue
 		}
-		return m.entries[i].kind == entryUser && strings.TrimSpace(m.entries[i].content) == content
+		return m.entries[i].kind == entryUser && m.entries[i].extensionID == "" && strings.TrimSpace(m.entries[i].content) == content
 	}
 	return false
 }

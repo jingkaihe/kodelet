@@ -1394,6 +1394,7 @@ const (
 // WebMessage represents a message with structured tool calls for the web UI
 type WebMessage struct {
 	delegatedSource  string
+	ExtensionID      string                     `json:"extensionId,omitempty"`
 	Anchor           *int                       `json:"anchor,omitempty"`
 	ID               string                     `json:"id,omitempty"`
 	ResourceReloadID string                     `json:"resourceReloadId,omitempty"`

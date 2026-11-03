@@ -129,9 +129,10 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 			switch msg.Role {
 			case "user":
 				entries = append(entries, chatEntry{
-					kind:       entryUser,
-					content:    strings.TrimSpace(msg.Content),
-					codingSpan: extendCodingSpan(nil, msg.Anchor),
+					extensionID: msg.ExtensionID,
+					kind:        entryUser,
+					content:     strings.TrimSpace(msg.Content),
+					codingSpan:  extendCodingSpan(nil, msg.Anchor),
 				})
 			case "assistant":
 				text := strings.TrimSpace(msg.Content)

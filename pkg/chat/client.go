@@ -686,6 +686,7 @@ type controlPlaneConversationResponse struct {
 }
 
 type controlPlaneConversationMessage struct {
+	ExtensionID      string                     `json:"extensionId"`
 	ID               string                     `json:"id"`
 	Anchor           *int                       `json:"anchor"`
 	Kind             string                     `json:"kind"`
@@ -765,6 +766,7 @@ func normalizeControlPlaneConversationMessages(messages []controlPlaneConversati
 			if strings.TrimSpace(content) != "" {
 				result = append(result, conversations.StreamableMessage{
 					Kind: "text", Role: role, Content: content, ID: message.ID, Anchor: anchor,
+					ExtensionID: message.ExtensionID,
 				})
 			}
 			continue

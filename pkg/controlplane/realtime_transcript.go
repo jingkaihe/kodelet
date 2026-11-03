@@ -4,12 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -198,70 +198,15 @@ func (s *Server) projectRealtimeTranscript(ctx context.Context, conversationID s
 // User provenance counts raw user items before any renderer drops tool feedback
 // or host notices. It is an insertion identity, never a text comparison.
 func (s *Server) convertRealtimeSegment(raw json.RawMessage, provider string, metadata map[string]any, results map[string]tooltypes.StructuredToolResult, userOrdinal *int) ([]WebMessage, error) {
-	if metadata["delegated_user_sources"] == nil {
-		return s.convertToWebMessages(raw, provider, metadata, results)
-	}
-	var items []json.RawMessage
-	if err := json.Unmarshal(raw, &items); err != nil {
-		return nil, err
-	}
-	var messages []WebMessage
-	var batch []json.RawMessage
-	flush := func(sourceID string) error {
-		if len(batch) == 0 {
-			return nil
-		}
-		encoded, err := json.Marshal(batch)
-		if err != nil {
-			return err
-		}
-		entries, err := s.convertToWebMessages(encoded, provider, metadata, results)
-		if err != nil {
-			return err
-		}
-		for i := range entries {
-			if entries[i].Role == "user" {
-				entries[i].delegatedSource = sourceID
+	return conversations.ProjectHistorySegment(raw, metadata, userOrdinal,
+		func(raw json.RawMessage) ([]WebMessage, error) {
+			return s.convertToWebMessages(raw, provider, metadata, results)
+		}, func(message *WebMessage, source conversations.UserMessageProvenance) {
+			if message.Role == "user" {
+				message.delegatedSource = source.DelegatedSource
+				message.ExtensionID = source.ExtensionID
 			}
-		}
-		messages = append(messages, entries...)
-		batch = nil
-		return nil
-	}
-	for _, item := range items {
-		var header struct {
-			Role string `json:"role"`
-		}
-		if err := json.Unmarshal(item, &header); err != nil {
-			return nil, err
-		}
-		sourceID := ""
-		if header.Role == "user" {
-			key := strconv.Itoa(*userOrdinal)
-			switch sources := metadata["delegated_user_sources"].(type) {
-			case map[string]string:
-				sourceID = sources[key]
-			case map[string]any:
-				sourceID, _ = sources[key].(string)
-			}
-			*userOrdinal++
-		}
-		if sourceID != "" {
-			if err := flush(""); err != nil {
-				return nil, err
-			}
-			batch = append(batch, item)
-			if err := flush(sourceID); err != nil {
-				return nil, err
-			}
-		} else {
-			batch = append(batch, item)
-		}
-	}
-	if err := flush(""); err != nil {
-		return nil, err
-	}
-	return messages, nil
+		})
 }
 
 func (s *Server) realtimeInstructions(ctx context.Context, conversationID string) string {

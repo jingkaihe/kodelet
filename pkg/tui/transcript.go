@@ -32,6 +32,11 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 
 		switch entry.kind {
 		case entryUser:
+			if entry.extensionID != "" {
+				label := thoughtHeaderStyle.Render(wrapText("Extension: "+entry.extensionID, m.transcriptTextWidth()))
+				b.WriteString(label + "\n")
+				line += lineCount(label)
+			}
 			block := userStyle.Render("┃ " + strings.ReplaceAll(wrapText(strings.TrimSpace(entry.content), m.transcriptTextWidth()-2), "\n", "\n┃ "))
 			b.WriteString(block)
 			b.WriteString("\n")

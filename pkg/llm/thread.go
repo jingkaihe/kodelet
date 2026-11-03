@@ -5,6 +5,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -118,6 +119,25 @@ func SendMessageAndGetText(ctx context.Context, state tooltypes.State, query str
 
 // ExtractMessages parses the raw messages from a conversation record
 func ExtractMessages(provider string, rawMessages []byte, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]llmtypes.Message, error) {
+	return extractDisplayMessages(provider, rawMessages, metadata, toolResults, new(int))
+}
+
+func extractDisplayMessages(provider string, rawMessages []byte, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult, userOrdinal *int) ([]llmtypes.Message, error) {
+	if strings.EqualFold(provider, "openai") && openai.RecordUsesResponsesMode(metadata, rawMessages) {
+		provider = "openai-responses"
+	}
+	return conversations.ProjectHistorySegment(rawMessages, metadata, userOrdinal,
+		func(raw json.RawMessage) ([]llmtypes.Message, error) {
+			return extractMessages(provider, raw, metadata, toolResults)
+		}, func(message *llmtypes.Message, source conversations.UserMessageProvenance) {
+			if message.Role == "user" && source.ExtensionID != "" {
+				message.Role = "extension"
+				message.Content = "Extension: " + source.ExtensionID + "\n\n" + message.Content
+			}
+		})
+}
+
+func extractMessages(provider string, rawMessages []byte, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]llmtypes.Message, error) {
 	var messages []llmtypes.Message
 	var err error
 	provider = strings.TrimSpace(strings.ToLower(provider))
@@ -143,9 +163,10 @@ func ExtractMessages(provider string, rawMessages []byte, metadata map[string]an
 // ExtractConversationRecordEntries projects full display history without changing active model input.
 func ExtractConversationRecordEntries(record convtypes.ConversationRecord) ([]conversations.StreamableMessage, error) {
 	var entries []conversations.StreamableMessage
+	userOrdinal := 0
 	if history := record.CompactionHistory; history != nil {
 		for _, segment := range history.Segments {
-			messages, err := ExtractConversationEntries(record.Provider, segment.RawMessages, record.Metadata, record.ToolResults)
+			messages, err := extractDisplayEntries(record.Provider, segment.RawMessages, record.Metadata, record.ToolResults, &userOrdinal)
 			if err != nil {
 				return nil, err
 			}
@@ -160,7 +181,7 @@ func ExtractConversationRecordEntries(record convtypes.ConversationRecord) ([]co
 	if err != nil {
 		return nil, err
 	}
-	messages, err := ExtractConversationEntries(record.Provider, visible, record.Metadata, record.ToolResults)
+	messages, err := extractDisplayEntries(record.Provider, visible, record.Metadata, record.ToolResults, &userOrdinal)
 	if err != nil {
 		return nil, err
 	}
@@ -170,9 +191,10 @@ func ExtractConversationRecordEntries(record convtypes.ConversationRecord) ([]co
 // ExtractConversationRecordMessages provides the complete transcript for text and JSON exports.
 func ExtractConversationRecordMessages(record convtypes.ConversationRecord) ([]llmtypes.Message, error) {
 	var messages []llmtypes.Message
+	userOrdinal := 0
 	if history := record.CompactionHistory; history != nil {
 		for _, segment := range history.Segments {
-			entries, err := ExtractMessages(record.Provider, segment.RawMessages, record.Metadata, record.ToolResults)
+			entries, err := extractDisplayMessages(record.Provider, segment.RawMessages, record.Metadata, record.ToolResults, &userOrdinal)
 			if err != nil {
 				return nil, err
 			}
@@ -188,7 +210,7 @@ func ExtractConversationRecordMessages(record convtypes.ConversationRecord) ([]l
 	if err != nil {
 		return nil, err
 	}
-	entries, err := ExtractMessages(record.Provider, visible, record.Metadata, record.ToolResults)
+	entries, err := extractDisplayMessages(record.Provider, visible, record.Metadata, record.ToolResults, &userOrdinal)
 	if err != nil {
 		return nil, err
 	}
@@ -197,6 +219,24 @@ func ExtractConversationRecordMessages(record convtypes.ConversationRecord) ([]l
 
 // ExtractConversationEntries parses the raw messages from a conversation record into structured conversation entries.
 func ExtractConversationEntries(provider string, rawMessages []byte, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
+	return extractDisplayEntries(provider, rawMessages, metadata, toolResults, new(int))
+}
+
+func extractDisplayEntries(provider string, rawMessages []byte, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult, userOrdinal *int) ([]conversations.StreamableMessage, error) {
+	if strings.EqualFold(provider, "openai") && openai.RecordUsesResponsesMode(metadata, rawMessages) {
+		provider = "openai-responses"
+	}
+	return conversations.ProjectHistorySegment(rawMessages, metadata, userOrdinal,
+		func(raw json.RawMessage) ([]conversations.StreamableMessage, error) {
+			return extractConversationEntries(provider, raw, metadata, toolResults)
+		}, func(message *conversations.StreamableMessage, source conversations.UserMessageProvenance) {
+			if message.Role == "user" {
+				message.ExtensionID = source.ExtensionID
+			}
+		})
+}
+
+func extractConversationEntries(provider string, rawMessages []byte, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
 	var messages []conversations.StreamableMessage
 	var err error
 	provider = strings.TrimSpace(strings.ToLower(provider))

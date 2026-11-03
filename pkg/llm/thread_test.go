@@ -41,6 +41,94 @@ func requireAnthropicIntegration(t *testing.T) {
 	}
 }
 
+func TestExtensionMessageDisplayHistory(t *testing.T) {
+	for _, provider := range []string{"anthropic", "openai", "openai-responses"} {
+		for _, state := range []string{"snapshot", "saved", "compacted"} {
+			t.Run(provider+"/"+state, func(t *testing.T) {
+				item := func(text string) json.RawMessage {
+					content := any(text)
+					if provider == "anthropic" {
+						content = []map[string]string{{"type": "text", "text": text}}
+					}
+					encoded, err := json.Marshal(map[string]any{"type": "message", "role": "user", "content": content})
+					require.NoError(t, err)
+					return encoded
+				}
+				// Empty user items still consume an ordinal even when a renderer drops them.
+				archive := []json.RawMessage{item(""), item("same words"), item("visible notice"), item("same words")}
+				tail := []json.RawMessage{item("hidden reminder"), item("same words")}
+				raw, err := json.Marshal(append(archive, tail...))
+				require.NoError(t, err)
+				record := convtypes.ConversationRecord{
+					Provider: provider, RawMessages: raw,
+					Metadata: map[string]any{"extension_messages": map[string]conversations.UserMessageProvenance{
+						"1": {ExtensionID: "reminders", Visibility: "hidden"},
+						"2": {ExtensionID: "reminders", Visibility: "visible"},
+						"4": {ExtensionID: "reminders", Visibility: "hidden"},
+					}},
+				}
+				if state == "compacted" {
+					archived, err := json.Marshal(archive)
+					require.NoError(t, err)
+					record.CompactionHistory = &convtypes.CompactionHistory{
+						ActiveDisplayStart: 1,
+						Segments: []convtypes.CompactedSegment{{
+							RawMessages: archived,
+							Marker:      llmtypes.CompactionMarker{ID: "checkpoint", Method: "api"},
+						}},
+					}
+					record.RawMessages, err = json.Marshal(append([]json.RawMessage{item("bootstrap")}, tail...))
+					require.NoError(t, err)
+				}
+				if state != "snapshot" {
+					encoded, err := json.Marshal(record)
+					require.NoError(t, err)
+					require.NoError(t, json.Unmarshal(encoded, &record))
+				}
+				before, err := json.Marshal(record)
+				require.NoError(t, err)
+				entries, err := ExtractConversationRecordEntries(record)
+				require.NoError(t, err)
+				var texts []string
+				for _, entry := range entries {
+					if entry.Kind == "text" && strings.TrimSpace(entry.Content) != "" {
+						texts = append(texts, entry.Content)
+						if entry.Content == "visible notice" {
+							assert.Equal(t, "reminders", entry.ExtensionID)
+						} else {
+							assert.Empty(t, entry.ExtensionID)
+						}
+					}
+					if entry.Compaction != nil {
+						assert.Equal(t, "checkpoint", entry.Compaction.ID)
+					}
+				}
+				assert.Equal(t, []string{"visible notice", "same words", "same words"}, texts)
+				messages, err := ExtractConversationRecordMessages(record)
+				require.NoError(t, err)
+				var humanTexts []string
+				for _, message := range messages {
+					assert.NotContains(t, message.Content, "hidden reminder")
+					if message.Role == "user" && message.Content != "" {
+						humanTexts = append(humanTexts, message.Content)
+					}
+					if message.Role == "extension" {
+						assert.Equal(t, "Extension: reminders\n\nvisible notice", message.Content)
+					}
+				}
+				assert.Equal(t, []string{"same words", "same words"}, humanTexts)
+				markdown, err := RenderConversationRecordMarkdown(record, ConversationMarkdownOptions{})
+				require.NoError(t, err)
+				assert.NotContains(t, markdown, "hidden reminder")
+				assert.Contains(t, markdown, "Extension: `reminders`")
+				after, err := json.Marshal(record)
+				require.NoError(t, err)
+				assert.Equal(t, before, after, "display must not modify raw model input, archive or metadata")
+			})
+		}
+	}
+}
+
 func TestExtractConversationRecordEntriesCompaction(t *testing.T) {
 	record := convtypes.ConversationRecord{
 		Provider: "openai",

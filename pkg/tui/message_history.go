@@ -190,7 +190,7 @@ func trimMessageHistory(history []string) []string {
 func userMessagesFromEntries(entries []chatEntry) []string {
 	messages := make([]string, 0)
 	for _, entry := range entries {
-		if entry.kind != entryUser {
+		if entry.kind != entryUser || entry.extensionID != "" {
 			continue
 		}
 		if text := strings.TrimSpace(entry.content); text != "" {

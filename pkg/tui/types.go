@@ -115,10 +115,11 @@ type assistantBlock struct {
 }
 
 type chatEntry struct {
-	kind    entryKind
-	title   string
-	content string
-	blocks  []assistantBlock
+	extensionID string
+	kind        entryKind
+	title       string
+	content     string
+	blocks      []assistantBlock
 
 	// Voice updates replace one utterance without sharing the coding reply.
 	realtimeID     string

@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -23,6 +25,102 @@ const (
 	// previous environment in place.
 	MessageDisplayKindResourceReloadRefused = "resource-reload-refused"
 )
+
+// UserMessageProvenance is host-owned attribution, never inferred from message text.
+type UserMessageProvenance struct {
+	ExtensionID     string `json:"extensionId"`
+	Visibility      string `json:"visibility"`
+	DelegatedSource string `json:"-"`
+}
+
+// ProjectHistorySegment converts display history while omitting hidden extension
+// input. userOrdinal spans archived segments and the visible current tail, and
+// counts every raw user item, including tool feedback omitted by renderers.
+// Raw history and provider conversion semantics remain unchanged; only attributed
+// user items are isolated so their converted entries can receive a trusted source.
+func ProjectHistorySegment[T any](
+	raw json.RawMessage, metadata map[string]any, userOrdinal *int,
+	convert func(json.RawMessage) ([]T, error), attribute func(*T, UserMessageProvenance),
+) ([]T, error) {
+	if metadata["extension_messages"] == nil && metadata["delegated_user_sources"] == nil {
+		return convert(raw)
+	}
+	var extensions map[string]UserMessageProvenance
+	if value := metadata["extension_messages"]; value != nil {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to encode extension message provenance")
+		}
+		if err := json.Unmarshal(encoded, &extensions); err != nil {
+			return nil, errors.Wrap(err, "failed to decode extension message provenance")
+		}
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, err
+	}
+	var messages []T
+	var batch []json.RawMessage
+	flush := func(source UserMessageProvenance) error {
+		if len(batch) == 0 {
+			return nil
+		}
+		encoded, err := json.Marshal(batch)
+		if err != nil {
+			return err
+		}
+		entries, err := convert(encoded)
+		if err != nil {
+			return err
+		}
+		if source.ExtensionID != "" || source.DelegatedSource != "" {
+			for i := range entries {
+				attribute(&entries[i], source)
+			}
+		}
+		messages = append(messages, entries...)
+		batch = nil
+		return nil
+	}
+	for _, item := range items {
+		var header struct {
+			Role string `json:"role"`
+		}
+		if err := json.Unmarshal(item, &header); err != nil {
+			return nil, err
+		}
+		var source UserMessageProvenance
+		if header.Role == "user" {
+			key := strconv.Itoa(*userOrdinal)
+			source = extensions[key]
+			switch sources := metadata["delegated_user_sources"].(type) {
+			case map[string]string:
+				source.DelegatedSource = sources[key]
+			case map[string]any:
+				source.DelegatedSource, _ = sources[key].(string)
+			}
+			*userOrdinal++
+		}
+		if source.ExtensionID == "" && source.DelegatedSource == "" {
+			batch = append(batch, item)
+			continue
+		}
+		if err := flush(UserMessageProvenance{}); err != nil {
+			return nil, err
+		}
+		if source.ExtensionID != "" && source.Visibility == "hidden" {
+			continue
+		}
+		batch = append(batch, item)
+		if err := flush(source); err != nil {
+			return nil, err
+		}
+	}
+	if err := flush(UserMessageProvenance{}); err != nil {
+		return nil, err
+	}
+	return messages, nil
+}
 
 // IsResourceReloadDisplayKind reports a host marker for a resource reload outcome.
 func IsResourceReloadDisplayKind(kind string) bool {
