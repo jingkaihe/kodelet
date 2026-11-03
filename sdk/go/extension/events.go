@@ -163,6 +163,16 @@ type ToolListPatch struct {
 	Enable  []string `json:"enable,omitempty"`
 }
 
+// FollowUp requests a model-visible notification at turn.end or agent.end.
+// Visibility defaults to visible; hidden suppresses user-facing text. A key and
+// positive revision deduplicate notifications per extension and conversation.
+type FollowUp struct {
+	Text       string `json:"text"`
+	Visibility string `json:"visibility,omitempty"`
+	Key        string `json:"key,omitempty"`
+	Revision   int64  `json:"revision,omitempty"`
+}
+
 // EventResult is returned by event handlers; the zero value means no change.
 // Input and Output replace the tool input or output seen by later handlers and
 // the host.
@@ -172,6 +182,7 @@ type EventResult struct {
 	Block            *EventBlock        `json:"block,omitempty"`
 	Message          *string            `json:"message,omitempty"`
 	FollowUpMessages []string           `json:"followUpMessages,omitempty"`
+	FollowUps        []FollowUp         `json:"followUps,omitempty"`
 	SystemPrompt     *SystemPromptPatch `json:"systemPrompt,omitempty"`
 	Tools            *ToolListPatch     `json:"tools,omitempty"`
 	Resources        any                `json:"resources,omitempty"`

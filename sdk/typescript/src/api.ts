@@ -271,6 +271,9 @@ export class ExtensionHost implements ExtensionAPI {
       if (result.followUpMessages !== undefined) {
         aggregate.followUpMessages = [...(aggregate.followUpMessages ?? []), ...result.followUpMessages];
       }
+      if (result.followUps !== undefined) {
+        aggregate.followUps = [...(aggregate.followUps ?? []), ...result.followUps];
+      }
       if (result.resources !== undefined) {
         aggregate.resources = result.resources;
       }

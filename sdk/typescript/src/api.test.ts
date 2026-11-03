@@ -378,6 +378,19 @@ test("registers tools, commands, events and executes handlers", async () => {
   assert.deepEqual(agentEndResult, { followUpMessages: ["inspect tests"] });
 });
 
+test("turn.end and agent.end aggregate structured and legacy follow-ups by priority", async () => {
+  for (const event of ["turn.end", "agent.end"] as const) {
+    const high = { text: "new mail", visibility: "hidden" as const, key: "mailbox:owner:contact", revision: 42 };
+    const low = { text: "visible notification" };
+    const harness = await createTestHarness(defineExtension((ext) => {
+      ext.on(event, () => ({ followUps: [low], followUpMessages: ["legacy low"] }));
+      ext.on(event, { priority: 10 }, () => ({ followUps: [high], followUpMessages: ["legacy high"] }));
+    }));
+    const result = await harness.handleEvent({ id: "evt-followup", event, payload: {} });
+    assert.deepEqual(result, { followUps: [high, low], followUpMessages: ["legacy high", "legacy low"] });
+  }
+});
+
 test("agent.finished subscriptions receive typed termination outcomes and call context", async () => {
   const observed: AgentFinishedEvent[] = [];
   const harness = await createTestHarness(defineExtension((ext) => {

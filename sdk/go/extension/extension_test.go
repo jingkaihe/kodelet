@@ -211,6 +211,39 @@ func TestEventHandlersRunByPriorityAndMergeResults(t *testing.T) {
 	assert.Equal(t, []string{"high", "low"}, result.FollowUpMessages)
 }
 
+func TestFollowUpsAggregateAtTurnAndAgentEnd(t *testing.T) {
+	for _, name := range []string{"turn.end", "agent.end"} {
+		t.Run(name, func(t *testing.T) {
+			ext := extension.New(extension.Metadata{})
+			high := extension.FollowUp{Text: "new mail", Visibility: "hidden", Key: "mailbox:owner:contact", Revision: 42}
+			low := extension.FollowUp{Text: "visible notification"}
+			register := func(result extension.EventResult, priority int) {
+				if name == "turn.end" {
+					extension.On(ext, extension.EventTurnEnd, func(context.Context, extension.TurnEndEvent, *extension.EventContext) (extension.EventResult, error) {
+						return result, nil
+					}, extension.WithPriority(priority))
+				} else {
+					extension.On(ext, extension.EventAgentEnd, func(context.Context, extension.AgentEndEvent, *extension.EventContext) (extension.EventResult, error) {
+						return result, nil
+					}, extension.WithPriority(priority))
+				}
+			}
+			register(extension.EventResult{FollowUps: []extension.FollowUp{low}, FollowUpMessages: []string{"legacy low"}}, 0)
+			register(extension.EventResult{FollowUps: []extension.FollowUp{high}, FollowUpMessages: []string{"legacy high"}}, 10)
+			result, err := newHarness(t, ext, nil).HandleEvent(t.Context(), name, map[string]any{})
+			require.NoError(t, err)
+			assert.Equal(t, []extension.FollowUp{high, low}, result.FollowUps)
+			assert.Equal(t, []string{"legacy high", "legacy low"}, result.FollowUpMessages)
+			raw, err := json.Marshal(result)
+			require.NoError(t, err)
+			var wire map[string]any
+			require.NoError(t, json.Unmarshal(raw, &wire))
+			assert.Contains(t, wire, "followUps")
+			assert.Contains(t, wire, "followUpMessages")
+		})
+	}
+}
+
 func TestBlockStopsTheChainAndAgentInitPatchesMerge(t *testing.T) {
 	ext := extension.New(extension.Metadata{})
 	calledAfterBlock := false

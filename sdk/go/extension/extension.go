@@ -531,6 +531,7 @@ func (e *Extension) handleEvent(ctx context.Context, env *callEnv, params handle
 		if result.FollowUpMessages != nil {
 			aggregate.FollowUpMessages = append(aggregate.FollowUpMessages, result.FollowUpMessages...)
 		}
+		aggregate.FollowUps = append(aggregate.FollowUps, result.FollowUps...)
 		if result.Resources != nil {
 			aggregate.Resources = result.Resources
 		}

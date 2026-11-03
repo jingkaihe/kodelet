@@ -82,6 +82,7 @@ export type {
   EventPayload,
   EventPayloadMap,
   EventResult,
+  FollowUp,
   EventSubscriptionOptions,
   ExecResult,
   ExtensionAPI,

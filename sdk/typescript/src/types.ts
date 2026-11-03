@@ -525,12 +525,21 @@ export interface ToolListPatch {
   enable?: string[];
 }
 
+/** A model-visible turn.end or agent.end notification, attributed by the host. */
+export interface FollowUp {
+  text: string;
+  visibility?: "hidden" | "visible";
+  key?: string;
+  revision?: number;
+}
+
 export interface EventResult {
   input?: unknown;
   output?: unknown;
   block?: EventBlock;
   message?: string;
   followUpMessages?: string[];
+  followUps?: FollowUp[];
   systemPrompt?: SystemPromptPatch;
   tools?: ToolListPatch;
   resources?: unknown;
