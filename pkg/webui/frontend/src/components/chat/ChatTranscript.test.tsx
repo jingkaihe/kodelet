@@ -19,6 +19,36 @@ vi.mock('../../utils', async (importOriginal) => {
 });
 
 describe('ChatTranscript', () => {
+  it('labels trusted extension history without attributing identical human text to it', () => {
+    const messages = conversationToChatMessages({
+      id: 'extensions',
+      createdAt: '',
+      updatedAt: '',
+      messageCount: 2,
+      messages: [
+        { role: 'user', content: 'same words', extensionId: 'reminders' },
+        { role: 'user', content: 'same words' },
+      ],
+    });
+    expect(messages[0].extensionId).toBe('reminders');
+    expect(messages[1].extensionId).toBeUndefined();
+    expect(
+      applyChatStreamEvent([messages[0]], {
+        kind: 'user-message-display',
+        content: 'same words',
+      })
+    ).toEqual(messages);
+    const { container, rerender } = render(<ChatTranscript isStreaming messages={messages} />);
+    const panels = container.querySelectorAll('article');
+    expect(panels).toHaveLength(2);
+    expect(within(panels[0]).getByText('Extension: reminders')).toBeVisible();
+    expect(within(panels[0]).queryByText('You')).not.toBeInTheDocument();
+    expect(within(panels[1]).getByText('You')).toBeVisible();
+    expect(screen.getAllByText('same words')).toHaveLength(2);
+    rerender(<ChatTranscript isStreaming={false} messages={messages} />);
+    expect(screen.getByText('Extension: reminders')).toBeVisible();
+  });
+
   beforeEach(() => {
     copyToClipboardMock.mockReset();
   });

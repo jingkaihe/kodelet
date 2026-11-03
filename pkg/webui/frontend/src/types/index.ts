@@ -8,6 +8,8 @@ export interface CompactionMarker {
 }
 
 export interface Message {
+  /** Trusted host attribution, not inferred from content. */
+  extensionId?: string;
   id?: string;
   anchor?: number;
   role: 'user' | 'assistant';
@@ -676,6 +678,7 @@ export interface UINotifyEvent {
 }
 
 export interface ChatRenderMessage {
+  extensionId?: string;
   id?: string;
   anchor?: number;
   /** Block offsets retain ordinary display-message boundaries after grouping. */

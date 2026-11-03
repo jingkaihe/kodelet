@@ -8,6 +8,7 @@ interface ChatMessageFrameProps {
   children: React.ReactNode;
   copyText?: string;
   messageRole: ChatMessageRole;
+  extensionId?: string;
 }
 
 const messageCopyButtonBaseClassName =
@@ -21,6 +22,7 @@ const ChatMessageFrame: React.FC<ChatMessageFrameProps> = ({
   children,
   copyText = '',
   messageRole,
+  extensionId,
 }) => {
   const isUser = messageRole === 'user';
 
@@ -34,7 +36,8 @@ const ChatMessageFrame: React.FC<ChatMessageFrameProps> = ({
       >
         <div className="chat-message-heading">
           <p className="chat-message-role">
-            <span aria-hidden="true">{isUser ? '›' : '·'}</span> {getRoleLabel(messageRole)}
+            <span aria-hidden="true">{isUser ? '›' : '·'}</span>{' '}
+            {extensionId ? `Extension: ${extensionId}` : getRoleLabel(messageRole)}
           </p>
 
           {isUser && copyText.trim() ? (

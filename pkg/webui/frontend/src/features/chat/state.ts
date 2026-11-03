@@ -305,6 +305,7 @@ export const conversationToChatMessages = (
     if (message.role === 'user') {
       chatMessages.push({
         ...(message.id ? { id: message.id, anchor: message.anchor } : {}),
+        ...(message.extensionId ? { extensionId: message.extensionId } : {}),
         role: 'user',
         content: message.content,
       });
@@ -621,7 +622,10 @@ export const applyChatStreamEvent = (
       }
 
       const lastMessageIndex = lastAgentMessageIndex(nextMessages);
-      if (nextMessages[lastMessageIndex]?.role === 'user') {
+      if (
+        nextMessages[lastMessageIndex]?.role === 'user' &&
+        !nextMessages[lastMessageIndex].extensionId
+      ) {
         nextMessages[lastMessageIndex] = {
           role: 'user',
           content: event.content,

@@ -487,6 +487,7 @@ const TranscriptMessage = React.memo(
       <ChatMessageFrame
         copyText={isUser ? getMessageBlockCopyText(message.content) : undefined}
         messageRole={message.role}
+        extensionId={message.extensionId}
       >
         {isUser ? (
           <div className="space-y-3">{renderUserContent(message.content)}</div>
