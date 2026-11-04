@@ -716,6 +716,8 @@ kodelet conversation turn <conversation-id> <turn-id>
 
 History filters use the exact runner ID and its saved directory. Forking without a conversation ID requires `--runner` or `--cwd`. Exports are saved on your client. Remote `import` and `edit` are not supported.
 
+`conversation show` omits hidden extension follow-ups from text, Markdown, and JSON output. Visible follow-ups use an `Extension: <id>` label in text; JSON messages use `role: "extension"` with the same attribution prefixed to `content`. `--format raw` and `conversation export` preserve the full record, including hidden follow-ups and their metadata.
+
 Move a conversation to a registered runner, optionally changing its destination directory:
 
 ```bash

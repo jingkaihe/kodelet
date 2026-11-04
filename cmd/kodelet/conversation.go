@@ -627,7 +627,10 @@ func displayConversation(w io.Writer, messages []llmtypes.Message) {
 				roleLabel = msg.Role
 			}
 		}
-		presentation.Section(roleLabel)
+		// Extension content already starts with its attribution label.
+		if msg.Role != "extension" {
+			presentation.Section(roleLabel)
+		}
 		fmt.Fprintf(w, "%s\n", msg.Content)
 	}
 }

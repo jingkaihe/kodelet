@@ -471,6 +471,44 @@ func TestDisplayConversation(t *testing.T) {
 	assert.Contains(t, output, "blank role")
 }
 
+func TestRenderConversationRecordExtensionMessages(t *testing.T) {
+	record := convtypes.ConversationRecord{
+		Provider: "anthropic",
+		RawMessages: json.RawMessage(`[
+			{"role":"user","content":[{"type":"text","text":"hello"}]},
+			{"role":"user","content":[{"type":"text","text":"visible notice"}]},
+			{"role":"user","content":[{"type":"text","text":"hidden notice"}]}
+		]`),
+		Metadata: map[string]any{
+			"extension_messages": map[string]conversations.UserMessageProvenance{
+				"1": {ExtensionID: "reminders", Visibility: "visible"},
+				"2": {ExtensionID: "reminders", Visibility: "hidden"},
+			},
+		},
+	}
+	for _, format := range []string{"text", "json"} {
+		t.Run(format, func(t *testing.T) {
+			var output bytes.Buffer
+			require.NoError(t, renderConversationRecord(&output, record, &ConversationShowConfig{
+				Format: format, NoHeader: true,
+			}))
+			assert.NotContains(t, output.String(), "hidden notice")
+			if format == "json" {
+				var messages []llmtypes.Message
+				require.NoError(t, json.Unmarshal(output.Bytes(), &messages))
+				assert.Equal(t, []llmtypes.Message{
+					{Role: "user", Content: "hello"},
+					{Role: "extension", Content: "Extension: reminders\n\nvisible notice"},
+				}, messages)
+			} else {
+				assert.Contains(t, output.String(), "You")
+				assert.Contains(t, output.String(), "Extension: reminders\n\nvisible notice")
+				assert.Equal(t, 1, strings.Count(output.String(), "Extension"))
+			}
+		})
+	}
+}
+
 func TestRenderConversationRecordMarkdown(t *testing.T) {
 	record := convtypes.ConversationRecord{
 		ID:       "conv`md",

@@ -50,6 +50,8 @@ Output formats for `conversation show`:
 | `json` | Structured JSON with id, provider, summary, usage, and messages. |
 | `raw` | Full `ConversationRecord` dump including raw messages, tool results, and metadata. |
 
+Text, Markdown, and JSON omit hidden extension follow-ups. Visible follow-ups have an `Extension: <id>` text label; JSON uses `role: "extension"` and prefixes `content` with that attribution. Raw output and `conversation export <id> [path]` retain hidden follow-ups and metadata.
+
 ## Steering autonomous work
 
 ```bash
