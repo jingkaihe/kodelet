@@ -219,10 +219,9 @@ extensions:
     get_weather:
       enabled: true
 
-  processes:
-    weather:
-      env:
-        WEATHER_API_KEY: null
+  config:
+    org@repo/weather:
+      units: celsius
 ```
 
 Config semantics:
@@ -233,7 +232,7 @@ Config semantics:
 - `max_output_size`: maximum assistant-facing extension tool output.
 - `allow` / `deny`: extension allow/deny lists; deny wins when both match.
 - `tools`: per-tool enablement.
-- `processes`: per-extension process config, including env injection/inheritance.
+- `config`: YAML settings keyed by discovered extension ID (full `org@repo/name` for plugins). Each extension's mapping is sent as `extension.config` in the JSON-RPC initialization request (default `{}`). Strings, booleans, numbers, lists and nested mappings are supported; keys follow Viper's case-insensitive, lowercase convention. Extensions validate their own settings. Resource reload rereads workspace YAML; global config changes require a runner restart.
 
 Disable for one run:
 

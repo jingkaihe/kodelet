@@ -1890,7 +1890,12 @@ extensions:
     get_weather:
       enabled: true
 
+  config:
+    org@repo/weather:
+      units: celsius
 ```
+
+`extensions.config.<discovered-id>` holds an extension's YAML settings; plugins use the full `org@repo/name` ID. Kodelet sends this mapping as `extension.config` in the JSON-RPC initialization request (default `{}`). Strings, booleans, numbers, lists and nested mappings are supported; keys follow Viper's case-insensitive, lowercase convention. Extensions validate their own settings. Resource reload rereads the workspace's `kodelet-config.yaml`; global config changes require a runner restart.
 
 Extension subprocesses inherit Kodelet's environment. Start Kodelet with any environment variables required by extension tools.
 

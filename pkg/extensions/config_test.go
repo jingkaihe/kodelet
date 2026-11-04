@@ -3,11 +3,13 @@ package extensions
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLoadConfigFromViperUsesDefaultsWhenExtensionsUnset(t *testing.T) {
@@ -55,6 +57,51 @@ func TestLoadConfigFromViperLoadsExtensionConfig(t *testing.T) {
 	assert.Equal(t, []string{"org@repo/blocked"}, config.Deny)
 	requireFalse := false
 	assert.Equal(t, &requireFalse, config.Tools["get_weather"].Enabled)
+}
+
+func TestExtensionConfigPreservesStructuredValues(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer restoreViperSettings(originalSettings)
+	viper.Reset()
+	viper.SetConfigType("yaml")
+	require.NoError(t, viper.ReadConfig(strings.NewReader(`
+extensions:
+  config:
+    Subagent:
+      Enabled: true
+      Empty: ""
+      Literal: '$HOME/CaseSensitive,a,b'
+      Retries: 3
+      Ratio: 1.5
+      Nested:
+        Mode: Review
+      Values: [false, 2, CaseSensitive, null, {Key: Value}]
+    Org@Repo/Worker:
+      Token: SecretCase
+`)))
+	expected := map[string]map[string]any{
+		"subagent": {
+			"enabled": true,
+			"empty":   "",
+			"literal": "$HOME/CaseSensitive,a,b",
+			"retries": 3,
+			"ratio":   1.5,
+			"nested":  map[string]any{"mode": "Review"},
+			"values":  []any{false, 2, "CaseSensitive", nil, map[string]any{"key": "Value"}},
+		},
+		"org@repo/worker": {"token": "SecretCase"},
+	}
+	assert.Equal(t, expected, LoadConfigFromViper().Config)
+	config, err := LoadConfigFromSettings(viper.GetStringMap("extensions"))
+	require.NoError(t, err)
+	assert.Equal(t, expected, config.Config)
+}
+
+func TestExtensionConfigRequiresObjects(t *testing.T) {
+	for _, value := range []any{"invalid", true, 3, []any{"invalid"}} {
+		_, err := LoadConfigFromSettings(map[string]any{"config": map[string]any{"subagent": value}})
+		require.Error(t, err)
+	}
 }
 
 func TestExtensionConfigHasNoTimeoutConfigSurface(t *testing.T) {

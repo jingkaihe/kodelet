@@ -120,6 +120,45 @@ func TestRuntimePassesWorkingDirToPATHExtensionProcessEnvironment(t *testing.T) 
 	assert.Equal(t, rootDir, result.GetResult())
 }
 
+func TestRuntimeInitializesWithConfigOnlyForMatchingExtensionID(t *testing.T) {
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	config, err := LoadConfigFromSettings(map[string]any{
+		"config": map[string]any{
+			"subagent": map[string]any{
+				"mailbox": true,
+				"nested":  map[string]any{"limit": 3, "ratio": 1.5},
+				"values":  []any{false, "CaseSensitive", nil, map[string]any{"count": 2}},
+			},
+			"org@repo/subagent": map[string]any{"mailbox": false},
+			"empty":             map[string]any{},
+		},
+	})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, plugin, expected string
+	}{
+		{"subagent", "", `{"mailbox":true,"nested":{"limit":3,"ratio":1.5},"values":[false,"CaseSensitive",null,{"count":2}]}`},
+		{"subagent", "Org@Repo", `{"mailbox":false}`},
+		{"subagent", "other@repo", `{}`},
+		{"other", "", `{}`},
+		{"empty", "", `{}`},
+	} {
+		t.Run(tc.plugin+"/"+tc.name, func(t *testing.T) {
+			rootDir := t.TempDir()
+			writeExecutable(t, filepath.Join(rootDir, "kodelet-extension-"+tc.name), helperEnvExtensionScript(t))
+			runtime, err := NewRuntime(t.Context(), WithConfig(config), WithWorkingDir(rootDir),
+				WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone, PluginPrefix: tc.plugin}))
+			require.NoError(t, err)
+			t.Cleanup(func() { assert.NoError(t, runtime.Close()) })
+			require.NoError(t, runtime.InitializationError())
+			require.Len(t, runtime.Tools(), 1)
+			result := runtime.Tools()[0].Execute(t.Context(), nil, `{"config":true}`)
+			require.False(t, result.IsError(), result.GetResult())
+			assert.JSONEq(t, tc.expected, result.GetResult())
+		})
+	}
+}
+
 func TestRuntimeExtensionToolCanRequestUIInput(t *testing.T) {
 	rootDir := t.TempDir()
 	extDir := filepath.Join(rootDir, "ask")
@@ -1112,6 +1151,7 @@ func helperEnvExtensionScript(t *testing.T) string {
 }
 
 func runEnvExtensionHelperProcess() {
+	var config map[string]any
 	workspaceCWD := os.Getenv(workspaceCWDEnvKey)
 	if diagnostic := os.Getenv("KODELET_TEST_EXTENSION_STDERR"); diagnostic != "" {
 		fmt.Fprintln(os.Stderr, diagnostic)
@@ -1145,11 +1185,12 @@ func runEnvExtensionHelperProcess() {
 
 		switch request.Method {
 		case "extension.initialize":
+			var params initializeParams
+			if err := json.Unmarshal(request.Params, &params); err != nil {
+				return
+			}
+			config = params.Extension.Config
 			if gateDir != "" {
-				var params initializeParams
-				if err := json.Unmarshal(request.Params, &params); err != nil {
-					return
-				}
 				id := params.Extension.ID
 				marker := filepath.Join(gateDir, id)
 				if err := os.WriteFile(marker+".started", []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
@@ -1194,7 +1235,21 @@ func runEnvExtensionHelperProcess() {
 				}},
 			}, nil)
 		case "extension.tool.execute":
-			writeHelperResponse(request.ID, ToolExecutionResult{Content: workspaceCWD}, nil)
+			var params struct {
+				Input struct {
+					Config bool `json:"config"`
+				} `json:"input"`
+			}
+			if err := json.Unmarshal(request.Params, &params); err != nil {
+				writeHelperResponse(request.ID, nil, &rpcError{Code: -32602, Message: err.Error()})
+				continue
+			}
+			value := workspaceCWD
+			if params.Input.Config {
+				data, _ := json.Marshal(config)
+				value = string(data)
+			}
+			writeHelperResponse(request.ID, ToolExecutionResult{Content: value}, nil)
 		case "extension.event.handle":
 			writeHelperResponse(request.ID, EventResult{}, nil)
 		default:

@@ -18,14 +18,15 @@ type ToolConfig struct {
 
 // Config contains extension runtime configuration.
 type Config struct {
-	Enabled       bool                  `mapstructure:"enabled" json:"enabled" yaml:"enabled"`
-	DiscoverPath  bool                  `mapstructure:"discover_path" json:"discover_path" yaml:"discover_path"`
-	GlobalDir     string                `mapstructure:"global_dir" json:"global_dir" yaml:"global_dir"`
-	LocalDir      string                `mapstructure:"local_dir" json:"local_dir" yaml:"local_dir"`
-	MaxOutputSize int                   `mapstructure:"max_output_size" json:"max_output_size" yaml:"max_output_size"`
-	Allow         []string              `mapstructure:"allow" json:"allow" yaml:"allow"`
-	Deny          []string              `mapstructure:"deny" json:"deny" yaml:"deny"`
-	Tools         map[string]ToolConfig `mapstructure:"tools" json:"tools" yaml:"tools"`
+	Enabled       bool                      `mapstructure:"enabled" json:"enabled" yaml:"enabled"`
+	DiscoverPath  bool                      `mapstructure:"discover_path" json:"discover_path" yaml:"discover_path"`
+	GlobalDir     string                    `mapstructure:"global_dir" json:"global_dir" yaml:"global_dir"`
+	LocalDir      string                    `mapstructure:"local_dir" json:"local_dir" yaml:"local_dir"`
+	MaxOutputSize int                       `mapstructure:"max_output_size" json:"max_output_size" yaml:"max_output_size"`
+	Allow         []string                  `mapstructure:"allow" json:"allow" yaml:"allow"`
+	Deny          []string                  `mapstructure:"deny" json:"deny" yaml:"deny"`
+	Tools         map[string]ToolConfig     `mapstructure:"tools" json:"tools" yaml:"tools"`
+	Config        map[string]map[string]any `mapstructure:"config" json:"config,omitempty" yaml:"config,omitempty"`
 }
 
 // DefaultConfig returns the default extension runtime configuration.

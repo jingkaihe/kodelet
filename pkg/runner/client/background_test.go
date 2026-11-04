@@ -53,12 +53,13 @@ func newBackgroundTestService(t *testing.T, mode string) (*Service, string) {
 }
 
 type backgroundHelperState struct {
-	PID          int    `json:"pid"`
-	Conversation string `json:"conversation"`
-	LeaseID      string `json:"leaseId"`
-	DataDir      string `json:"dataDir"`
-	Previous     string `json:"previous"`
-	Error        string `json:"error"`
+	PID          int            `json:"pid"`
+	Conversation string         `json:"conversation"`
+	LeaseID      string         `json:"leaseId"`
+	DataDir      string         `json:"dataDir"`
+	Previous     string         `json:"previous"`
+	Error        string         `json:"error"`
+	Config       map[string]any `json:"config,omitempty"`
 }
 
 func backgroundState(t *testing.T, workspace, conversation string) backgroundHelperState {
@@ -521,6 +522,58 @@ func TestReloadRefreshesSchemaWithoutLauncherChangesAndRejectsInitializationFail
 	}
 }
 
+func TestReloadRunReinitializesExtensionsWithWorkspaceConfig(t *testing.T) {
+	service, workspace := newBackgroundTestService(t, "config")
+	loader, err := NewWorkspaceConfigLoader(map[string]any{
+		"skills":     map[string]any{"enabled": false},
+		"extensions": map[string]any{"discover_path": false},
+	})
+	require.NoError(t, err)
+	service.workspaceConfigLoader = loader
+	var previousPID int
+	for _, name := range []string{"before", "after"} {
+		require.NoError(t, os.WriteFile(filepath.Join(workspace, "kodelet-config.yaml"), []byte(fmt.Sprintf(`
+extensions:
+  config:
+    lifetime:
+      tool: %s
+      enabled: true
+      nested:
+        values: [false, 2, CaseSensitive]
+    other:
+      tool: unrelated
+`, name)), 0o600))
+		var manifest runnerpayload.Manifest
+		if name == "before" {
+			manifest, err = service.openRun(t.Context(), protocol.RunOpenParams{
+				RunID: "run", ConversationID: "conversation", EnvironmentReload: true,
+			})
+			require.NoError(t, err)
+		} else {
+			result, err := service.reloadRun(t.Context(), protocol.RunReloadParams{RunID: "run", ExpectedEnvironmentRevision: 1})
+			require.NoError(t, err)
+			assert.Empty(t, result.Refusal)
+			assert.Empty(t, result.Warning)
+			manifest = result.Manifest
+			assert.Equal(t, int64(2), manifest.EnvironmentRevision)
+			assert.NotContains(t, manifestToolNames(manifest), "before")
+			assertBackgroundProcessStopped(t, previousPID)
+		}
+		assert.Contains(t, manifestToolNames(manifest), name)
+		assert.NotContains(t, manifestToolNames(manifest), "unrelated")
+		state := backgroundState(t, workspace, "conversation")
+		assert.Equal(t, map[string]any{
+			"tool":    name,
+			"enabled": true,
+			"nested":  map[string]any{"values": []any{false, float64(2), "CaseSensitive"}},
+		}, state.Config)
+		assert.NotEqual(t, previousPID, state.PID)
+		previousPID = state.PID
+	}
+	require.NoError(t, service.closeRun(t.Context(), "run"))
+	assertBackgroundProcessStopped(t, previousPID)
+}
+
 func TestReloadRunContinuesWithoutExtensionsThatFailToStart(t *testing.T) {
 	service, workspace := newBackgroundTestService(t, "schema")
 	schemaPath := filepath.Join(workspace, "tool-schema.json")
@@ -803,12 +856,18 @@ func runBackgroundExtensionHelper() {
 		case "extension.initialize":
 			var params struct {
 				Extension struct {
-					CWD     string `json:"cwd"`
-					DataDir string `json:"dataDir"`
+					CWD     string         `json:"cwd"`
+					DataDir string         `json:"dataDir"`
+					Config  map[string]any `json:"config"`
 				} `json:"extension"`
 			}
 			_ = json.Unmarshal(request.Params, &params)
 			cwd, state.DataDir = params.Extension.CWD, params.Extension.DataDir
+			state.Config = params.Extension.Config
+			toolName := "lifetime"
+			if mode == "config" {
+				toolName, _ = state.Config["tool"].(string)
+			}
 			if file, err := os.OpenFile(filepath.Join(cwd, "initializations.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
 				_, _ = fmt.Fprintln(file, state.PID)
 				_ = file.Close()
@@ -848,7 +907,7 @@ func runBackgroundExtensionHelper() {
 			result = extensions.InitializeResult{
 				Name: "lifetime", Version: "1",
 				Profiles:      profiles,
-				Tools:         []extensions.ToolRegistration{{Name: "lifetime", Description: "Inspect and release extension lifetime", InputSchema: schema}},
+				Tools:         []extensions.ToolRegistration{{Name: toolName, Description: "Inspect and release extension lifetime", InputSchema: schema}},
 				Subscriptions: subscriptions,
 			}
 		case "extension.event.handle":

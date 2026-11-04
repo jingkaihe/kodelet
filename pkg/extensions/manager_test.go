@@ -162,6 +162,11 @@ func TestRuntimeManagerScopesConfiguredRuntimesByVariantAndFingerprint(t *testin
 	}
 	require.Len(t, configs, 3)
 	assert.Equal(t, 2048, configs[2].MaxOutputSize)
+
+	changedConfig.Config = map[string]map[string]any{"subagent": {"mailbox": true}}
+	withConfig, err := manager.RuntimeWithConfigAndCallContext(context.Background(), rootDir, "runner-work", changedConfig, ExtensionCallContext{})
+	require.NoError(t, err)
+	assert.NotSame(t, replacement, withConfig, "extension config changes must invalidate the cached runtime")
 }
 
 func TestRuntimeManagerKeepsCachedRuntimeWhenFingerprintRefreshFails(t *testing.T) {

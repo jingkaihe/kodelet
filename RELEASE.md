@@ -2,6 +2,8 @@
 
 ## 0.8.21-beta
 
+Added per-extension YAML settings under `extensions.config.<extension-id>`, delivered during initialization and refreshed on workspace resource reload.
+
 Added structured extension `followUps` to `turn.end` and `agent.end`, with typed Go and TypeScript SDK support. Follow-ups accept `text`, optional `visibility`, and optional `key`/`revision` fields; existing `followUpMessages` remain supported. See [Extension events](docs/MANUAL.md#extension-events).
 
 Changed `turn.end` to run after every completed model iteration and its tool results, including tool-only iterations, and allow follow-ups to continue the run. Follow-ups respect cancellation and turn limits; repeated unkeyed follow-ups can continue indefinitely with `--max-turns 0`. Runners without subscribers skip the extra turn-end round trip.

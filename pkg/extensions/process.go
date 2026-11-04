@@ -351,6 +351,10 @@ func (p *Process) initialize(ctx context.Context, cwd string, client *rpcClient,
 	if err != nil {
 		return nil, err
 	}
+	config := p.config.Config[strings.ToLower(p.Extension.ID)]
+	if config == nil {
+		config = map[string]any{}
+	}
 	params := initializeParams{
 		ProtocolVersion: protocolVersion,
 		Kodelet: map[string]any{
@@ -359,7 +363,7 @@ func (p *Process) initialize(ctx context.Context, cwd string, client *rpcClient,
 		Extension: initializeExtensionInfo{
 			ID:       p.Extension.ID,
 			RunnerID: runnerID,
-			Config:   map[string]any{},
+			Config:   config,
 			CWD:      cwd,
 			DataDir:  dataDir,
 		},

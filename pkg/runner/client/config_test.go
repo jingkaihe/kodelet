@@ -3,10 +3,13 @@ package client
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/extensions"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -78,6 +81,69 @@ func TestWorkspaceConfigLoaderConcurrentSnapshots(t *testing.T) {
 	assert.Equal(t, processCWD, currentCWD)
 	assert.Equal(t, globalSettings, viper.AllSettings())
 	assert.Equal(t, "not-a-runner-model", os.Getenv("KODELET_MODEL"))
+}
+
+func TestRunnerConfigLoadersMergeExtensionConfig(t *testing.T) {
+	defaults := viper.New()
+	defaults.SetConfigType("yaml")
+	require.NoError(t, defaults.ReadConfig(strings.NewReader(`
+extensions:
+  config:
+    subagent:
+      mailbox: false
+      nested:
+        keep: runner
+        limit: 3
+    org@repo/worker:
+      token: CaseSensitive
+environment_profiles:
+  review:
+    extensions:
+      config:
+        subagent:
+          mailbox: false
+          nested:
+            limit: 7
+`)))
+	cwd := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(cwd, "kodelet-config.yaml"), []byte(`
+extensions:
+  config:
+    subagent:
+      mailbox: true
+      nested:
+        extra: workspace
+      values: [true, 2.5, CaseSensitive]
+`), 0o600))
+	standalone, err := NewWorkspaceConfigLoader(defaults.AllSettings())
+	require.NoError(t, err)
+	embedded, err := NewEmbeddedConfigLoader(defaults.AllSettings(), nil)
+	require.NoError(t, err)
+	for _, profile := range []string{"", "review"} {
+		for _, loader := range []WorkspaceConfigLoader{
+			standalone,
+			func(cwd, profile string) (llmtypes.Config, error) { return embedded(cwd, "", profile) },
+		} {
+			config, err := loader(cwd, profile)
+			require.NoError(t, err)
+			extConfig, err := extensions.LoadConfigFromSettings(config.ExtensionSettings)
+			require.NoError(t, err)
+			wantMailbox := true
+			wantLimit := float64(3)
+			if profile != "" {
+				wantMailbox = false
+				wantLimit = 7
+			}
+			assert.Equal(t, map[string]any{
+				"mailbox": wantMailbox,
+				"nested": map[string]any{
+					"keep": "runner", "extra": "workspace", "limit": wantLimit,
+				},
+				"values": []any{true, 2.5, "CaseSensitive"},
+			}, extConfig.Config["subagent"])
+			assert.Equal(t, map[string]any{"token": "CaseSensitive"}, extConfig.Config["org@repo/worker"])
+		}
+	}
 }
 
 func TestWorkspaceConfigLoaderReloadOnlyAffectsLaterSnapshots(t *testing.T) {
