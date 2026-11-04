@@ -553,6 +553,7 @@ export interface PendingImageAttachment {
 }
 
 export interface ChatStreamEvent {
+  extensionId?: string;
   delegatedUser?: boolean;
   kind:
     | 'conversation'

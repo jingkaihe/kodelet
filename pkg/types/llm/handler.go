@@ -68,6 +68,12 @@ type SourcedUserMessageHandler interface {
 	HandleSourcedUserMessage(content string, images []string, sourceID string)
 }
 
+// ExtensionUserMessageHandler renders visible extension input with its trusted
+// attribution, separately from human input and assistant output.
+type ExtensionUserMessageHandler interface {
+	HandleExtensionUserMessage(content, extensionID string)
+}
+
 // StreamingMessageHandler extends MessageHandler with delta streaming support.
 // Handlers implementing this interface will receive content as it streams from the LLM.
 type StreamingMessageHandler interface {

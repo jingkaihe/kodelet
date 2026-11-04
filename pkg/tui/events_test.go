@@ -76,6 +76,32 @@ func TestApplyChatEventAdoptsRunnerCanonicalCWD(t *testing.T) {
 	assert.Equal(t, "/runner/other-project", m.requestedCWD)
 }
 
+func TestApplyExtensionUserMessageMatchesHistory(t *testing.T) {
+	m := newModel(t.Context(), Config{})
+	t.Cleanup(m.cancel)
+	m.applyChatEvent(chat.ChatEvent{Kind: "user-message", Content: "same words"})
+	m.queuedSteering = []string{"same words"}
+	for range 2 {
+		m.applyChatEvent(chat.ChatEvent{Kind: "user-message", Content: "same words", ExtensionID: "reminders"})
+	}
+	assert.Equal(t, []string{"same words"}, m.queuedSteering, "extension input cannot consume human steering")
+	m.applyChatEvent(chat.ChatEvent{Kind: "user-message", Content: "same words"})
+	assert.Empty(t, m.queuedSteering)
+	m.applyChatEvent(chat.ChatEvent{Kind: "text-delta", Delta: "done"})
+	m.applyChatEvent(chat.ChatEvent{Kind: "user-message", Content: "check again", ExtensionID: "reminders"})
+	m.applyChatEvent(chat.ChatEvent{Kind: "text-delta", Delta: "checked"})
+	expected := entriesFromHistory([]conversations.StreamableMessage{
+		{Kind: "text", Role: "user", Content: "same words"},
+		{Kind: "text", Role: "user", Content: "same words", ExtensionID: "reminders"},
+		{Kind: "text", Role: "user", Content: "same words", ExtensionID: "reminders"},
+		{Kind: "text", Role: "user", Content: "same words"},
+		{Kind: "text", Role: "assistant", Content: "done"},
+		{Kind: "text", Role: "user", Content: "check again", ExtensionID: "reminders"},
+		{Kind: "text", Role: "assistant", Content: "checked"},
+	})
+	assert.Equal(t, expected, m.entries)
+}
+
 func TestApplyCompactionBeforeCurrentUserMatchesReplay(t *testing.T) {
 	m := newModel(t.Context(), Config{})
 	t.Cleanup(m.cancel)

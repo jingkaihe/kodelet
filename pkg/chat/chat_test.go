@@ -447,6 +447,34 @@ func TestChatMessageHandler_HandleUserMessageEmitsRenderableContent(t *testing.T
 	assert.Equal(t, "aGVsbG8=", blocks[1].Source.Data)
 }
 
+func TestChatMessageHandlerExtensionUserMessagePreservesAttribution(t *testing.T) {
+	sink := &recordingChatSink{}
+	handler := &chatMessageHandler{conversationID: "conv-123", sink: sink}
+	var attributed llmtypes.ExtensionUserMessageHandler = handler
+	attributed.HandleExtensionUserMessage("same words", "reminders")
+	handler.HandleUserMessage("same words", nil)
+	require.Len(t, sink.events, 2)
+	for i, event := range sink.events {
+		encoded, err := json.Marshal(event)
+		require.NoError(t, err)
+		var decoded ChatEvent
+		require.NoError(t, json.Unmarshal(encoded, &decoded))
+		assert.Equal(t, "user-message", decoded.Kind)
+		assert.Equal(t, "user", decoded.Role)
+		assert.Equal(t, "conv-123", decoded.ConversationID)
+		assert.Equal(t, "same words", decoded.Content)
+		assert.False(t, decoded.DelegatedUser)
+		assert.Empty(t, decoded.SourceID)
+		if i == 0 {
+			assert.Equal(t, "reminders", decoded.ExtensionID)
+			assert.Contains(t, string(encoded), `"extensionId":"reminders"`)
+		} else {
+			assert.Empty(t, decoded.ExtensionID)
+			assert.NotContains(t, string(encoded), "extensionId")
+		}
+	}
+}
+
 func TestExpandWebChatSlashCommandUsesResolvedCWD(t *testing.T) {
 	workspace := t.TempDir()
 	writeWebChatRecipe(t, workspace, "limited", `---

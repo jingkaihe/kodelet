@@ -899,7 +899,7 @@ const ChatPage: React.FC = () => {
             setStreamError(event.error || 'Chat request failed');
           }
 
-          if (event.kind === 'user-message') {
+          if (event.kind === 'user-message' && !event.extensionId) {
             setConversation((currentConversation) =>
               currentConversation
                 ? { ...currentConversation, pendingSteer: [] }
@@ -1588,7 +1588,7 @@ const ChatPage: React.FC = () => {
               return;
             }
 
-            if (event.kind === 'user-message') {
+            if (event.kind === 'user-message' && !event.extensionId) {
               if (shouldUpdateCurrentView) {
                 setConversation((currentConversation) =>
                   currentConversation

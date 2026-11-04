@@ -211,7 +211,7 @@ func TestBroadcastingEventSinkBroadcastsOnSuccessAndFailure(t *testing.T) {
 			broadcasted = append(broadcasted, event)
 		},
 	}
-	event := ChatEvent{Kind: "text", ConversationID: "conv-123", Role: "assistant", Content: "hi"}
+	event := ChatEvent{Kind: "user-message", ConversationID: "conv-123", Role: "user", Content: "same words", ExtensionID: "reminders"}
 
 	require.NoError(t, sink.Send(event))
 	assert.Equal(t, []ChatEvent{event}, primary.Events())
@@ -227,7 +227,7 @@ func TestBroadcastingEventSinkBroadcastsOnSuccessAndFailure(t *testing.T) {
 		},
 	}
 
-	secondEvent := ChatEvent{Kind: "text", ConversationID: "conv-123", Role: "assistant", Content: "again"}
+	secondEvent := ChatEvent{Kind: "user-message", ConversationID: "conv-123", Role: "user", Content: "same words"}
 	require.NoError(t, failing.Send(event))
 	require.NoError(t, failing.Send(secondEvent))
 	assert.Equal(t, 1, failingPrimary.calls)

@@ -483,6 +483,89 @@ func (t *provenanceThread) AddUserMessage(ctx context.Context, text string, _ ..
 	t.base.RecordUserMessageSource(ctx, llmtypes.UserMessageSource(ctx), t.raw)
 }
 
+type recordingUserHandler struct {
+	recordingHandler
+	users []string
+}
+
+func (h *recordingUserHandler) HandleUserMessage(content string, _ []string) {
+	h.users = append(h.users, content)
+}
+
+type recordingExtensionHandler struct {
+	recordingUserHandler
+	extensionIDs []string
+}
+
+func (h *recordingExtensionHandler) HandleExtensionUserMessage(content, extensionID string) {
+	h.users = append(h.users, content)
+	h.extensionIDs = append(h.extensionIDs, extensionID)
+}
+
+func TestExtensionFollowUpsLiveAttributionAndFallbacks(t *testing.T) {
+	for _, kind := range []string{"attributed", "user", "legacy", "nil"} {
+		t.Run(kind, func(t *testing.T) {
+			thread := &provenanceThread{base: NewThread(llmtypes.Config{}, "conversation")}
+			attributed, user, legacy := &recordingExtensionHandler{}, &recordingUserHandler{}, &recordingHandler{}
+			handler := map[string]llmtypes.MessageHandler{
+				"attributed": attributed, "user": user, "legacy": legacy,
+			}[kind]
+			visible := extensions.FollowUpMessage{
+				ExtensionID: "reminders",
+				FollowUp:    extensions.FollowUp{Text: "same words", Key: "visible", Revision: 1},
+			}
+			hidden := visible
+			hidden.Text, hidden.Key, hidden.Visibility = "private follow-up", "hidden", "hidden"
+			require.True(t, appendExtensionFollowUps(t.Context(), thread, handler, []extensions.FollowUpMessage{visible, hidden, visible}))
+			require.Len(t, thread.raw, 2)
+			assert.Equal(t, "same words", thread.raw[0]["content"], "attribution does not change model input")
+			assert.Equal(t, "private follow-up", thread.raw[1]["content"])
+			switch kind {
+			case "attributed":
+				assert.Equal(t, []string{"same words"}, attributed.users)
+				assert.Equal(t, []string{"reminders"}, attributed.extensionIDs)
+				assert.Empty(t, attributed.texts)
+			case "user":
+				assert.Equal(t, []string{"Extension: reminders\n\nsame words"}, user.users)
+				assert.Empty(t, user.texts)
+			case "legacy":
+				assert.Equal(t, []string{"\n📨 Extension follow-up (reminders): same words\n"}, legacy.texts)
+			}
+		})
+	}
+}
+
+func TestExtensionFollowUpsLogOnlyAcceptedAndDeduplicatedCounts(t *testing.T) {
+	log, hook := logrustest.NewNullLogger()
+	log.SetLevel(logrus.DebugLevel)
+	ctx := logger.WithLogger(t.Context(), logrus.NewEntry(log))
+	thread := &provenanceThread{base: NewThread(llmtypes.Config{}, "conversation")}
+	message := extensions.FollowUpMessage{
+		ExtensionID: "private-extension",
+		FollowUp:    extensions.FollowUp{Text: "private follow-up", Visibility: "hidden", Key: "private-key", Revision: 1},
+	}
+	require.True(t, appendExtensionFollowUps(ctx, thread, nil, []extensions.FollowUpMessage{message, message, {}}))
+	entries := hook.AllEntries()
+	require.Len(t, entries, 2)
+	assert.Equal(t, logrus.InfoLevel, entries[0].Level)
+	assert.Equal(t, "accepted extension follow-ups", entries[0].Message)
+	assert.Equal(t, logrus.Fields{"count": 1}, entries[0].Data)
+	assert.Equal(t, logrus.DebugLevel, entries[1].Level)
+	assert.Equal(t, "deduplicated extension follow-ups", entries[1].Message)
+	assert.Equal(t, logrus.Fields{"count": 1}, entries[1].Data)
+
+	hook.Reset()
+	require.False(t, appendExtensionFollowUps(ctx, thread, nil, []extensions.FollowUpMessage{message}))
+	require.Len(t, hook.AllEntries(), 1)
+	assert.Equal(t, logrus.DebugLevel, hook.LastEntry().Level)
+	hook.Reset()
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	require.False(t, appendExtensionFollowUps(cancelled, thread, nil, []extensions.FollowUpMessage{message}))
+	require.False(t, appendExtensionFollowUps(ctx, thread, nil, []extensions.FollowUpMessage{{}}))
+	assert.Empty(t, hook.AllEntries())
+}
+
 func TestExtensionFollowUpsPersistExactProvenanceAndMonotonicRevisions(t *testing.T) {
 	ctx := llmtypes.WithUserMessageSource(t.Context(), "human-steer")
 	thread := &provenanceThread{base: NewThread(llmtypes.Config{}, "conversation")}

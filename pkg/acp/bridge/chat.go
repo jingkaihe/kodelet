@@ -119,7 +119,7 @@ func (s *ACPChatEventSink) Send(event chat.ChatEvent) error {
 		if text == "" || s.sender == nil {
 			return nil
 		}
-		return s.sender.SendUpdate(s.sessionID, userMessageUpdate(text, ""))
+		return s.sender.SendUpdate(s.sessionID, userMessageUpdate(text, event.ExtensionID))
 	}
 	return nil
 }

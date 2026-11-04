@@ -116,6 +116,45 @@ const expectQueuedCommandsDiscarded = async () => {
 describe('ChatPage streaming, steering, and navigation', () => {
   setupChatPageTests();
 
+  it.each([
+    'submitted',
+    'observed',
+  ] as const)('preserves human steering when a %s run emits extension input', async (source) => {
+    const { startRun } = setupCommandQueueStreams();
+    render(<ChatPage />);
+    await screen.findByText('First conversation');
+    const stream = await startRun(source);
+    fireEvent.change(screen.getByTestId('composer-textarea'), {
+      target: { value: 'Focus on tests' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Steer' }));
+    await screen.findByRole('region', { name: 'Queued message' });
+
+    await act(async () => {
+      stream.onEvent({
+        kind: 'user-message',
+        conversation_id: 'conv-123',
+        content: 'Focus on tests',
+        extensionId: 'reminders',
+      });
+    });
+    expect(screen.getByText('Extension: reminders')).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Queued message' })).toHaveTextContent(
+      'Focus on tests'
+    );
+
+    await act(async () => {
+      stream.onEvent({
+        kind: 'user-message',
+        conversation_id: 'conv-123',
+        content: 'Focus on tests',
+      });
+    });
+    expect(screen.queryByRole('region', { name: 'Queued message' })).not.toBeInTheDocument();
+    expect(screen.getByText('Extension: reminders')).toBeVisible();
+    expect(screen.getAllByText('Focus on tests')).toHaveLength(2);
+  });
+
   it('keeps healthy watchers and recovers voice turns after an observer disconnects', async () => {
     setRouteParams({ id: 'conv-123' });
     mockGetConversation

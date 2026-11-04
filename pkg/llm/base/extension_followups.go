@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
@@ -82,7 +83,7 @@ func (t *Thread) RestoreMessageMetadata(metadata map[string]any) {
 }
 
 func appendExtensionFollowUps(ctx context.Context, thread llmtypes.Thread, handler llmtypes.MessageHandler, messages []extensions.FollowUpMessage) bool {
-	appended := false
+	accepted, deduplicated := 0, 0
 	for _, message := range messages {
 		if ctx.Err() != nil {
 			break
@@ -94,6 +95,7 @@ func appendExtensionFollowUps(ctx context.Context, thread llmtypes.Thread, handl
 			revisions := followUpRevisions(thread.GetMetadata()[FollowUpRevisionsMetadataKey])
 			previous, _ := strconv.ParseInt(revisions[message.ExtensionID][message.Key], 10, 64)
 			if message.Revision <= previous {
+				deduplicated++
 				continue
 			}
 		}
@@ -102,10 +104,23 @@ func appendExtensionFollowUps(ctx context.Context, thread llmtypes.Thread, handl
 		}
 		messageCtx := context.WithValue(llmtypes.WithUserMessageSource(ctx, ""), extensionFollowUpContextKey{}, message)
 		thread.AddUserMessage(messageCtx, message.Text)
-		appended = true
+		accepted++
 		if message.Visibility != "hidden" && handler != nil {
-			handler.HandleText(fmt.Sprintf("\n📨 Extension follow-up (%s): %s\n", message.ExtensionID, message.Text))
+			switch h := handler.(type) {
+			case llmtypes.ExtensionUserMessageHandler:
+				h.HandleExtensionUserMessage(message.Text, message.ExtensionID)
+			case llmtypes.UserMessageHandler:
+				h.HandleUserMessage("Extension: "+message.ExtensionID+"\n\n"+message.Text, nil)
+			default:
+				handler.HandleText(fmt.Sprintf("\n📨 Extension follow-up (%s): %s\n", message.ExtensionID, message.Text))
+			}
 		}
 	}
-	return appended
+	if accepted > 0 {
+		logger.G(ctx).WithField("count", accepted).Info("accepted extension follow-ups")
+	}
+	if deduplicated > 0 {
+		logger.G(ctx).WithField("count", deduplicated).Debug("deduplicated extension follow-ups")
+	}
+	return accepted > 0
 }

@@ -14,8 +14,9 @@ import (
 )
 
 var (
-	_ llmtypes.StreamingMessageHandler  = (*ACPMessageHandler)(nil)
-	_ llmtypes.ToolUpdateMessageHandler = (*ACPMessageHandler)(nil)
+	_ llmtypes.StreamingMessageHandler     = (*ACPMessageHandler)(nil)
+	_ llmtypes.ToolUpdateMessageHandler    = (*ACPMessageHandler)(nil)
+	_ llmtypes.ExtensionUserMessageHandler = (*ACPMessageHandler)(nil)
 )
 
 // ToolCallLocation represents a file location for the "follow the agent" feature
@@ -86,6 +87,11 @@ func NewACPMessageHandler(sender UpdateSender, sessionID acptypes.SessionID, opt
 		opt(h)
 	}
 	return h
+}
+
+// HandleExtensionUserMessage sends attributed extension input as a user message.
+func (h *ACPMessageHandler) HandleExtensionUserMessage(content, extensionID string) {
+	h.sendUpdate(userMessageUpdate(content, extensionID))
 }
 
 // HandleText sends complete text as agent_message_chunk

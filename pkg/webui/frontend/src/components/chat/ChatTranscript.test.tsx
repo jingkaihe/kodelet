@@ -19,7 +19,7 @@ vi.mock('../../utils', async (importOriginal) => {
 });
 
 describe('ChatTranscript', () => {
-  it('labels trusted extension history without attributing identical human text to it', () => {
+  it('labels live extension input exactly as history without attributing identical human text to it', () => {
     const messages = conversationToChatMessages({
       id: 'extensions',
       createdAt: '',
@@ -38,7 +38,14 @@ describe('ChatTranscript', () => {
         content: 'same words',
       })
     ).toEqual(messages);
-    const { container, rerender } = render(<ChatTranscript isStreaming messages={messages} />);
+    let live = applyChatStreamEvent([], {
+      kind: 'user-message',
+      content: 'same words',
+      extensionId: 'reminders',
+    });
+    live = applyChatStreamEvent(live, { kind: 'user-message', content: 'same words' });
+    expect(live).toEqual(messages);
+    const { container, rerender } = render(<ChatTranscript isStreaming messages={live} />);
     const panels = container.querySelectorAll('article');
     expect(panels).toHaveLength(2);
     expect(within(panels[0]).getByText('Extension: reminders')).toBeVisible();

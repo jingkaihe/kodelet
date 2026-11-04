@@ -149,6 +149,18 @@ func TestReplayConversationHistoryPreservesExtensionAttribution(t *testing.T) {
 	assert.Equal(t, "same words", human["content"].(acptypes.ContentBlock).Text)
 	assert.NotContains(t, human, "_meta")
 
+	live := &mockSender{}
+	sink := NewACPChatEventSink(live, "session-1")
+	for _, message := range messages {
+		require.NoError(t, sink.Send(chat.ChatEvent{
+			Kind: "user-message", Content: message.Content, ExtensionID: message.ExtensionID,
+		}))
+	}
+	assert.Equal(t, sender.updates, live.updates)
+	direct := &mockSender{}
+	NewACPMessageHandler(direct, "session-1").HandleExtensionUserMessage("same words", "reminders")
+	assert.Equal(t, sender.updates[:1], direct.updates)
+
 	failing := &failingCompactionSender{err: assert.AnError}
 	require.ErrorIs(t, ReplayConversationHistory(failing, "session-1", messages), assert.AnError)
 }

@@ -611,6 +611,7 @@ export const applyChatStreamEvent = (
       nextMessages.push({
         role: 'user',
         content: event.content,
+        ...(event.extensionId ? { extensionId: event.extensionId } : {}),
       });
       return nextMessages;
     }

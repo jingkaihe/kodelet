@@ -92,6 +92,7 @@ type ChatImageURLSource struct {
 
 // ChatEvent is a single streaming chat event.
 type ChatEvent struct {
+	ExtensionID       string                          `json:"extensionId,omitempty"`
 	SourceID          string                          `json:"sourceId,omitempty"`
 	DelegatedUser     bool                            `json:"delegatedUser,omitempty"`
 	ResourceReloadID  string                          `json:"resource_reload_id,omitempty"`
@@ -1582,6 +1583,16 @@ func (h *chatMessageHandler) HandleResourceReload(kind, markerID, text string) {
 
 func (h *chatMessageHandler) HandleUserMessage(content string, images []string) {
 	h.HandleSourcedUserMessage(content, images, "")
+}
+
+func (h *chatMessageHandler) HandleExtensionUserMessage(content, extensionID string) {
+	h.sendEvent(ChatEvent{
+		Kind:           "user-message",
+		ExtensionID:    extensionID,
+		Content:        content,
+		ConversationID: h.conversationID,
+		Role:           "user",
+	})
 }
 
 func (h *chatMessageHandler) HandleSourcedUserMessage(content string, images []string, sourceID string) {

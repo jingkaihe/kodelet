@@ -74,11 +74,13 @@ func (m *model) applyChatEvent(event chat.ChatEvent) {
 			return
 		}
 		m.clearActiveAssistantEntry()
-		m.removeQueuedSteering(content)
-		if m.hasLastUserEntry(content) {
-			return
+		if event.ExtensionID == "" {
+			m.removeQueuedSteering(content)
+			if m.hasLastUserEntry(content) {
+				return
+			}
 		}
-		m.entries = append(m.entries, chatEntry{kind: entryUser, content: content})
+		m.entries = append(m.entries, chatEntry{kind: entryUser, content: content, extensionID: event.ExtensionID})
 		return
 	case "text", "text-delta":
 		idx := m.ensureAssistantEntry()
