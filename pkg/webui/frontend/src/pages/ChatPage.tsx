@@ -91,6 +91,7 @@ const normalizeConversation = (conversation: Conversation): Conversation => ({
   messages: (conversation.messages || []).map((message) => ({
     id: message.id,
     anchor: message.anchor,
+    extensionId: message.extensionId,
     role: message.role || 'user',
     content: message.content || '',
     kind: message.kind,

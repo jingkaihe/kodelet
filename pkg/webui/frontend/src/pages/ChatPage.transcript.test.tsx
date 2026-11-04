@@ -13,6 +13,54 @@ import {
 describe('ChatPage transcript statistics and scrolling', () => {
   setupChatPageTests();
 
+  it('preserves extension attribution on load, live updates, and completion reload', async () => {
+    setRouteParams({ id: 'conv-123' });
+    const saved: Conversation = {
+      id: 'conv-123',
+      createdAt: '',
+      updatedAt: '',
+      messageCount: 2,
+      messages: [
+        { role: 'user', content: 'same words', extensionId: 'reminders' },
+        { role: 'user', content: 'same words' },
+      ],
+    };
+    mockGetConversation.mockResolvedValueOnce(saved).mockResolvedValue({
+      ...saved,
+      messageCount: 3,
+      messages: [
+        ...(saved.messages || []),
+        { role: 'user', content: 'new notice', extensionId: 'reminders' },
+      ],
+    });
+    let streamListener: ((event: ChatStreamEvent) => void) | null = null;
+    mockStreamConversation.mockImplementation(async (_id, options) => {
+      streamListener = options.onEvent;
+      return new Promise(() => undefined);
+    });
+    render(<ChatPage />);
+    await waitFor(() => expect(streamListener).not.toBeNull());
+    expect(screen.getByText('Extension: reminders')).toBeVisible();
+    expect(screen.getAllByText('You')).toHaveLength(1);
+    expect(screen.getAllByText('same words')).toHaveLength(2);
+    await act(async () => {
+      streamListener?.({ kind: 'conversation', conversation_id: 'conv-123' });
+      streamListener?.({
+        kind: 'user-message',
+        content: 'new notice',
+        extensionId: 'reminders',
+      });
+    });
+    expect(screen.getAllByText('Extension: reminders')).toHaveLength(2);
+    await act(async () => {
+      streamListener?.({ kind: 'done', conversation_id: 'conv-123' });
+    });
+    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledTimes(2));
+    expect(screen.getAllByText('Extension: reminders')).toHaveLength(2);
+    expect(screen.getAllByText('You')).toHaveLength(1);
+    expect(screen.getAllByText('new notice')).toHaveLength(1);
+  });
+
   it('preserves compaction markers and old chat through live updates and completion reload', async () => {
     setRouteParams({ id: 'conv-123' });
     const apiCompaction: CompactionMarker = { id: 'compact-1', method: 'api', createdAt: '' };
