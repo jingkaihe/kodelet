@@ -20,6 +20,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestLocalEnvironmentEndHooksReportCancellationWithoutRuntime(t *testing.T) {
+	environment := NewLocalEnvironment(t.TempDir(), nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	turn, err := environment.DispatchTurnEnd(ctx, "", 1)
+	assert.Empty(t, turn)
+	assert.ErrorIs(t, err, context.Canceled)
+	agent, err := environment.DispatchAgentEnd(ctx, nil)
+	assert.Empty(t, agent)
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
 func TestLocalEnvironmentAdditionalToolsRespectPolicy(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	for _, test := range []struct {

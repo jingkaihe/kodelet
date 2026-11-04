@@ -353,7 +353,7 @@ func (e *LocalEnvironment) DispatchTurnEnd(ctx context.Context, finalOutput stri
 func (e *LocalEnvironment) DispatchAgentEnd(ctx context.Context, messages []llmtypes.Message) ([]extensions.FollowUpMessage, error) {
 	runtime, callContext := e.runContext()
 	if runtime == nil {
-		return nil, nil
+		return nil, ctx.Err()
 	}
 	return runtime.DispatchAgentEnd(ctx, callContext, messages), ctx.Err()
 }
