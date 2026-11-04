@@ -97,12 +97,13 @@ func (t *Thread) RestoreMessageMetadata(metadata map[string]any) {
 }
 
 func appendExtensionFollowUps(ctx context.Context, thread llmtypes.Thread, handler llmtypes.MessageHandler, messages []extensions.FollowUpMessage) bool {
-	accepted, deduplicated := 0, 0
+	accepted, deduplicated, rejected := 0, 0, 0
 	for _, message := range messages {
 		if ctx.Err() != nil {
 			break
 		}
 		if message.ExtensionID == "" || !message.Valid() {
+			rejected++
 			continue
 		}
 		if message.Key != "" && message.Revision > 0 {
@@ -135,6 +136,9 @@ func appendExtensionFollowUps(ctx context.Context, thread llmtypes.Thread, handl
 	}
 	if deduplicated > 0 {
 		logger.G(ctx).WithField("count", deduplicated).Debug("deduplicated extension follow-ups")
+	}
+	if rejected > 0 {
+		logger.G(ctx).WithField("count", rejected).Warn("rejected invalid extension follow-ups")
 	}
 	return accepted > 0
 }

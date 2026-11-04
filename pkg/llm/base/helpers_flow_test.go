@@ -538,7 +538,7 @@ func TestExtensionFollowUpsLiveAttributionAndFallbacks(t *testing.T) {
 	}
 }
 
-func TestExtensionFollowUpsLogOnlyAcceptedAndDeduplicatedCounts(t *testing.T) {
+func TestExtensionFollowUpsLogOnlyAcceptanceCounts(t *testing.T) {
 	log, hook := logrustest.NewNullLogger()
 	log.SetLevel(logrus.DebugLevel)
 	ctx := logger.WithLogger(t.Context(), logrus.NewEntry(log))
@@ -549,13 +549,16 @@ func TestExtensionFollowUpsLogOnlyAcceptedAndDeduplicatedCounts(t *testing.T) {
 	}
 	require.True(t, appendExtensionFollowUps(ctx, thread, nil, []extensions.FollowUpMessage{message, message, {}}))
 	entries := hook.AllEntries()
-	require.Len(t, entries, 2)
+	require.Len(t, entries, 3)
 	assert.Equal(t, logrus.InfoLevel, entries[0].Level)
 	assert.Equal(t, "accepted extension follow-ups", entries[0].Message)
 	assert.Equal(t, logrus.Fields{"count": 1}, entries[0].Data)
 	assert.Equal(t, logrus.DebugLevel, entries[1].Level)
 	assert.Equal(t, "deduplicated extension follow-ups", entries[1].Message)
 	assert.Equal(t, logrus.Fields{"count": 1}, entries[1].Data)
+	assert.Equal(t, logrus.WarnLevel, entries[2].Level)
+	assert.Equal(t, "rejected invalid extension follow-ups", entries[2].Message)
+	assert.Equal(t, logrus.Fields{"count": 1}, entries[2].Data)
 
 	hook.Reset()
 	require.False(t, appendExtensionFollowUps(ctx, thread, nil, []extensions.FollowUpMessage{message}))
@@ -565,8 +568,67 @@ func TestExtensionFollowUpsLogOnlyAcceptedAndDeduplicatedCounts(t *testing.T) {
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
 	require.False(t, appendExtensionFollowUps(cancelled, thread, nil, []extensions.FollowUpMessage{message}))
-	require.False(t, appendExtensionFollowUps(ctx, thread, nil, []extensions.FollowUpMessage{{}}))
 	assert.Empty(t, hook.AllEntries())
+
+	invalid := message
+	invalid.Revision = -1
+	missingSource := message
+	missingSource.ExtensionID = ""
+	metadata := thread.GetMetadata()
+	handler := &recordingExtensionHandler{}
+	require.False(t, appendExtensionFollowUps(ctx, thread, handler, []extensions.FollowUpMessage{invalid, missingSource}))
+	require.Len(t, hook.AllEntries(), 1)
+	assert.Equal(t, logrus.WarnLevel, hook.LastEntry().Level)
+	assert.Equal(t, "rejected invalid extension follow-ups", hook.LastEntry().Message)
+	assert.Equal(t, logrus.Fields{"count": 2}, hook.LastEntry().Data)
+	assert.Equal(t, metadata, thread.GetMetadata())
+	assert.Len(t, thread.raw, 1)
+	assert.Empty(t, handler.users)
+	assert.Empty(t, handler.texts)
+}
+
+func TestExtensionFollowUpMetadataCopyOnWrite(t *testing.T) {
+	for _, persisted := range []bool{false, true} {
+		t.Run(map[bool]string{false: "typed", true: "JSON"}[persisted], func(t *testing.T) {
+			thread := &provenanceThread{base: NewThread(llmtypes.Config{}, "conversation")}
+			message := extensions.FollowUpMessage{
+				ExtensionID: "mailbox",
+				FollowUp:    extensions.FollowUp{Text: "notice", Visibility: "hidden", Key: "inbox", Revision: math.MaxInt64 - 1},
+			}
+			require.True(t, appendExtensionFollowUps(t.Context(), thread, nil, []extensions.FollowUpMessage{message}))
+			snapshot := thread.GetMetadata()
+			before, err := json.Marshal(snapshot)
+			require.NoError(t, err)
+			if persisted {
+				require.NoError(t, json.Unmarshal(before, &snapshot))
+				thread.base.SetMetadata(snapshot)
+			}
+			message.Revision++
+			require.True(t, appendExtensionFollowUps(t.Context(), thread, nil, []extensions.FollowUpMessage{message}))
+			message.ExtensionID = "other"
+			require.True(t, appendExtensionFollowUps(t.Context(), thread, nil, []extensions.FollowUpMessage{message}))
+			after, err := json.Marshal(snapshot)
+			require.NoError(t, err)
+			assert.JSONEq(t, string(before), string(after), "both provenance and nested revision maps are immutable snapshots")
+			assert.Equal(t, map[string]map[string]string{
+				"mailbox": {"inbox": "9223372036854775807"},
+				"other":   {"inbox": "9223372036854775807"},
+			}, followUpRevisions(thread.GetMetadata()[FollowUpRevisionsMetadataKey]))
+			thread.base.RestoreMessageMetadata(snapshot)
+			message.ExtensionID = "mailbox"
+			require.True(t, appendExtensionFollowUps(t.Context(), thread, nil, []extensions.FollowUpMessage{message}), "rollback restores the old watermark")
+		})
+	}
+}
+
+func TestFollowUpRevisionsTypedReadDoesNotAllocate(t *testing.T) {
+	value := map[string]map[string]string{"mailbox": {"inbox": "9223372036854775807"}}
+	var got string
+	allocations := testing.AllocsPerRun(10, func() {
+		got = followUpRevisions(value)["mailbox"]["inbox"]
+	})
+	assert.Equal(t, "9223372036854775807", got)
+	assert.Zero(t, allocations)
 }
 
 func TestExtensionFollowUpsPersistExactProvenanceAndMonotonicRevisions(t *testing.T) {
