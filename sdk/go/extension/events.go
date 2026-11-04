@@ -78,14 +78,15 @@ type TurnStartEvent struct {
 	TurnNumber int `json:"turnNumber,omitempty"`
 }
 
-// TurnEndEvent is delivered when a model turn ends.
+// TurnEndEvent is delivered after each completed iteration and its tool results,
+// including iterations without assistant text. Handlers may request continuation.
 type TurnEndEvent struct {
 	EventHeader
 	Response   string `json:"response"`
 	TurnNumber int    `json:"turnNumber,omitempty"`
 }
 
-// AgentEndEvent is delivered when a run ends.
+// AgentEndEvent is a continuation hook, not a termination notification.
 type AgentEndEvent struct {
 	EventHeader
 	Messages []json.RawMessage `json:"messages,omitempty"`
@@ -164,8 +165,10 @@ type ToolListPatch struct {
 }
 
 // FollowUp requests a model-visible notification at turn.end or agent.end.
-// Visibility defaults to visible; hidden suppresses user-facing text. A key and
-// positive revision deduplicate notifications per extension and conversation.
+// Visibility defaults to visible; hidden suppresses user-facing text. Use a stable
+// key per logical stream, not per message, and increasing positive revisions to
+// deduplicate per extension and conversation. Repeated unkeyed follow-ups can
+// continue indefinitely with maxTurns=0. Checkpoint save failures stop continuation.
 type FollowUp struct {
 	Text       string `json:"text"`
 	Visibility string `json:"visibility,omitempty"`

@@ -453,11 +453,13 @@ export interface TurnStartEventPayload {
   turnNumber?: number;
 }
 
+/** After each completed iteration and its tool results, even without assistant text; handlers may continue. */
 export interface TurnEndEventPayload {
   response: string;
   turnNumber?: number;
 }
 
+/** A continuation hook, not a termination notification. */
 export interface AgentEndEventPayload {
   messages?: unknown[];
 }
@@ -525,7 +527,13 @@ export interface ToolListPatch {
   enable?: string[];
 }
 
-/** A model-visible turn.end or agent.end notification, attributed by the host. */
+/**
+ * A model-visible turn.end or agent.end notification, attributed by the host.
+ * Visibility defaults to visible; hidden suppresses user-facing text. Use a stable
+ * key per logical stream, not per message, and increasing positive revisions to
+ * deduplicate per extension and conversation. Repeated unkeyed follow-ups can
+ * continue indefinitely with maxTurns=0. Checkpoint save failures stop continuation.
+ */
 export interface FollowUp {
   text: string;
   visibility?: "hidden" | "visible";

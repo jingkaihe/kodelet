@@ -705,7 +705,7 @@ Use dot-separated event names.
 | `agent.finished` | Started run reaches a handled terminal exit | No | No |
 | `session.end` | Kodelet shuts down extension runtime | No | No |
 
-`turn.end` and `agent.end` accept visible or hidden follow-ups with optional revision-based deduplication; see [Extension events](MANUAL.md#extension-events) for the wire contract.
+`turn.end` and `agent.end` accept structured `followUps` or legacy `followUpMessages`. Stable keys identify logical streams, not individual messages; repeated unkeyed follow-ups can continue indefinitely with `maxTurns: 0`. Checkpoint save failures intentionally stop before continuation. See [Extension events](MANUAL.md#extension-events) for visibility, revision deduplication, and validation.
 
 `agent.finished` reports the final outcome once per started run after all continuations, before environment release. Handler results and errors do not affect the run. Resource reload does not emit it; abrupt process termination may prevent delivery.
 

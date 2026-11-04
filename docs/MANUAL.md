@@ -1846,7 +1846,11 @@ Extensions subscribe to dot-separated lifecycle events with `ext.on(...)`. Mutat
 | `agent.finished` | Started run reaches a handled terminal exit | No | No |
 | `session.end` | Extension runtime shuts down | No | No |
 
-`turn.end` and `agent.end` handlers can return `followUpMessages: ["text"]` or structured `followUps: [{text, visibility?, key?, revision?}]` to continue the loop, subject to cancellation and turn limits. Visibility defaults to `visible`; `hidden` keeps input in model/raw history but omits it from normal TUI/Web transcripts. The host records the originating extension. Supplying a stable `key` and positive, increasing `revision` suppresses duplicates and older notifications across turns and resumes; the watermark advances only when the host appends the message. Follow-ups do not modify the system prompt or wake idle conversations.
+`turn.end` and `agent.end` handlers can return `followUpMessages: ["text"]` or structured `followUps: [{text, visibility?, key?, revision?}]` to continue the loop, subject to cancellation and turn limits. Visibility defaults to `visible`; `hidden` keeps input in model/raw history but omits it from normal transcripts. The host records the originating extension. Follow-ups do not modify the system prompt or wake idle conversations.
+
+Use one stable `key` per logical notification stream, not per message, with positive, increasing `revision` values to suppress duplicates and older notifications across turns and resumes. Per-extension/key watermarks advance only when a message is appended and are not evicted. Repeated unkeyed follow-ups can continue indefinitely with `maxTurns: 0` (`--max-turns 0`); there is no extra follow-up loop cap.
+
+With persistence enabled, a follow-up checkpoint save failure intentionally stops the run before continuation. Validation checks nonblank text and supplied keys, valid visibility, and nonnegative revisions (positive revisions require a key), without follow-up-specific text-size, count, or key-length caps.
 
 `agent.finished` reports the final outcome once per started run, including failure and cancellation. It is notification-only: handler results and errors do not affect the run. Each `agent.finished` handler is capped at 30 seconds, even when `timeoutInSec` is larger or disables timeouts. Abrupt process termination may prevent delivery.
 
