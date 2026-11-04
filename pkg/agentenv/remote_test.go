@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -23,6 +24,7 @@ type fakeRemoteController struct {
 	cancelErr      error
 	closeErr       error
 	omitStructured bool
+	lifecycleReply any
 	openRunnerID   string
 	openParams     protocol.RunOpenParams
 	calls          []string
@@ -64,6 +66,9 @@ func (c *fakeRemoteController) CallRun(_ context.Context, _ string, method strin
 			AllowedCommands: []string{"go test *"},
 		})
 	case protocol.MethodLifecycleDispatch:
+		if c.lifecycleReply != nil {
+			return assignRemoteResult(result, c.lifecycleReply)
+		}
 		value := params.(runnerpayload.LifecycleDispatchParams)
 		response := runnerpayload.LifecycleDispatchResult{}
 		switch value.Event {
@@ -73,8 +78,8 @@ func (c *fakeRemoteController) CallRun(_ context.Context, _ string, method strin
 			response.SystemPrompt = value.SystemPrompt + "\npatched"
 			response.AllowedTools = []string{"file_read"}
 			response.ToolsModified = true
-		case runnerpayload.LifecycleAgentEnd:
-			response.FollowUpMessages = []string{"follow up"}
+		case runnerpayload.LifecycleAgentEnd, runnerpayload.LifecycleTurnEnd:
+			response.FollowUps = []extensions.FollowUpMessage{{FollowUp: extensions.FollowUp{Text: "follow up", Visibility: "hidden", Key: "mailbox", Revision: 42}, ExtensionID: "test"}}
 		case runnerpayload.LifecycleToolCall:
 			response.ToolInput = json.RawMessage(`{"path":"changed"}`)
 		case runnerpayload.LifecycleToolUpdate, runnerpayload.LifecycleToolResult:
@@ -597,6 +602,49 @@ func TestRemoteEnvironmentRejectsMismatchedContextDigest(t *testing.T) {
 	assert.Equal(t, protocol.RunStatusFailed, controller.closedStatus)
 }
 
+func TestRemoteEnvironmentFollowUpWireCompatibility(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		reply string
+		want  []extensions.FollowUpMessage
+	}{
+		{
+			name:  "old runner",
+			reply: "{\"followUpMessages\":[\"legacy\"]}",
+			want:  []extensions.FollowUpMessage{{ExtensionID: "legacy-runner", FollowUp: extensions.FollowUp{Text: "legacy", Visibility: "visible"}}},
+		},
+		{
+			name:  "new runner with visible legacy projection",
+			reply: "{\"followUps\":[{\"text\":\"visible\",\"visibility\":\"visible\",\"extensionId\":\"mailbox\",\"key\":\"inbox\",\"revision\":42},{\"text\":\"hidden\",\"visibility\":\"hidden\",\"extensionId\":\"mailbox\"}],\"followUpMessages\":[\"visible\"]}",
+			want: []extensions.FollowUpMessage{
+				{ExtensionID: "mailbox", FollowUp: extensions.FollowUp{Text: "visible", Visibility: "visible", Key: "inbox", Revision: 42}},
+				{ExtensionID: "mailbox", FollowUp: extensions.FollowUp{Text: "hidden", Visibility: "hidden"}},
+			},
+		},
+		{
+			name:  "explicit empty structured decision wins",
+			reply: "{\"followUps\":[],\"followUpMessages\":[\"stale\"]}",
+			want:  []extensions.FollowUpMessage{},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			controller := &fakeRemoteController{
+				manifest:       runnerpayload.Manifest{ProtocolVersion: protocol.Version, RunnerID: "runner-1", RunID: "run-1", Generation: 1, WorkingDirectory: "/workspace"},
+				lifecycleReply: json.RawMessage(test.reply),
+			}
+			environment := NewRemoteEnvironment(controller, "runner-1", WithRemoteRunIDGenerator(func() (string, error) { return "run-1", nil }))
+			_, err := environment.Open(t.Context(), RunSpec{ConversationID: "conversation"})
+			require.NoError(t, err)
+			turn, err := environment.DispatchTurnEnd(t.Context(), "", 1)
+			require.NoError(t, err)
+			assert.Equal(t, test.want, turn)
+			agent, err := environment.DispatchAgentEnd(t.Context(), nil)
+			require.NoError(t, err)
+			assert.Equal(t, test.want, agent)
+		})
+	}
+}
+
 func TestRemoteEnvironmentLifecycleHelpersAndToolProxy(t *testing.T) {
 	content := "# Runner context"
 	controller := &fakeRemoteController{manifest: runnerpayload.Manifest{
@@ -632,10 +680,12 @@ func TestRemoteEnvironmentLifecycleHelpersAndToolProxy(t *testing.T) {
 
 	require.NoError(t, environment.DispatchAgentStart(t.Context()))
 	require.NoError(t, environment.DispatchTurnStart(t.Context(), 2))
-	require.NoError(t, environment.DispatchTurnEnd(t.Context(), "done", 3))
+	turnFollowUps, err := environment.DispatchTurnEnd(t.Context(), "done", 3)
+	require.NoError(t, err)
 	followUps, err := environment.DispatchAgentEnd(t.Context(), []llmtypes.Message{{Role: "user", Content: "hello"}})
 	require.NoError(t, err)
-	assert.Equal(t, []string{"follow up"}, followUps)
+	assert.Equal(t, []extensions.FollowUpMessage{{FollowUp: extensions.FollowUp{Text: "follow up", Visibility: "hidden", Key: "mailbox", Revision: 42}, ExtensionID: "test"}}, followUps)
+	assert.Equal(t, followUps, turnFollowUps)
 	structured := tooltypes.StructuredToolResult{ToolName: "file_read", Success: true}
 	update, err := environment.DispatchToolUpdate(t.Context(), ToolOutputRequest{Name: "file_read", Input: `{}`, ToolCallID: "tool-1", StructuredResult: structured})
 	require.NoError(t, err)

@@ -29,6 +29,26 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func TestFollowUpLifecycleResultProjectsOnlyVisibleMessages(t *testing.T) {
+	messages := []extensions.FollowUpMessage{
+		{ExtensionID: "mailbox", FollowUp: extensions.FollowUp{Text: "hidden", Visibility: "hidden", Key: "inbox", Revision: 42}},
+		{ExtensionID: "mailbox", FollowUp: extensions.FollowUp{Text: "visible", Visibility: "visible"}},
+		{ExtensionID: "mailbox", FollowUp: extensions.FollowUp{Text: "default visible"}},
+	}
+	result := followUpLifecycleResult(messages)
+	assert.Equal(t, messages, result.FollowUps)
+	assert.Equal(t, []string{"visible", "default visible"}, result.FollowUpMessages)
+	raw, err := json.Marshal(result)
+	require.NoError(t, err)
+	// A version-1 host ignores the new field and sees no hidden text.
+	var legacy struct{ FollowUpMessages []string }
+	require.NoError(t, json.Unmarshal(raw, &legacy))
+	assert.Equal(t, []string{"visible", "default visible"}, legacy.FollowUpMessages)
+	hiddenOnly, err := json.Marshal(followUpLifecycleResult(messages[:1]))
+	require.NoError(t, err)
+	assert.NotContains(t, string(hiddenOnly), "followUpMessages")
+}
+
 type staticRuntimeProvider struct {
 	runtime *extensions.Runtime
 }
@@ -912,7 +932,7 @@ Review the runner workspace.`), 0o600))
 	agentEnd := callService[runnerpayload.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, runnerpayload.LifecycleDispatchParams{
 		RunID: "run-1", Event: runnerpayload.LifecycleAgentEnd,
 	})
-	assert.Empty(t, agentEnd.FollowUpMessages)
+	assert.Empty(t, agentEnd.FollowUps)
 	toolCall := callService[runnerpayload.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, runnerpayload.LifecycleDispatchParams{
 		RunID: "run-1", Event: runnerpayload.LifecycleToolCall, ToolName: "file_read", ToolCallID: "policy-1", ToolInput: json.RawMessage(`{}`),
 	})

@@ -216,12 +216,15 @@ type LifecycleDispatchParams struct {
 
 // LifecycleDispatchResult is the aggregate effective extension decision.
 type LifecycleDispatchResult struct {
-	Message          string                          `json:"message,omitempty"`
-	Blocked          bool                            `json:"blocked,omitempty"`
-	Reason           string                          `json:"reason,omitempty"`
-	SystemPrompt     string                          `json:"systemPrompt,omitempty"`
-	AllowedTools     []string                        `json:"allowedTools,omitempty"`
-	ToolsModified    bool                            `json:"toolsModified,omitempty"`
+	Message       string                       `json:"message,omitempty"`
+	Blocked       bool                         `json:"blocked,omitempty"`
+	Reason        string                       `json:"reason,omitempty"`
+	SystemPrompt  string                       `json:"systemPrompt,omitempty"`
+	AllowedTools  []string                     `json:"allowedTools,omitempty"`
+	ToolsModified bool                         `json:"toolsModified,omitempty"`
+	FollowUps     []extensions.FollowUpMessage `json:"followUps,omitempty"`
+	// FollowUpMessages keeps version-1 hosts/runners compatible. New hosts
+	// prefer FollowUps; new runners project only visible messages here.
 	FollowUpMessages []string                        `json:"followUpMessages,omitempty"`
 	ToolInput        json.RawMessage                 `json:"toolInput,omitempty"`
 	StructuredResult *tooltypes.StructuredToolResult `json:"structuredResult,omitempty"`

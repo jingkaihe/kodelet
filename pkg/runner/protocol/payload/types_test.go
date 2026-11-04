@@ -11,6 +11,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestLifecycleFollowUpFieldsAreOptionalAndCompatible(t *testing.T) {
+	raw, err := json.Marshal(LifecycleDispatchResult{})
+	require.NoError(t, err)
+	assert.JSONEq(t, "{}", string(raw))
+	var result LifecycleDispatchResult
+	require.NoError(t, json.Unmarshal([]byte("{\"followUpMessages\":[\"legacy\"]}"), &result))
+	assert.Nil(t, result.FollowUps)
+	assert.Equal(t, []string{"legacy"}, result.FollowUpMessages)
+	result.FollowUps = []extensions.FollowUpMessage{{ExtensionID: "mailbox", FollowUp: extensions.FollowUp{Text: "hidden", Visibility: "hidden", Key: "inbox", Revision: 42}}}
+	raw, err = json.Marshal(result)
+	require.NoError(t, err)
+	var restored LifecycleDispatchResult
+	require.NoError(t, json.Unmarshal(raw, &restored))
+	assert.Equal(t, result, restored)
+}
+
 func TestManifestProfilesWireCompatibilityAndDigest(t *testing.T) {
 	data, err := json.Marshal(Manifest{})
 	require.NoError(t, err)

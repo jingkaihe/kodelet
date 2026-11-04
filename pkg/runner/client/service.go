@@ -1571,10 +1571,11 @@ func (s *Service) dispatchLifecycle(ctx context.Context, params runnerpayload.Li
 			ToolsModified: decision.ToolsModified,
 		}, err
 	case runnerpayload.LifecycleTurnEnd:
-		return runnerpayload.LifecycleDispatchResult{}, run.environment.DispatchTurnEnd(operationCtx, params.FinalOutput, params.TurnCount)
+		messages, err := run.environment.DispatchTurnEnd(operationCtx, params.FinalOutput, params.TurnCount)
+		return followUpLifecycleResult(messages), err
 	case runnerpayload.LifecycleAgentEnd:
 		messages, err := run.environment.DispatchAgentEnd(operationCtx, params.Messages)
-		return runnerpayload.LifecycleDispatchResult{FollowUpMessages: messages}, err
+		return followUpLifecycleResult(messages), err
 	case runnerpayload.LifecycleToolCall:
 		decision, err := run.environment.DispatchToolCall(operationCtx, agentenv.ToolRequest{
 			Name:       params.ToolName,
@@ -1615,6 +1616,16 @@ func (s *Service) dispatchLifecycle(ctx context.Context, params runnerpayload.Li
 	default:
 		return runnerpayload.LifecycleDispatchResult{}, errors.Errorf("unsupported lifecycle event %q", params.Event)
 	}
+}
+
+func followUpLifecycleResult(messages []extensions.FollowUpMessage) runnerpayload.LifecycleDispatchResult {
+	result := runnerpayload.LifecycleDispatchResult{FollowUps: messages}
+	for _, message := range messages {
+		if message.Visibility == "" || message.Visibility == "visible" {
+			result.FollowUpMessages = append(result.FollowUpMessages, message.Text)
+		}
+	}
+	return result
 }
 
 func (s *Service) executeTool(ctx context.Context, params runnerpayload.ToolExecuteParams) (runnerpayload.ToolExecuteResult, error) {

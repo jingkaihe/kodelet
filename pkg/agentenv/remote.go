@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -307,17 +308,20 @@ func (e *RemoteEnvironment) ProcessAgentInit(ctx context.Context, systemPrompt s
 }
 
 // DispatchTurnEnd applies runner-owned turn.end handlers.
-func (e *RemoteEnvironment) DispatchTurnEnd(ctx context.Context, finalOutput string, turnCount int) error {
-	_, err := e.dispatchLifecycle(ctx, runnerpayload.LifecycleDispatchParams{
+func (e *RemoteEnvironment) DispatchTurnEnd(ctx context.Context, finalOutput string, turnCount int) ([]extensions.FollowUpMessage, error) {
+	result, err := e.dispatchLifecycle(ctx, runnerpayload.LifecycleDispatchParams{
 		Event:       runnerpayload.LifecycleTurnEnd,
 		FinalOutput: finalOutput,
 		TurnCount:   turnCount,
 	})
-	return err
+	if err != nil {
+		return nil, err
+	}
+	return remoteFollowUps(result), nil
 }
 
 // DispatchAgentEnd applies runner-owned agent.end handlers.
-func (e *RemoteEnvironment) DispatchAgentEnd(ctx context.Context, messages []llmtypes.Message) ([]string, error) {
+func (e *RemoteEnvironment) DispatchAgentEnd(ctx context.Context, messages []llmtypes.Message) ([]extensions.FollowUpMessage, error) {
 	result, err := e.dispatchLifecycle(ctx, runnerpayload.LifecycleDispatchParams{
 		Event:    runnerpayload.LifecycleAgentEnd,
 		Messages: slices.Clone(messages),
@@ -325,7 +329,26 @@ func (e *RemoteEnvironment) DispatchAgentEnd(ctx context.Context, messages []llm
 	if err != nil {
 		return nil, err
 	}
-	return slices.Clone(result.FollowUpMessages), nil
+	return remoteFollowUps(result), nil
+}
+
+func remoteFollowUps(result runnerpayload.LifecycleDispatchResult) []extensions.FollowUpMessage {
+	if result.FollowUps != nil {
+		return slices.Clone(result.FollowUps)
+	}
+	// Old runners did not transmit extension identity. Use an explicit host-owned
+	// label rather than presenting these messages as human input or guessing an ID.
+	var messages []extensions.FollowUpMessage
+	remaining := 16 * 1024
+	for _, text := range result.FollowUpMessages {
+		message := extensions.FollowUp{Text: text, Visibility: "visible"}
+		if !message.Valid() || len(messages) >= 32 || len(text) > remaining {
+			continue
+		}
+		messages = append(messages, extensions.FollowUpMessage{FollowUp: message, ExtensionID: "legacy-runner"})
+		remaining -= len(text)
+	}
+	return messages
 }
 
 // DispatchToolCall proxies tool.call extension policy without executing the tool.
