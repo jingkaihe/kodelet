@@ -337,6 +337,50 @@ func TestResponsesEndHookTurnBudgetPersistsRevisions(t *testing.T) {
 	}
 }
 
+func TestResponsesEndHookCheckpointFailureStopsBeforeNextRequest(t *testing.T) {
+	for _, hook := range []string{"turn.end", "agent.end"} {
+		t.Run(hook, func(t *testing.T) {
+			t.Setenv("KODELET_BASE_PATH", t.TempDir())
+			sentinel := errors.New("checkpoint unavailable")
+			require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+			followUps := []extensions.FollowUpMessage{{
+				ExtensionID: "review",
+				FollowUp:    extensions.FollowUp{Text: "review notification", Key: "review", Revision: 42, Visibility: "hidden"},
+			}}
+			environment := &finishedEnvironment{}
+			if hook == "turn.end" {
+				environment.turnEnd = func(string, int) []extensions.FollowUpMessage { return followUps }
+			} else {
+				environment.agentEnd = func() []extensions.FollowUpMessage { return followUps }
+			}
+			store := &mockResponsesConversationStore{saveFunc: func(_ context.Context, record convtypes.ConversationRecord) error {
+				if record.Metadata[base.ExtensionMessagesMetadataKey] != nil {
+					return sentinel
+				}
+				return nil
+			}}
+			requests := 0
+			thread := newFollowUpTestThread(func() { requests++ })
+			thread.Store, thread.Persisted = store, true
+			thread.SetEnvironment(environment)
+			_, err := thread.SendMessage(t.Context(), "hello", &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{
+				MaxTurns: 3, DisableUsageLog: true,
+			})
+			require.ErrorIs(t, err, sentinel)
+			require.ErrorContains(t, err, "failed to checkpoint extension follow-ups")
+			assert.Equal(t, 1, requests, "an uncheckpointed follow-up must never reach another provider request")
+			require.NotEmpty(t, store.savedRecords)
+			record := store.savedRecords[len(store.savedRecords)-1]
+			assert.Contains(t, string(record.RawMessages), "review notification", "the failed save must be the follow-up checkpoint")
+			assert.Equal(t, map[string]map[string]string{"review": {"review": "42"}}, record.Metadata[base.FollowUpRevisionsMetadataKey])
+			require.Len(t, environment.outcomes, 1)
+			assert.Equal(t, llmtypes.AgentRunStatusFailed, environment.outcomes[0].Status)
+			assert.Equal(t, llmtypes.AgentRunReasonError, environment.outcomes[0].Reason)
+			assert.False(t, environment.IsOpen())
+		})
+	}
+}
+
 func TestResponsesReportsTerminationOutcome(t *testing.T) {
 	for _, test := range []struct {
 		name          string
