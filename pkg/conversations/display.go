@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
@@ -28,8 +29,7 @@ const (
 
 // UserMessageProvenance is host-owned attribution, never inferred from message text.
 type UserMessageProvenance struct {
-	ExtensionID     string `json:"extensionId"`
-	Visibility      string `json:"visibility"`
+	convtypes.ExtensionMessageMetadata
 	DelegatedSource string `json:"-"`
 }
 
@@ -42,11 +42,11 @@ func ProjectHistorySegment[T any](
 	raw json.RawMessage, metadata map[string]any, userOrdinal *int,
 	convert func(json.RawMessage) ([]T, error), attribute func(*T, UserMessageProvenance),
 ) ([]T, error) {
-	if metadata["extension_messages"] == nil && metadata["delegated_user_sources"] == nil {
+	if metadata[convtypes.ExtensionMessagesMetadataKey] == nil && metadata[convtypes.UserMessageSourcesMetadataKey] == nil {
 		return convert(raw)
 	}
-	var extensions map[string]UserMessageProvenance
-	if value := metadata["extension_messages"]; value != nil {
+	extensions, typed := metadata[convtypes.ExtensionMessagesMetadataKey].(map[string]convtypes.ExtensionMessageMetadata)
+	if value := metadata[convtypes.ExtensionMessagesMetadataKey]; !typed && value != nil {
 		encoded, err := json.Marshal(value)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to encode extension message provenance")
@@ -92,8 +92,8 @@ func ProjectHistorySegment[T any](
 		var source UserMessageProvenance
 		if header.Role == "user" {
 			key := strconv.Itoa(*userOrdinal)
-			source = extensions[key]
-			switch sources := metadata["delegated_user_sources"].(type) {
+			source.ExtensionMessageMetadata = extensions[key]
+			switch sources := metadata[convtypes.UserMessageSourcesMetadataKey].(type) {
 			case map[string]string:
 				source.DelegatedSource = sources[key]
 			case map[string]any:

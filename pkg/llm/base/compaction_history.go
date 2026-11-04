@@ -16,7 +16,7 @@ import (
 
 // UserMessageSourcesMetadataKey maps display-history raw user ordinals to their
 // delegated source IDs. Values are replaced, never mutated, when recording input.
-const UserMessageSourcesMetadataKey = "delegated_user_sources"
+const UserMessageSourcesMetadataKey = convtypes.UserMessageSourcesMetadataKey
 
 // RecordUserMessageSource identifies the last appended raw user item without
 // changing inference input. Ordinals span the display archive, so compaction

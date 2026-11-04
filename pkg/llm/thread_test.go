@@ -61,7 +61,7 @@ func TestExtensionMessageDisplayHistory(t *testing.T) {
 				require.NoError(t, err)
 				record := convtypes.ConversationRecord{
 					Provider: provider, RawMessages: raw,
-					Metadata: map[string]any{"extension_messages": map[string]conversations.UserMessageProvenance{
+					Metadata: map[string]any{convtypes.ExtensionMessagesMetadataKey: map[string]convtypes.ExtensionMessageMetadata{
 						"1": {ExtensionID: "reminders", Visibility: "hidden"},
 						"2": {ExtensionID: "reminders", Visibility: "visible"},
 						"4": {ExtensionID: "reminders", Visibility: "hidden"},

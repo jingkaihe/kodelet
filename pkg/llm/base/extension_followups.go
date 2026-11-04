@@ -4,31 +4,34 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strconv"
 
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
 // ExtensionMessagesMetadataKey maps archive-spanning raw user ordinals to
 // extension provenance. It shares the delegated_user_sources ordinal scheme.
-const ExtensionMessagesMetadataKey = "extension_messages"
+const ExtensionMessagesMetadataKey = convtypes.ExtensionMessagesMetadataKey
 
 // FollowUpRevisionsMetadataKey stores per-extension/key revision watermarks.
 // Decimal strings preserve the entire int64 range through JSON metadata loads.
-const FollowUpRevisionsMetadataKey = "extension_follow_up_revisions"
+const FollowUpRevisionsMetadataKey = convtypes.FollowUpRevisionsMetadataKey
 
 // ExtensionMessageMetadata identifies the source and display policy of one
 // exact history entry without changing its model-facing content.
-type ExtensionMessageMetadata struct {
-	ExtensionID string `json:"extensionId"`
-	Visibility  string `json:"visibility"`
-}
+type ExtensionMessageMetadata = convtypes.ExtensionMessageMetadata
 
 type extensionFollowUpContextKey struct{}
 
+// followUpRevisions returns a read-only view; callers must copy before writing.
 func followUpRevisions(value any) map[string]map[string]string {
+	if revisions, ok := value.(map[string]map[string]string); ok {
+		return revisions
+	}
 	revisions := make(map[string]map[string]string)
 	if raw, err := json.Marshal(value); err == nil && value != nil {
 		_ = json.Unmarshal(raw, &revisions)
@@ -44,19 +47,30 @@ func (t *Thread) recordExtensionMessageLocked(ctx context.Context, ordinal strin
 		return
 	}
 	entries := make(map[string]ExtensionMessageMetadata)
-	if value := t.Metadata[ExtensionMessagesMetadataKey]; value != nil {
+	switch value := t.Metadata[ExtensionMessagesMetadataKey].(type) {
+	case map[string]ExtensionMessageMetadata:
+		maps.Copy(entries, value)
+	default:
 		if raw, err := json.Marshal(value); err == nil {
 			_ = json.Unmarshal(raw, &entries)
 		}
 	}
+	if entries == nil {
+		entries = make(map[string]ExtensionMessageMetadata)
+	}
 	if isExtension {
 		entries[ordinal] = ExtensionMessageMetadata{ExtensionID: message.ExtensionID, Visibility: message.Visibility}
 		if message.Key != "" && message.Revision > 0 {
-			revisions := followUpRevisions(t.Metadata[FollowUpRevisionsMetadataKey])
-			if revisions[message.ExtensionID] == nil {
-				revisions[message.ExtensionID] = make(map[string]string)
+			revisions := maps.Clone(followUpRevisions(t.Metadata[FollowUpRevisionsMetadataKey]))
+			if revisions == nil {
+				revisions = make(map[string]map[string]string)
 			}
-			revisions[message.ExtensionID][message.Key] = strconv.FormatInt(message.Revision, 10)
+			watermarks := maps.Clone(revisions[message.ExtensionID])
+			if watermarks == nil {
+				watermarks = make(map[string]string)
+			}
+			watermarks[message.Key] = strconv.FormatInt(message.Revision, 10)
+			revisions[message.ExtensionID] = watermarks
 			t.Metadata[FollowUpRevisionsMetadataKey] = revisions
 		}
 	} else {

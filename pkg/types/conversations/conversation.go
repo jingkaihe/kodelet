@@ -21,6 +21,13 @@ import (
 var ErrConversationNotFound = errors.New("conversation not found")
 
 const (
+	// UserMessageSourcesMetadataKey maps archive-spanning raw user ordinals to delegated source IDs.
+	UserMessageSourcesMetadataKey = "delegated_user_sources"
+	// ExtensionMessagesMetadataKey maps the same raw user ordinals to extension provenance.
+	ExtensionMessagesMetadataKey = "extension_messages"
+	// FollowUpRevisionsMetadataKey stores per-extension/key revision watermarks.
+	// Decimal strings preserve the entire int64 range through JSON metadata loads.
+	FollowUpRevisionsMetadataKey = "extension_follow_up_revisions"
 	// ParentConversationIDMetadataKey stores the explicit hierarchy parent, independently of fork provenance.
 	ParentConversationIDMetadataKey = "parent_conversation_id"
 	// ConversationForkMetadataKey stores durable conversation fork lineage.
@@ -35,6 +42,13 @@ const (
 	// context-window generation. Forks intentionally start a new generation lineage.
 	CodexResponsesWindowGenerationMetadataKey = "codex_responses_window_generation"
 )
+
+// ExtensionMessageMetadata identifies the source and display policy of one
+// exact history entry without changing its model-facing content.
+type ExtensionMessageMetadata struct {
+	ExtensionID string `json:"extensionId"`
+	Visibility  string `json:"visibility"`
+}
 
 // ConversationForkMode identifies how the source state was obtained.
 type ConversationForkMode string
