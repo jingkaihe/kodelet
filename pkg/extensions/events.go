@@ -34,7 +34,7 @@ const (
 	EventToolUpdate = "tool.update"
 	// EventToolResult is dispatched after a tool executes and before it is rendered/stored.
 	EventToolResult = "tool.result"
-	// EventTurnEnd is dispatched after one assistant turn completes.
+	// EventTurnEnd is dispatched after each completed iteration and its tool results, even without text.
 	EventTurnEnd = "turn.end"
 	// EventAgentEnd is dispatched when an agent loop completes and may request continuation.
 	EventAgentEnd = "agent.end"
@@ -381,7 +381,6 @@ func (r *Runtime) dispatchFollowUps(ctx context.Context, eventName string, paylo
 	}
 
 	var followUps []FollowUpMessage
-	remaining := 16 * 1024
 	for _, handler := range r.eventHandlers(eventName) {
 		if ctx.Err() != nil {
 			break
@@ -395,14 +394,15 @@ func (r *Runtime) dispatchFollowUps(ctx context.Context, eventName string, paylo
 			continue
 		}
 		appendFollowUp := func(message FollowUp) {
-			if !message.Valid() || len(followUps) >= 32 || len(message.Text) > remaining {
+			if !message.Valid() {
+				logger.G(ctx).WithField("extension", handler.process.Extension.ID).WithField("event", eventName).
+					Warn("extension follow-up rejected: invalid text, visibility, key, or revision")
 				return
 			}
 			if message.Visibility == "" {
 				message.Visibility = "visible"
 			}
 			followUps = append(followUps, FollowUpMessage{FollowUp: message, ExtensionID: handler.process.Extension.ID})
-			remaining -= len(message.Text)
 		}
 		for _, message := range result.FollowUps {
 			appendFollowUp(message)
@@ -414,11 +414,11 @@ func (r *Runtime) dispatchFollowUps(ctx context.Context, eventName string, paylo
 	return followUps
 }
 
-// Valid bounds notification payloads independently of general tool output limits.
+// Valid checks follow-up semantics without imposing prompt size or batch limits.
 func (f FollowUp) Valid() bool {
-	return strings.TrimSpace(f.Text) != "" && len(f.Text) <= 4096 &&
+	return strings.TrimSpace(f.Text) != "" &&
 		(f.Visibility == "" || f.Visibility == "visible" || f.Visibility == "hidden") &&
-		len(f.Key) <= 256 && (f.Key == "" || strings.TrimSpace(f.Key) != "") &&
+		(f.Key == "" || strings.TrimSpace(f.Key) != "") &&
 		f.Revision >= 0 && (f.Revision == 0 || f.Key != "")
 }
 

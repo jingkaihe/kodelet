@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -603,6 +604,17 @@ func TestRemoteEnvironmentRejectsMismatchedContextDigest(t *testing.T) {
 }
 
 func TestRemoteEnvironmentFollowUpWireCompatibility(t *testing.T) {
+	largeLegacy := runnerpayload.LifecycleDispatchResult{}
+	var largeExpected []extensions.FollowUpMessage
+	for range 40 {
+		text := strings.Repeat("legacy prompt ", 1024)
+		largeLegacy.FollowUpMessages = append(largeLegacy.FollowUpMessages, text)
+		largeExpected = append(largeExpected, extensions.FollowUpMessage{
+			ExtensionID: "legacy-runner", FollowUp: extensions.FollowUp{Text: text, Visibility: "visible"},
+		})
+	}
+	largeReply, err := json.Marshal(largeLegacy)
+	require.NoError(t, err)
 	for _, test := range []struct {
 		name  string
 		reply string
@@ -612,6 +624,11 @@ func TestRemoteEnvironmentFollowUpWireCompatibility(t *testing.T) {
 			name:  "old runner",
 			reply: "{\"followUpMessages\":[\"legacy\"]}",
 			want:  []extensions.FollowUpMessage{{ExtensionID: "legacy-runner", FollowUp: extensions.FollowUp{Text: "legacy", Visibility: "visible"}}},
+		},
+		{
+			name:  "legacy prompts have no follow-up-specific size or count cap",
+			reply: string(largeReply),
+			want:  largeExpected,
 		},
 		{
 			name:  "new runner with visible legacy projection",

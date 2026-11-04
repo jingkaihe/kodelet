@@ -14,6 +14,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -317,7 +318,7 @@ func (e *RemoteEnvironment) DispatchTurnEnd(ctx context.Context, finalOutput str
 	if err != nil {
 		return nil, err
 	}
-	return remoteFollowUps(result), nil
+	return remoteFollowUps(ctx, result), nil
 }
 
 // DispatchAgentEnd applies runner-owned agent.end handlers.
@@ -329,24 +330,23 @@ func (e *RemoteEnvironment) DispatchAgentEnd(ctx context.Context, messages []llm
 	if err != nil {
 		return nil, err
 	}
-	return remoteFollowUps(result), nil
+	return remoteFollowUps(ctx, result), nil
 }
 
-func remoteFollowUps(result runnerpayload.LifecycleDispatchResult) []extensions.FollowUpMessage {
+func remoteFollowUps(ctx context.Context, result runnerpayload.LifecycleDispatchResult) []extensions.FollowUpMessage {
 	if result.FollowUps != nil {
 		return slices.Clone(result.FollowUps)
 	}
 	// Old runners did not transmit extension identity. Use an explicit host-owned
 	// label rather than presenting these messages as human input or guessing an ID.
 	var messages []extensions.FollowUpMessage
-	remaining := 16 * 1024
 	for _, text := range result.FollowUpMessages {
 		message := extensions.FollowUp{Text: text, Visibility: "visible"}
-		if !message.Valid() || len(messages) >= 32 || len(text) > remaining {
+		if !message.Valid() {
+			logger.G(ctx).WithField("extension", "legacy-runner").Warn("extension follow-up rejected: blank text")
 			continue
 		}
 		messages = append(messages, extensions.FollowUpMessage{FollowUp: message, ExtensionID: "legacy-runner"})
-		remaining -= len(text)
 	}
 	return messages
 }

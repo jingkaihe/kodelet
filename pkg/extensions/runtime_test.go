@@ -476,7 +476,7 @@ func TestRuntimeDispatchesAgentInitAndEndEvents(t *testing.T) {
 	assert.NotEmpty(t, followUps[0].ExtensionID)
 }
 
-func TestRuntimeFollowUpsAreBoundedAndHostAttributed(t *testing.T) {
+func TestRuntimeFollowUpsAreValidatedAndHostAttributed(t *testing.T) {
 	rootDir := t.TempDir()
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	writeExecutable(t, filepath.Join(rootDir, "events", "kodelet-extension-events"), helperExtensionScript(t))
@@ -492,8 +492,7 @@ func TestRuntimeFollowUpsAreBoundedAndHostAttributed(t *testing.T) {
 			{"text": "invalid visibility", "visibility": "secret"},
 			{"text": "invalid revision", "key": "mailbox", "revision": -1},
 			{"text": "missing key", "revision": 1},
-			{"text": strings.Repeat("x", 4097)},
-			{"text": "oversized key", "key": strings.Repeat("k", 257)},
+			{"text": "blank key", "key": " ", "revision": 1},
 		},
 		"followUpMessages": []string{"legacy"},
 	}
@@ -514,17 +513,20 @@ func TestRuntimeFollowUpsAreBoundedAndHostAttributed(t *testing.T) {
 		}
 		assert.Equal(t, messages, runtime.DispatchAgentEnd(t.Context(), callContext, nil))
 	}
-	oversizedBatch := EventResult{}
+	largeBatch := EventResult{}
 	for range 40 {
-		oversizedBatch.FollowUps = append(oversizedBatch.FollowUps, FollowUp{Text: "notification"})
+		largeBatch.FollowUps = append(largeBatch.FollowUps, FollowUp{
+			Text: strings.Repeat("x", 8192), Key: strings.Repeat("k", 512), Revision: 1,
+		})
+		largeBatch.FollowUpMessages = append(largeBatch.FollowUpMessages, strings.Repeat("y", 8192))
 	}
-	writeFixture(oversizedBatch)
-	assert.Len(t, runtime.DispatchTurnEnd(t.Context(), callContext, "", 2), 32)
-	for i := range oversizedBatch.FollowUps {
-		oversizedBatch.FollowUps[i].Text = strings.Repeat("x", 4096)
-	}
-	writeFixture(oversizedBatch)
-	assert.Len(t, runtime.DispatchTurnEnd(t.Context(), callContext, "", 3), 4)
+	writeFixture(largeBatch)
+	messages := runtime.DispatchTurnEnd(t.Context(), callContext, "", 2)
+	require.Len(t, messages, 80)
+	assert.Equal(t, largeBatch.FollowUps[0].Text, messages[0].Text)
+	assert.Equal(t, largeBatch.FollowUps[0].Key, messages[0].Key)
+	assert.Equal(t, largeBatch.FollowUpMessages[39], messages[79].Text)
+	assert.Equal(t, messages, runtime.DispatchAgentEnd(t.Context(), callContext, nil))
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	assert.Empty(t, runtime.DispatchTurnEnd(ctx, callContext, "", 4))
