@@ -132,6 +132,27 @@ func TestReplayConversationHistory(t *testing.T) {
 	assert.Equal(t, acptypes.UpdateAgentMessageChunk, sender.updates[6].(map[string]any)["sessionUpdate"])
 }
 
+func TestReplayConversationHistoryPreservesExtensionAttribution(t *testing.T) {
+	sender := &mockSender{}
+	messages := []conversations.StreamableMessage{
+		{Kind: "text", Role: "user", Content: "same words", ExtensionID: "reminders"},
+		{Kind: "text", Role: "user", Content: "same words"},
+	}
+	require.NoError(t, ReplayConversationHistory(sender, "session-1", messages))
+	require.Len(t, sender.updates, 2)
+	extension := sender.updates[0].(map[string]any)
+	assert.Equal(t, acptypes.UpdateUserMessageChunk, extension["sessionUpdate"])
+	assert.Equal(t, "Extension: reminders\n\nsame words", extension["content"].(acptypes.ContentBlock).Text)
+	assert.Equal(t, map[string]any{"kodelet/extensionId": "reminders"}, extension["_meta"])
+	human := sender.updates[1].(map[string]any)
+	assert.Equal(t, acptypes.UpdateUserMessageChunk, human["sessionUpdate"])
+	assert.Equal(t, "same words", human["content"].(acptypes.ContentBlock).Text)
+	assert.NotContains(t, human, "_meta")
+
+	failing := &failingCompactionSender{err: assert.AnError}
+	require.ErrorIs(t, ReplayConversationHistory(failing, "session-1", messages), assert.AnError)
+}
+
 func TestACPCompactionLiveAndReplay(t *testing.T) {
 	for _, method := range []string{"api", "summary"} {
 		t.Run(method, func(t *testing.T) {

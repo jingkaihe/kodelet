@@ -119,7 +119,7 @@ func (s *ACPChatEventSink) Send(event chat.ChatEvent) error {
 		if text == "" || s.sender == nil {
 			return nil
 		}
-		return s.sender.SendUpdate(s.sessionID, userMessageUpdate(text))
+		return s.sender.SendUpdate(s.sessionID, userMessageUpdate(text, ""))
 	}
 	return nil
 }
@@ -195,7 +195,7 @@ func replayUserMessage(sender UpdateSender, sessionID acptypes.SessionID, messag
 		content = ""
 	}
 	if content != "" {
-		if err := sender.SendUpdate(sessionID, userMessageUpdate(message.Content)); err != nil {
+		if err := sender.SendUpdate(sessionID, userMessageUpdate(message.Content, message.ExtensionID)); err != nil {
 			return err
 		}
 	}
@@ -290,14 +290,22 @@ func chatEventText(event chat.ChatEvent) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func userMessageUpdate(text string) map[string]any {
-	return map[string]any{
+func userMessageUpdate(text, extensionID string) map[string]any {
+	update := map[string]any{
 		"sessionUpdate": acptypes.UpdateUserMessageChunk,
 		"content": acptypes.ContentBlock{
 			Type: acptypes.ContentTypeText,
 			Text: text,
 		},
 	}
+	if extensionID != "" {
+		update["content"] = acptypes.ContentBlock{
+			Type: acptypes.ContentTypeText,
+			Text: "Extension: " + extensionID + "\n\n" + text,
+		}
+		update["_meta"] = map[string]any{"kodelet/extensionId": extensionID}
+	}
+	return update
 }
 
 func chatEventToolResult(event chat.ChatEvent) tooltypes.ToolResult {
