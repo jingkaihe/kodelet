@@ -119,6 +119,7 @@ type recordingAgentEnvironment struct {
 	agentInitErr          error
 	agentInitAllowedTools []string
 	turnEndErr            error
+	turnFollowUps         []extensions.FollowUpMessage
 	followUps             []string
 	agentEndErr           error
 	toolCallDecision      agentenv.ToolCallDecision
@@ -132,6 +133,7 @@ type recordingAgentEnvironment struct {
 	agentStartCalls       int
 	turnStartCalls        []int
 	turnEndCalls          []string
+	agentEndCalls         int
 }
 
 func (e *recordingAgentEnvironment) Open(context.Context, agentenv.RunSpec) (agentenv.Manifest, error) {
@@ -175,10 +177,11 @@ func (e *recordingAgentEnvironment) ProcessAgentInit(_ context.Context, _ string
 
 func (e *recordingAgentEnvironment) DispatchTurnEnd(_ context.Context, finalOutput string, _ int) ([]extensions.FollowUpMessage, error) {
 	e.turnEndCalls = append(e.turnEndCalls, finalOutput)
-	return nil, e.turnEndErr
+	return e.turnFollowUps, e.turnEndErr
 }
 
 func (e *recordingAgentEnvironment) DispatchAgentEnd(context.Context, []llmtypes.Message) ([]extensions.FollowUpMessage, error) {
+	e.agentEndCalls++
 	var messages []extensions.FollowUpMessage
 	for _, text := range e.followUps {
 		messages = append(messages, extensions.FollowUpMessage{FollowUp: extensions.FollowUp{Text: text}, ExtensionID: "test"})
@@ -392,15 +395,15 @@ func TestTurnFlowUsesPinnedAgentEnvironment(t *testing.T) {
 	prompt, err := ProcessSystemPrompt(t.Context(), thread, "base prompt")
 	require.NoError(t, err)
 	assert.Equal(t, "runner prompt", prompt)
-	_, err = TriggerTurnEnd(t.Context(), thread, nil, "final response", 3)
+	_, err = TriggerTurnEnd(t.Context(), thread, nil, "final response", 3, true)
 	require.NoError(t, err)
-	_, err = TriggerTurnEnd(t.Context(), thread, nil, "", 4)
+	_, err = TriggerTurnEnd(t.Context(), thread, nil, "", 4, true)
 	require.NoError(t, err)
-	_, err = TriggerTurnEnd(t.Context(), thread, nil, " \n\t", 5)
+	_, err = TriggerTurnEnd(t.Context(), thread, nil, " \n\t", 5, true)
 	require.NoError(t, err)
 
 	handler := &recordingHandler{}
-	continued, err := HandleAgentStopFollowUps(t.Context(), thread, handler)
+	continued, err := HandleAgentStopFollowUps(t.Context(), thread, handler, true)
 	require.NoError(t, err)
 	assert.True(t, continued)
 	assert.Equal(t, []string{"inspect the logs", "retry the check"}, thread.userMessages)
@@ -430,9 +433,9 @@ func TestTurnFlowPropagatesEnvironmentFailures(t *testing.T) {
 	require.ErrorIs(t, DispatchTurnStart(t.Context(), thread, 1), sentinel)
 	_, err = ProcessAgentInit(t.Context(), thread, "prompt")
 	require.ErrorIs(t, err, sentinel)
-	_, err = TriggerTurnEnd(t.Context(), thread, nil, "output", 1)
+	_, err = TriggerTurnEnd(t.Context(), thread, nil, "output", 1, true)
 	require.ErrorIs(t, err, sentinel)
-	_, err = HandleAgentStopFollowUps(t.Context(), thread, &recordingHandler{})
+	_, err = HandleAgentStopFollowUps(t.Context(), thread, &recordingHandler{}, true)
 	require.ErrorIs(t, err, sentinel)
 
 	message, err := ProcessUserMessage(t.Context(), nil, "unchanged")
@@ -637,9 +640,52 @@ func TestExtensionFollowUpsPersistExactProvenanceAndMonotonicRevisions(t *testin
 	assert.True(t, appendMessage(temporary), "cancellation does not advance the watermark")
 }
 
+func TestEndHooksRemainObservationalWithoutFollowUpBudget(t *testing.T) {
+	for _, hook := range []string{"turn.end", "agent.end"} {
+		t.Run(hook, func(t *testing.T) {
+			environment := &recordingAgentEnvironment{
+				open: true,
+				turnFollowUps: []extensions.FollowUpMessage{{
+					ExtensionID: "review",
+					FollowUp:    extensions.FollowUp{Text: "review again", Key: "review", Revision: 42},
+				}},
+				followUps: []string{"review again"},
+			}
+			thread := &environmentThreadStub{threadStub: &threadStub{}, environment: environment}
+			handler := &recordingHandler{}
+			dispatch := func(accept bool) (bool, error) {
+				if hook == "turn.end" {
+					return TriggerTurnEnd(t.Context(), thread, handler, "answer", 1, accept)
+				}
+				return HandleAgentStopFollowUps(t.Context(), thread, handler, accept)
+			}
+			continued, err := dispatch(false)
+			require.NoError(t, err)
+			assert.False(t, continued)
+			assert.Empty(t, thread.userMessages)
+			assert.Empty(t, handler.texts)
+			if hook == "turn.end" {
+				assert.Equal(t, []string{"answer"}, environment.turnEndCalls)
+			} else {
+				assert.Equal(t, 1, environment.agentEndCalls)
+			}
+
+			environment.turnEndErr, environment.agentEndErr = context.Canceled, context.Canceled
+			_, err = dispatch(false)
+			require.ErrorIs(t, err, context.Canceled, "observational dispatch must still propagate cancellation")
+			environment.turnEndErr, environment.agentEndErr = nil, nil
+			continued, err = dispatch(true)
+			require.NoError(t, err)
+			assert.True(t, continued)
+			assert.Equal(t, []string{"review again"}, thread.userMessages)
+			require.Len(t, handler.texts, 1)
+		})
+	}
+}
+
 func TestTriggerTurnEnd(t *testing.T) {
 	thread := &threadStub{}
-	continued, err := TriggerTurnEnd(context.Background(), thread, nil, "final response", 7)
+	continued, err := TriggerTurnEnd(context.Background(), thread, nil, "final response", 7, true)
 	require.NoError(t, err)
 	assert.False(t, continued)
 }
@@ -671,7 +717,7 @@ func TestHandleAgentStopFollowUps(t *testing.T) {
 	}
 	handler := &recordingHandler{}
 
-	continued, err := HandleAgentStopFollowUps(context.Background(), thread, handler)
+	continued, err := HandleAgentStopFollowUps(context.Background(), thread, handler, true)
 	require.NoError(t, err)
 
 	assert.False(t, continued)
@@ -683,7 +729,7 @@ func TestHandleAgentStopFollowUpsReturnsFalse(t *testing.T) {
 	t.Run("message retrieval error", func(t *testing.T) {
 		thread := &threadStub{getMessagesErr: errors.New("boom")}
 
-		continued, err := HandleAgentStopFollowUps(context.Background(), thread, &recordingHandler{})
+		continued, err := HandleAgentStopFollowUps(context.Background(), thread, &recordingHandler{}, true)
 		require.NoError(t, err)
 
 		assert.False(t, continued)
@@ -692,7 +738,7 @@ func TestHandleAgentStopFollowUpsReturnsFalse(t *testing.T) {
 	t.Run("no follow ups", func(t *testing.T) {
 		thread := &threadStub{messages: []llmtypes.Message{{Role: "assistant", Content: "done"}}}
 
-		continued, err := HandleAgentStopFollowUps(context.Background(), thread, &recordingHandler{})
+		continued, err := HandleAgentStopFollowUps(context.Background(), thread, &recordingHandler{}, true)
 		require.NoError(t, err)
 
 		assert.False(t, continued)

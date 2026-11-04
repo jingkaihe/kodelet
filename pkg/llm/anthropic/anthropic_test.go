@@ -20,6 +20,9 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/codemode"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
@@ -1321,18 +1324,29 @@ type terminationOutcomeEnvironment struct {
 	agentenv.UtilityEnvironment
 	outcomes      []llmtypes.AgentRunOutcome
 	turnFollowUps bool
+	followUps     []extensions.FollowUpMessage
+	turnEnds      int
+	agentEnds     int
 }
 
 func (e *terminationOutcomeEnvironment) DispatchTurnEnd(_ context.Context, _ string, turn int) ([]extensions.FollowUpMessage, error) {
+	e.turnEnds++
 	if !e.turnFollowUps {
 		return nil, nil
+	}
+	if e.followUps != nil {
+		return e.followUps, nil
 	}
 	return []extensions.FollowUpMessage{{FollowUp: extensions.FollowUp{Text: "continue", Visibility: "hidden", Key: "mailbox", Revision: int64(turn)}, ExtensionID: "test"}}, nil
 }
 
 func (e *terminationOutcomeEnvironment) DispatchAgentEnd(context.Context, []llmtypes.Message) ([]extensions.FollowUpMessage, error) {
+	e.agentEnds++
 	if e.turnFollowUps {
 		return nil, nil
+	}
+	if e.followUps != nil {
+		return e.followUps, nil
 	}
 	// Keep requesting follow-ups so successful exchanges reach the turn limit.
 	return []extensions.FollowUpMessage{{FollowUp: extensions.FollowUp{Text: "continue"}, ExtensionID: "test"}}, nil
@@ -1341,6 +1355,107 @@ func (e *terminationOutcomeEnvironment) DispatchAgentEnd(context.Context, []llmt
 func (e *terminationOutcomeEnvironment) CloseWithOutcome(ctx context.Context, outcome llmtypes.AgentRunOutcome) error {
 	e.outcomes = append(e.outcomes, outcome)
 	return e.Close(ctx)
+}
+
+func newFollowUpTestThread(onRequest func()) *Thread {
+	client := anthropic.NewClient(
+		option.WithAPIKey("test-key"),
+		option.WithMiddleware(func(_ *http.Request, _ option.MiddlewareNext) (*http.Response, error) {
+			onRequest()
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": {"text/event-stream"}},
+				Body: io.NopCloser(strings.NewReader(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_review","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[],"usage":{"input_tokens":1,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"answer"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+`)),
+			}, nil
+		}),
+	)
+	return &Thread{
+		Thread: base.NewThread(llmtypes.Config{Provider: "anthropic", Model: "claude-sonnet-4-6"}, "review-budget"),
+		client: client,
+	}
+}
+
+func TestAnthropicEndHookTurnBudgetPersistsRevisions(t *testing.T) {
+	for _, hook := range []string{"turn.end", "agent.end"} {
+		t.Run(hook, func(t *testing.T) {
+			t.Setenv("KODELET_BASE_PATH", t.TempDir())
+			require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+			store, err := conversations.GetConversationStore(t.Context())
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, store.Close()) })
+
+			for run, phase := range []struct {
+				revision  int64
+				maxTurns  int
+				requests  int
+				watermark string
+			}{
+				{revision: 41, maxTurns: 3, requests: 2, watermark: "41"},
+				{revision: 42, maxTurns: 1, requests: 1, watermark: "41"},
+				{revision: 42, maxTurns: 0, requests: 2, watermark: "42"},
+			} {
+				followUps := []extensions.FollowUpMessage{{
+					ExtensionID: "review",
+					FollowUp: extensions.FollowUp{
+						Text: fmt.Sprintf("review revision %d", phase.revision),
+						Key:  "review", Revision: phase.revision, Visibility: "hidden",
+					},
+				}}
+				environment := &terminationOutcomeEnvironment{turnFollowUps: hook == "turn.end", followUps: followUps}
+				requests := 0
+				thread := newFollowUpTestThread(func() { requests++ })
+				thread.Store, thread.Persisted = store, true
+				if run > 0 {
+					require.NoError(t, thread.loadConversation(t.Context()))
+				}
+				thread.SetEnvironment(environment)
+				_, err := thread.SendMessage(t.Context(), "hello", &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{
+					MaxTurns: phase.maxTurns, DisableUsageLog: true,
+				})
+				require.NoError(t, err)
+				assert.Equal(t, phase.requests, requests, "run %d", run)
+				assert.Equal(t, requests, environment.turnEnds, "turn.end observes every completed iteration")
+				assert.Positive(t, environment.agentEnds, "agent.end still observes the final iteration")
+				require.Len(t, environment.outcomes, 1)
+				assert.Equal(t, llmtypes.AgentRunStatusSucceeded, environment.outcomes[0].Status)
+				assert.False(t, environment.IsOpen())
+				assert.Equal(t, llmtypes.AgentRunReasonCompleted, environment.outcomes[0].Reason)
+
+				record, err := store.Load(t.Context(), thread.ConversationID)
+				require.NoError(t, err)
+				wantRevisions := fmt.Sprintf(`{"review":{"review":%q}}`, phase.watermark)
+				for _, metadata := range []map[string]any{thread.GetMetadata(), record.Metadata} {
+					revisions, err := json.Marshal(metadata[base.FollowUpRevisionsMetadataKey])
+					require.NoError(t, err)
+					assert.JSONEq(t, wantRevisions, string(revisions), "run %d", run)
+				}
+				assert.Equal(t, 1, strings.Count(string(record.RawMessages), "review revision 41"))
+				if run < 2 {
+					assert.NotContains(t, string(record.RawMessages), "review revision 42", "the rejected revision must not enter persisted history")
+				} else {
+					assert.Equal(t, 1, strings.Count(string(record.RawMessages), "review revision 42"), "the same revision is accepted after reloading with budget")
+				}
+			}
+		})
+	}
 }
 
 func TestAnthropicReportsTerminationOutcome(t *testing.T) {
@@ -1355,14 +1470,14 @@ func TestAnthropicReportsTerminationOutcome(t *testing.T) {
 		{
 			name:     "turn limit",
 			status:   llmtypes.AgentRunStatusSucceeded,
-			reason:   llmtypes.AgentRunReasonTurnLimit,
+			reason:   llmtypes.AgentRunReasonCompleted,
 			requests: 2,
 		},
 		{
 			name:          "empty turn.end followups respect turn limit",
 			turnFollowUps: true,
 			status:        llmtypes.AgentRunStatusSucceeded,
-			reason:        llmtypes.AgentRunReasonTurnLimit,
+			reason:        llmtypes.AgentRunReasonCompleted,
 			requests:      2,
 		},
 		{

@@ -643,7 +643,8 @@ OUTER:
 			turnCount++
 			finalOutput = exchangeOutput
 
-			continued, err := base.TriggerTurnEnd(ctx, t, handler, finalOutput, turnCount)
+			canContinue := maxTurns == 0 || turnCount < maxTurns
+			continued, err := base.TriggerTurnEnd(ctx, t, handler, finalOutput, turnCount, canContinue)
 			if err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					stoppedErr = err
@@ -662,7 +663,7 @@ OUTER:
 
 			// If no tools were used, check for queued continuations before stopping
 			if !toolsUsed {
-				continued, err := base.HandleAgentStopFollowUps(ctx, t, handler)
+				continued, err := base.HandleAgentStopFollowUps(ctx, t, handler, canContinue)
 				if err != nil {
 					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 						stoppedErr = err
@@ -678,7 +679,7 @@ OUTER:
 					}
 					continue OUTER
 				}
-				if (maxTurns == 0 || turnCount < maxTurns) && base.HasPendingSteer(ctx, t.ConversationID) {
+				if canContinue && base.HasPendingSteer(ctx, t.ConversationID) {
 					continue OUTER
 				}
 

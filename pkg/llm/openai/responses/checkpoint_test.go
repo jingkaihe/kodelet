@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -197,6 +200,7 @@ type finishedEnvironment struct {
 	outcomes  []llmtypes.AgentRunOutcome
 	closeErr  error
 	turnEnd   func(string, int) []extensions.FollowUpMessage
+	agentEnd  func() []extensions.FollowUpMessage
 }
 
 func (e *finishedEnvironment) DispatchTurnEnd(_ context.Context, output string, turn int) ([]extensions.FollowUpMessage, error) {
@@ -214,6 +218,9 @@ func (e *finishedEnvironment) DispatchAgentStart(context.Context) error {
 }
 
 func (e *finishedEnvironment) DispatchAgentEnd(context.Context, []llmtypes.Message) ([]extensions.FollowUpMessage, error) {
+	if e.agentEnd != nil {
+		return e.agentEnd(), nil
+	}
 	if e.followUps > 0 {
 		e.followUps--
 		return []extensions.FollowUpMessage{{FollowUp: extensions.FollowUp{Text: "continue"}, ExtensionID: "test"}}, nil
@@ -225,6 +232,109 @@ func (e *finishedEnvironment) CloseWithOutcome(ctx context.Context, outcome llmt
 	e.closeErr = ctx.Err()
 	e.outcomes = append(e.outcomes, outcome)
 	return e.Close(ctx)
+}
+
+func newFollowUpTestThread(onRequest func()) *Thread {
+	thread := &Thread{Thread: base.NewThread(llmtypes.Config{
+		Provider: "openai", Model: "gpt-4.1", Retry: llmtypes.RetryConfig{Attempts: 1},
+	}, "review-budget")}
+	thread.newStreamingFunc = func(context.Context, openairesponses.ResponseNewParams, ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+		onRequest()
+		return nil
+	}
+	thread.processStreamFunc = func(ctx context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (processStreamResult, error) {
+		thread.AddAssistantMessage(ctx, "answer")
+		return processStreamResult{responseCompleted: true}, nil
+	}
+	return thread
+}
+
+func TestResponsesEndHookTurnBudgetPersistsRevisions(t *testing.T) {
+	for _, hook := range []string{"turn.end", "agent.end"} {
+		t.Run(hook, func(t *testing.T) {
+			t.Setenv("KODELET_BASE_PATH", t.TempDir())
+			require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+			store, err := conversations.GetConversationStore(t.Context())
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, store.Close()) })
+
+			for run, phase := range []struct {
+				revision  int64
+				maxTurns  int
+				requests  int
+				watermark string
+			}{
+				{revision: 41, maxTurns: 3, requests: 2, watermark: "41"},
+				{revision: 42, maxTurns: 1, requests: 1, watermark: "41"},
+				{revision: 42, maxTurns: 0, requests: 2, watermark: "42"},
+			} {
+				followUps := []extensions.FollowUpMessage{{
+					ExtensionID: "review",
+					FollowUp: extensions.FollowUp{
+						Text: fmt.Sprintf("review revision %d", phase.revision),
+						Key:  "review", Revision: phase.revision, Visibility: "hidden",
+					},
+				}}
+				environment := &finishedEnvironment{}
+				turnEnds, agentEnds := 0, 0
+				environment.turnEnd = func(string, int) []extensions.FollowUpMessage {
+					turnEnds++
+					if hook == "turn.end" {
+						return followUps
+					}
+					return nil
+				}
+				environment.agentEnd = func() []extensions.FollowUpMessage {
+					agentEnds++
+					if hook == "agent.end" {
+						return followUps
+					}
+					return nil
+				}
+				requests := 0
+				thread := newFollowUpTestThread(func() { requests++ })
+				thread.Store, thread.Persisted = store, true
+				if run > 0 {
+					require.NoError(t, thread.loadConversation(t.Context()))
+				}
+				thread.SetEnvironment(environment)
+				_, err := thread.SendMessage(t.Context(), "hello", &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{
+					MaxTurns: phase.maxTurns, DisableUsageLog: true,
+				})
+				require.NoError(t, err)
+				assert.Equal(t, phase.requests, requests, "run %d", run)
+				assert.Equal(t, requests, turnEnds, "turn.end observes every completed iteration")
+				assert.Positive(t, agentEnds, "agent.end still observes the final iteration")
+				require.Len(t, environment.outcomes, 1)
+				assert.Equal(t, llmtypes.AgentRunStatusSucceeded, environment.outcomes[0].Status)
+				assert.False(t, environment.IsOpen())
+				assert.Equal(t, llmtypes.AgentRunReasonCompleted, environment.outcomes[0].Reason)
+
+				record, err := store.Load(t.Context(), thread.ConversationID)
+				require.NoError(t, err)
+				wantRevisions := fmt.Sprintf(`{"review":{"review":%q}}`, phase.watermark)
+				for _, metadata := range []map[string]any{thread.GetMetadata(), record.Metadata} {
+					revisions, err := json.Marshal(metadata[base.FollowUpRevisionsMetadataKey])
+					require.NoError(t, err)
+					assert.JSONEq(t, wantRevisions, string(revisions), "run %d", run)
+				}
+				var items []StoredInputItem
+				require.NoError(t, json.Unmarshal(record.RawMessages, &items))
+				var reviews []string
+				for _, item := range items {
+					if item.Role == "user" && strings.HasPrefix(item.Content, "review revision ") {
+						reviews = append(reviews, item.Content)
+					}
+				}
+				if run < 2 {
+					assert.Equal(t, []string{"review revision 41"}, reviews)
+					assert.NotContains(t, string(record.RawMessages), "review revision 42", "the rejected revision must not enter persisted history")
+				} else {
+					assert.Equal(t, []string{"review revision 41", "review revision 42"}, reviews, "the same revision is accepted after reloading with budget")
+				}
+			}
+		})
+	}
 }
 
 func TestResponsesReportsTerminationOutcome(t *testing.T) {

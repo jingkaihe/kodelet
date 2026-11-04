@@ -18,6 +18,9 @@ import (
 
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/steer"
@@ -1696,11 +1699,15 @@ type terminationOutcomeEnvironment struct {
 	agentenv.UtilityEnvironment
 	outcomes      []llm.AgentRunOutcome
 	turnFollowUps bool
+	followUps     []extensions.FollowUpMessage
+	turnEnds      int
+	agentEnds     int
 	cancelAt      string
 	cancel        context.CancelFunc
 }
 
 func (e *terminationOutcomeEnvironment) DispatchTurnEnd(ctx context.Context, _ string, turn int) ([]extensions.FollowUpMessage, error) {
+	e.turnEnds++
 	if e.cancelAt == "turn.end" {
 		e.cancel()
 		return nil, ctx.Err()
@@ -1708,16 +1715,23 @@ func (e *terminationOutcomeEnvironment) DispatchTurnEnd(ctx context.Context, _ s
 	if !e.turnFollowUps {
 		return nil, nil
 	}
+	if e.followUps != nil {
+		return e.followUps, nil
+	}
 	return []extensions.FollowUpMessage{{FollowUp: extensions.FollowUp{Text: "continue", Visibility: "hidden", Key: "mailbox", Revision: int64(turn)}, ExtensionID: "test"}}, nil
 }
 
 func (e *terminationOutcomeEnvironment) DispatchAgentEnd(ctx context.Context, _ []llm.Message) ([]extensions.FollowUpMessage, error) {
+	e.agentEnds++
 	if e.cancelAt == "agent.end" {
 		e.cancel()
 		return nil, ctx.Err()
 	}
 	if e.turnFollowUps {
 		return nil, nil
+	}
+	if e.followUps != nil {
+		return e.followUps, nil
 	}
 	// Keep requesting follow-ups so successful exchanges reach the turn limit.
 	return []extensions.FollowUpMessage{{FollowUp: extensions.FollowUp{Text: "continue"}, ExtensionID: "test"}}, nil
@@ -1726,6 +1740,84 @@ func (e *terminationOutcomeEnvironment) DispatchAgentEnd(ctx context.Context, _ 
 func (e *terminationOutcomeEnvironment) CloseWithOutcome(ctx context.Context, outcome llm.AgentRunOutcome) error {
 	e.outcomes = append(e.outcomes, outcome)
 	return e.Close(ctx)
+}
+
+func newFollowUpTestThread(onRequest func()) *Thread {
+	client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(_ *http.Request) (*http.Response, error) {
+		onRequest()
+		return jsonOpenAIResponse(http.StatusOK, `{
+			"id":"chatcmpl-review","model":"gpt-4o",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"answer"},"finish_reason":"stop"}]
+		}`), nil
+	}))
+	return newTestOpenAIExchangeThread(client, llm.Config{Provider: "openai", Model: "gpt-4o"})
+}
+
+func TestOpenAIEndHookTurnBudgetPersistsRevisions(t *testing.T) {
+	for _, hook := range []string{"turn.end", "agent.end"} {
+		t.Run(hook, func(t *testing.T) {
+			t.Setenv("KODELET_BASE_PATH", t.TempDir())
+			require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+			store, err := conversations.GetConversationStore(t.Context())
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, store.Close()) })
+
+			for run, phase := range []struct {
+				revision  int64
+				maxTurns  int
+				requests  int
+				watermark string
+			}{
+				{revision: 41, maxTurns: 3, requests: 2, watermark: "41"},
+				{revision: 42, maxTurns: 1, requests: 1, watermark: "41"},
+				{revision: 42, maxTurns: 0, requests: 2, watermark: "42"},
+			} {
+				followUps := []extensions.FollowUpMessage{{
+					ExtensionID: "review",
+					FollowUp: extensions.FollowUp{
+						Text: fmt.Sprintf("review revision %d", phase.revision),
+						Key:  "review", Revision: phase.revision, Visibility: "hidden",
+					},
+				}}
+				environment := &terminationOutcomeEnvironment{turnFollowUps: hook == "turn.end", followUps: followUps}
+				requests := 0
+				thread := newFollowUpTestThread(func() { requests++ })
+				thread.Store, thread.Persisted = store, true
+				if run > 0 {
+					require.NoError(t, thread.loadConversation(t.Context()))
+				}
+				thread.SetEnvironment(environment)
+				handler := &captureOpenAIMessageHandler{}
+				_, err := thread.SendMessage(t.Context(), "hello", handler, llm.MessageOpt{
+					MaxTurns: phase.maxTurns, DisableUsageLog: true,
+				})
+				require.NoError(t, err)
+				assert.Equal(t, phase.requests, requests, "run %d", run)
+				assert.Equal(t, requests, environment.turnEnds, "turn.end observes every completed iteration")
+				assert.Positive(t, environment.agentEnds, "agent.end still observes the final iteration")
+				require.Len(t, environment.outcomes, 1)
+				assert.Equal(t, llm.AgentRunStatusSucceeded, environment.outcomes[0].Status)
+				assert.False(t, environment.IsOpen())
+				assert.Equal(t, 1, handler.done)
+				assert.Equal(t, llm.AgentRunReasonCompleted, environment.outcomes[0].Reason)
+
+				record, err := store.Load(t.Context(), thread.ConversationID)
+				require.NoError(t, err)
+				wantRevisions := fmt.Sprintf(`{"review":{"review":%q}}`, phase.watermark)
+				for _, metadata := range []map[string]any{thread.GetMetadata(), record.Metadata} {
+					revisions, err := json.Marshal(metadata[base.FollowUpRevisionsMetadataKey])
+					require.NoError(t, err)
+					assert.JSONEq(t, wantRevisions, string(revisions), "run %d", run)
+				}
+				assert.Equal(t, 1, strings.Count(string(record.RawMessages), "review revision 41"))
+				if run < 2 {
+					assert.NotContains(t, string(record.RawMessages), "review revision 42", "the rejected revision must not enter persisted history")
+				} else {
+					assert.Equal(t, 1, strings.Count(string(record.RawMessages), "review revision 42"), "the same revision is accepted after reloading with budget")
+				}
+			}
+		})
+	}
 }
 
 func TestOpenAIReportsTerminationOutcome(t *testing.T) {
@@ -1740,14 +1832,14 @@ func TestOpenAIReportsTerminationOutcome(t *testing.T) {
 		{
 			name:     "turn limit",
 			status:   llm.AgentRunStatusSucceeded,
-			reason:   llm.AgentRunReasonTurnLimit,
+			reason:   llm.AgentRunReasonCompleted,
 			requests: 2,
 		},
 		{
 			name:          "turn.end followups respect turn limit",
 			turnFollowUps: true,
 			status:        llm.AgentRunStatusSucceeded,
-			reason:        llm.AgentRunReasonTurnLimit,
+			reason:        llm.AgentRunReasonCompleted,
 			requests:      2,
 		},
 		{
@@ -1823,12 +1915,20 @@ func TestOpenAIEndHooksCheckpointBeforeErrorsAndFinalizeCancellation(t *testing.
 				thread.Store, thread.Persisted = store, true
 				thread.SetEnvironment(environment)
 				handler := &captureOpenAIMessageHandler{}
-				output, err := thread.SendMessage(ctx, "hello", handler, llm.MessageOpt{MaxTurns: 3, DisableUsageLog: true})
+				maxTurns := 3
+				if cancelHook {
+					maxTurns = 1 // Observational end hooks must still finalize cancellation at the limit.
+				}
+				output, err := thread.SendMessage(ctx, "hello", handler, llm.MessageOpt{MaxTurns: maxTurns, DisableUsageLog: true})
 				if cancelHook {
 					require.NoError(t, err)
 					assert.Equal(t, "completed answer", output)
 					assert.Equal(t, 1, handler.done)
 					assert.Equal(t, 1, requests)
+					require.Len(t, environment.outcomes, 1)
+					assert.Equal(t, llm.AgentRunStatusCanceled, environment.outcomes[0].Status)
+					assert.Equal(t, llm.AgentRunReasonCanceled, environment.outcomes[0].Reason)
+					assert.False(t, environment.IsOpen())
 				} else {
 					require.ErrorContains(t, err, "provider unavailable")
 				}

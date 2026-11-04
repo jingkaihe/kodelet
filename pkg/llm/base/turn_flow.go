@@ -182,12 +182,14 @@ func agentInitEnvironmentToolNames(config llmtypes.Config, environmentTools []to
 
 // TriggerTurnEnd runs after every completed exchange, including its tool results.
 // It returns whether follow-ups were appended and require another model turn.
+// When acceptFollowUps is false, dispatch remains observational.
 func TriggerTurnEnd(
 	ctx context.Context,
 	thread llmtypes.Thread,
 	handler llmtypes.MessageHandler,
 	finalOutput string,
 	turnCount int,
+	acceptFollowUps bool,
 ) (bool, error) {
 	var followUps []extensions.FollowUpMessage
 	if environment := EnvironmentForThread(thread); environment != nil && environment.IsOpen() {
@@ -199,7 +201,7 @@ func TriggerTurnEnd(
 	} else if runtime := extensionRuntime(thread); runtime != nil {
 		followUps = runtime.DispatchTurnEnd(ctx, buildExtensionCallContext(thread, threadState(thread)), finalOutput, turnCount)
 	}
-	return appendExtensionFollowUps(ctx, thread, handler, followUps), nil
+	return acceptFollowUps && appendExtensionFollowUps(ctx, thread, handler, followUps), nil
 }
 
 // HasPendingSteer reports whether steering arrived while the current model turn was in flight.
@@ -229,10 +231,12 @@ func HasPendingSteer(ctx context.Context, conversationID string) bool {
 
 // HandleAgentStopFollowUps checks agent.end extension handlers and appends any follow-up user messages.
 // Returns true when follow-ups were added and the caller should continue the loop.
+// When acceptFollowUps is false, dispatch remains observational.
 func HandleAgentStopFollowUps(
 	ctx context.Context,
 	thread llmtypes.Thread,
 	handler llmtypes.MessageHandler,
+	acceptFollowUps bool,
 ) (bool, error) {
 	logger.G(ctx).Debug("no tools used, checking agent end follow-ups")
 
@@ -249,7 +253,7 @@ func HandleAgentStopFollowUps(
 	} else if runtime := extensionRuntime(thread); runtime != nil {
 		followUps = runtime.DispatchAgentEnd(ctx, buildExtensionCallContext(thread, threadState(thread)), messages)
 	}
-	return appendExtensionFollowUps(ctx, thread, handler, followUps), nil
+	return acceptFollowUps && appendExtensionFollowUps(ctx, thread, handler, followUps), nil
 }
 
 func threadState(thread llmtypes.Thread) tooltypes.State {
