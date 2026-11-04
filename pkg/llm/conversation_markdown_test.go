@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 )
@@ -244,7 +245,7 @@ func TestRenderConversationEntriesMarkdownPreservesResponsesImageOnlyMessage(t *
 	assert.NotContains(t, markdown, "_Empty message._")
 }
 
-func TestRenderConversationMarkdownPreservesRepeatedCommands(t *testing.T) {
+func TestRenderConversationRecordMarkdownPreservesRepeatedCommands(t *testing.T) {
 	prompt := "Inspect project dependencies"
 	metadata := conversations.AddSlashCommandDisplay(nil, prompt, "/review dependencies", "review")
 	rawMessages := []byte(`[
@@ -252,7 +253,9 @@ func TestRenderConversationMarkdownPreservesRepeatedCommands(t *testing.T) {
 		{"role":"user","content":[{"type":"text","text":"Inspect project dependencies"}]}
 	]`)
 
-	markdown, err := RenderConversationMarkdown("anthropic", rawMessages, metadata, nil)
+	markdown, err := RenderConversationRecordMarkdown(convtypes.ConversationRecord{
+		Provider: "anthropic", RawMessages: rawMessages, Metadata: metadata,
+	}, ConversationMarkdownOptions{})
 
 	assert.NoError(t, err)
 	assert.Equal(t, 2, strings.Count(markdown, "/review dependencies"))

@@ -117,11 +117,6 @@ func SendMessageAndGetText(ctx context.Context, state tooltypes.State, query str
 	return text
 }
 
-// ExtractMessages parses the raw messages from a conversation record
-func ExtractMessages(provider string, rawMessages []byte, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]llmtypes.Message, error) {
-	return extractDisplayMessages(provider, rawMessages, metadata, toolResults, new(int))
-}
-
 func extractDisplayMessages(provider string, rawMessages []byte, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult, userOrdinal *int) ([]llmtypes.Message, error) {
 	if strings.EqualFold(provider, "openai") && openai.RecordUsesResponsesMode(metadata, rawMessages) {
 		provider = "openai-responses"
@@ -215,11 +210,6 @@ func ExtractConversationRecordMessages(record convtypes.ConversationRecord) ([]l
 		return nil, err
 	}
 	return append(messages, entries...), nil
-}
-
-// ExtractConversationEntries parses the raw messages from a conversation record into structured conversation entries.
-func ExtractConversationEntries(provider string, rawMessages []byte, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
-	return extractDisplayEntries(provider, rawMessages, metadata, toolResults, new(int))
 }
 
 func extractDisplayEntries(provider string, rawMessages []byte, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult, userOrdinal *int) ([]conversations.StreamableMessage, error) {

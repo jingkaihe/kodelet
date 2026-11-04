@@ -56,7 +56,7 @@ func TestExtensionMessageDisplayHistory(t *testing.T) {
 				}
 				// Empty user items still consume an ordinal even when a renderer drops them.
 				archive := []json.RawMessage{item(""), item("same words"), item("visible notice"), item("same words")}
-				tail := []json.RawMessage{item("hidden reminder"), item("same words")}
+				tail := []json.RawMessage{item("hidden reminder"), item("visible tail"), item("same words")}
 				raw, err := json.Marshal(append(archive, tail...))
 				require.NoError(t, err)
 				record := convtypes.ConversationRecord{
@@ -65,6 +65,7 @@ func TestExtensionMessageDisplayHistory(t *testing.T) {
 						"1": {ExtensionID: "reminders", Visibility: "hidden"},
 						"2": {ExtensionID: "reminders", Visibility: "visible"},
 						"4": {ExtensionID: "reminders", Visibility: "hidden"},
+						"5": {ExtensionID: "reminders", Visibility: "visible"},
 					}},
 				}
 				if state == "compacted" {
@@ -93,7 +94,7 @@ func TestExtensionMessageDisplayHistory(t *testing.T) {
 				for _, entry := range entries {
 					if entry.Kind == "text" && strings.TrimSpace(entry.Content) != "" {
 						texts = append(texts, entry.Content)
-						if entry.Content == "visible notice" {
+						if entry.Content == "visible notice" || entry.Content == "visible tail" {
 							assert.Equal(t, "reminders", entry.ExtensionID)
 						} else {
 							assert.Empty(t, entry.ExtensionID)
@@ -103,20 +104,22 @@ func TestExtensionMessageDisplayHistory(t *testing.T) {
 						assert.Equal(t, "checkpoint", entry.Compaction.ID)
 					}
 				}
-				assert.Equal(t, []string{"visible notice", "same words", "same words"}, texts)
+				assert.Equal(t, []string{"visible notice", "same words", "visible tail", "same words"}, texts)
 				messages, err := ExtractConversationRecordMessages(record)
 				require.NoError(t, err)
 				var humanTexts []string
+				var extensionTexts []string
 				for _, message := range messages {
 					assert.NotContains(t, message.Content, "hidden reminder")
 					if message.Role == "user" && message.Content != "" {
 						humanTexts = append(humanTexts, message.Content)
 					}
 					if message.Role == "extension" {
-						assert.Equal(t, "Extension: reminders\n\nvisible notice", message.Content)
+						extensionTexts = append(extensionTexts, message.Content)
 					}
 				}
 				assert.Equal(t, []string{"same words", "same words"}, humanTexts)
+				assert.Equal(t, []string{"Extension: reminders\n\nvisible notice", "Extension: reminders\n\nvisible tail"}, extensionTexts)
 				markdown, err := RenderConversationRecordMarkdown(record, ConversationMarkdownOptions{})
 				require.NoError(t, err)
 				assert.NotContains(t, markdown, "hidden reminder")
@@ -201,7 +204,9 @@ func TestCompactedExportsPreserveProviderRendering(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			baseline, err := ExtractMessages(tt.provider, tt.raw, nil, nil)
+			baseline, err := ExtractConversationRecordMessages(convtypes.ConversationRecord{
+				Provider: tt.provider, RawMessages: tt.raw,
+			})
 			require.NoError(t, err)
 			require.NotEmpty(t, baseline)
 			var active []json.RawMessage
@@ -322,23 +327,27 @@ func TestStringCollectorHandler(t *testing.T) {
 	handler.HandleToolResult("call-1", "test-tool", tooltypes.BaseToolResult{Result: "test-result"})
 }
 
-func TestExtractMessagesAppliesMessageDisplay(t *testing.T) {
+func TestExtractConversationRecordMessagesAppliesMessageDisplay(t *testing.T) {
 	expanded := "Full rendered recipe prompt"
 	metadata := conversations.AddSlashCommandDisplay(nil, expanded, "/init focus", "init")
 	rawMessages := []byte(`[{"role":"user","content":[{"type":"text","text":"Full rendered recipe prompt"}]}]`)
 
-	messages, err := ExtractMessages("anthropic", rawMessages, metadata, nil)
+	messages, err := ExtractConversationRecordMessages(convtypes.ConversationRecord{
+		Provider: "anthropic", RawMessages: rawMessages, Metadata: metadata,
+	})
 	require.NoError(t, err)
 	require.Len(t, messages, 1)
 	assert.Equal(t, "/init focus", messages[0].Content)
 }
 
-func TestExtractConversationEntriesAppliesMessageDisplay(t *testing.T) {
+func TestExtractConversationRecordEntriesAppliesMessageDisplay(t *testing.T) {
 	expanded := "Full rendered recipe prompt"
 	metadata := conversations.AddSlashCommandDisplay(nil, expanded, "/init focus", "init")
 	rawMessages := []byte(`[{"role":"user","content":[{"type":"text","text":"Full rendered recipe prompt"}]}]`)
 
-	messages, err := ExtractConversationEntries("anthropic", rawMessages, metadata, nil)
+	messages, err := ExtractConversationRecordEntries(convtypes.ConversationRecord{
+		Provider: "anthropic", RawMessages: rawMessages, Metadata: metadata,
+	})
 	require.NoError(t, err)
 	require.Len(t, messages, 1)
 	assert.Equal(t, "/init focus", messages[0].Content)
@@ -464,7 +473,7 @@ func TestStringCollectorHandlerCapture(t *testing.T) {
 	assert.Equal(t, "Test text\n", handler.CollectedText())
 }
 
-func TestExtractConversationEntriesPreservesResponsesRawItem(t *testing.T) {
+func TestExtractConversationRecordEntriesPreservesResponsesRawItem(t *testing.T) {
 	rawMessages := json.RawMessage(`[
 		{
 			"type": "message",
@@ -478,9 +487,10 @@ func TestExtractConversationEntriesPreservesResponsesRawItem(t *testing.T) {
 		}
 	]`)
 
-	messages, err := ExtractConversationEntries("openai", rawMessages, map[string]any{
-		"api_mode": "responses",
-	}, nil)
+	messages, err := ExtractConversationRecordEntries(convtypes.ConversationRecord{
+		Provider: "openai", RawMessages: rawMessages,
+		Metadata: map[string]any{"api_mode": "responses"},
+	})
 	require.NoError(t, err)
 	require.Len(t, messages, 1)
 	assert.Equal(t, "text", messages[0].Kind)
@@ -488,20 +498,22 @@ func TestExtractConversationEntriesPreservesResponsesRawItem(t *testing.T) {
 	assert.Contains(t, string(messages[0].RawItem), `"input_image"`)
 }
 
-func TestExtractConversationEntriesSupportsLegacyResponsesProvider(t *testing.T) {
+func TestExtractConversationRecordEntriesSupportsLegacyResponsesProvider(t *testing.T) {
 	rawMessages := json.RawMessage(`[
 		{"type":"message","role":"user","content":"hello"},
 		{"type":"message","role":"assistant","content":"world"}
 	]`)
 
-	messages, err := ExtractConversationEntries("openai-responses", rawMessages, nil, nil)
+	messages, err := ExtractConversationRecordEntries(convtypes.ConversationRecord{
+		Provider: "openai-responses", RawMessages: rawMessages,
+	})
 	require.NoError(t, err)
 	require.Len(t, messages, 2)
 	assert.Equal(t, "hello", messages[0].Content)
 	assert.Equal(t, "world", messages[1].Content)
 }
 
-func TestExtractConversationEntriesPreservesOpenAIRawItem(t *testing.T) {
+func TestExtractConversationRecordEntriesPreservesOpenAIRawItem(t *testing.T) {
 	rawMessages, err := json.Marshal([]openai.ChatCompletionMessage{
 		{
 			Role: openai.ChatMessageRoleUser,
@@ -518,9 +530,10 @@ func TestExtractConversationEntriesPreservesOpenAIRawItem(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	messages, err := ExtractConversationEntries("openai", rawMessages, map[string]any{
-		"api_mode": "chat_completions",
-	}, nil)
+	messages, err := ExtractConversationRecordEntries(convtypes.ConversationRecord{
+		Provider: "openai", RawMessages: rawMessages,
+		Metadata: map[string]any{"api_mode": "chat_completions"},
+	})
 	require.NoError(t, err)
 	require.Len(t, messages, 1)
 	assert.Equal(t, "text", messages[0].Kind)
