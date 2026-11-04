@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -25,7 +26,11 @@ func (t *Thread) RecordUserMessageSource(ctx context.Context, sourceID string, c
 	t.Mu.Lock()
 	defer t.Mu.Unlock()
 	const key = UserMessageSourcesMetadataKey
-	if sourceID == "" && t.Metadata[key] == nil {
+	_, isExtension := ctx.Value(extensionFollowUpContextKey{}).(extensions.FollowUpMessage)
+	if isExtension {
+		sourceID = ""
+	}
+	if sourceID == "" && t.Metadata[key] == nil && !isExtension && t.Metadata[ExtensionMessagesMetadataKey] == nil {
 		return
 	}
 	raw, err := json.Marshal(current)
@@ -87,6 +92,7 @@ func (t *Thread) RecordUserMessageSource(ctx context.Context, sourceID string, c
 		t.Metadata = make(map[string]any)
 	}
 	t.Metadata[key] = sources
+	t.recordExtensionMessageLocked(ctx, strconv.Itoa(ordinal))
 }
 
 // RestoreUserMessageSources restores only provenance when temporary history is

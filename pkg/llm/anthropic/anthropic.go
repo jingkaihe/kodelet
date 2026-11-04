@@ -353,12 +353,12 @@ func (t *Thread) SendMessage(
 		copy(originalMessages, t.messages)
 		originalHistory := t.GetCompactionHistory()
 		originalResults := t.GetStructuredToolResults()
-		originalSources := t.GetMetadata()[base.UserMessageSourcesMetadataKey]
+		originalMetadata := t.GetMetadata()
 		defer func() {
 			t.messages = originalMessages
 			t.SetCompactionHistory(originalHistory)
 			t.SetStructuredToolResults(originalResults)
-			t.RestoreUserMessageSources(originalSources)
+			t.RestoreMessageMetadata(originalMetadata)
 		}()
 	}
 
@@ -438,17 +438,39 @@ OUTER:
 			// Update finalOutput with the most recent output
 			finalOutput = exchangeOutput
 
-			if err := base.TriggerTurnEnd(ctx, t, finalOutput, turnCount); err != nil {
+			continued, err := base.TriggerTurnEnd(ctx, t, handler, finalOutput, turnCount)
+			if err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					stoppedErr = err
+					break OUTER
+				}
 				return "", errors.Wrap(err, "failed to dispatch turn end")
+			}
+			if continued {
+				if !opt.NoSaveConversation {
+					if err := t.SaveConversation(context.WithoutCancel(ctx)); err != nil {
+						return "", errors.Wrap(err, "failed to checkpoint extension follow-ups")
+					}
+				}
+				continue OUTER
 			}
 
 			// If no tools were used, check for queued continuations before stopping
 			if !toolsUsed {
 				continued, err := base.HandleAgentStopFollowUps(ctx, t, handler)
 				if err != nil {
+					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+						stoppedErr = err
+						break OUTER
+					}
 					return "", errors.Wrap(err, "failed to dispatch agent end")
 				}
 				if continued {
+					if !opt.NoSaveConversation {
+						if err := t.SaveConversation(context.WithoutCancel(ctx)); err != nil {
+							return "", errors.Wrap(err, "failed to checkpoint extension follow-ups")
+						}
+					}
 					continue OUTER
 				}
 				if (maxTurns == 0 || turnCount < maxTurns) && base.HasPendingSteer(ctx, t.ConversationID) {

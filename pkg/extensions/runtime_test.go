@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -469,7 +470,64 @@ func TestRuntimeDispatchesAgentInitAndEndEvents(t *testing.T) {
 	runtime.DispatchTurnEnd(context.Background(), callContext, "final response", 3)
 
 	followUps := runtime.DispatchAgentEnd(context.Background(), callContext, []llmtypes.Message{{Role: "assistant", Content: "done"}})
-	assert.Equal(t, []string{"inspect tests", "update docs"}, followUps)
+	require.Len(t, followUps, 2)
+	assert.Equal(t, "inspect tests", followUps[0].Text)
+	assert.Equal(t, "update docs", followUps[1].Text)
+	assert.NotEmpty(t, followUps[0].ExtensionID)
+}
+
+func TestRuntimeFollowUpsAreBoundedAndHostAttributed(t *testing.T) {
+	rootDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	writeExecutable(t, filepath.Join(rootDir, "events", "kodelet-extension-events"), helperExtensionScript(t))
+	runtime, err := NewRuntime(t.Context(), WithWorkingDir(rootDir), WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone}))
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, runtime.Close()) })
+	callContext := ExtensionCallContext{ConversationID: "conversation", CWD: rootDir}
+	fixture := map[string]any{
+		"followUps": []map[string]any{
+			{"text": "hidden", "visibility": "hidden", "key": "mailbox", "revision": 42, "extensionId": "human"},
+			{"text": "visible", "extensionId": "other-extension"},
+			{"text": " \n\t"},
+			{"text": "invalid visibility", "visibility": "secret"},
+			{"text": "invalid revision", "key": "mailbox", "revision": -1},
+			{"text": "missing key", "revision": 1},
+			{"text": strings.Repeat("x", 4097)},
+			{"text": "oversized key", "key": strings.Repeat("k", 257)},
+		},
+		"followUpMessages": []string{"legacy"},
+	}
+	writeFixture := func(value any) {
+		raw, err := json.Marshal(value)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(rootDir, "follow-ups.json"), raw, 0o600))
+	}
+	writeFixture(fixture)
+	for _, output := range []string{"", " \n\t", "done"} {
+		messages := runtime.DispatchTurnEnd(t.Context(), callContext, output, 1)
+		require.Len(t, messages, 3)
+		assert.Equal(t, FollowUp{Text: "hidden", Visibility: "hidden", Key: "mailbox", Revision: 42}, messages[0].FollowUp)
+		assert.Equal(t, FollowUp{Text: "visible", Visibility: "visible"}, messages[1].FollowUp)
+		assert.Equal(t, FollowUp{Text: "legacy", Visibility: "visible"}, messages[2].FollowUp)
+		for _, message := range messages {
+			assert.Equal(t, runtime.eventHandlers(EventTurnEnd)[0].process.Extension.ID, message.ExtensionID)
+		}
+		assert.Equal(t, messages, runtime.DispatchAgentEnd(t.Context(), callContext, nil))
+	}
+	oversizedBatch := EventResult{}
+	for range 40 {
+		oversizedBatch.FollowUps = append(oversizedBatch.FollowUps, FollowUp{Text: "notification"})
+	}
+	writeFixture(oversizedBatch)
+	assert.Len(t, runtime.DispatchTurnEnd(t.Context(), callContext, "", 2), 32)
+	for i := range oversizedBatch.FollowUps {
+		oversizedBatch.FollowUps[i].Text = strings.Repeat("x", 4096)
+	}
+	writeFixture(oversizedBatch)
+	assert.Len(t, runtime.DispatchTurnEnd(t.Context(), callContext, "", 3), 4)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	assert.Empty(t, runtime.DispatchTurnEnd(ctx, callContext, "", 4))
 }
 
 func TestRuntimeDispatchesSessionLifecycleEvents(t *testing.T) {
@@ -1304,6 +1362,13 @@ func handleHelperCommand(params executeCommandParams) CommandResult {
 }
 
 func handleHelperEvent(params eventParams) EventResult {
+	if params.Event == EventTurnEnd || params.Event == EventAgentEnd {
+		if raw, err := os.ReadFile(filepath.Join(params.Context.CWD, "follow-ups.json")); err == nil {
+			var result EventResult
+			_ = json.Unmarshal(raw, &result)
+			return result
+		}
+	}
 	switch params.Event {
 	case EventSessionStart, EventResourcesDiscover, EventSessionEnd:
 		if path := filepath.Join(params.Context.CWD, "events.log"); params.Context.CWD != "" {

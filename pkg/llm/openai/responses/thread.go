@@ -383,7 +383,7 @@ type responsesNoSaveSnapshot struct {
 	currentContextWindow  int
 	maxContextWindow      int
 	structuredToolResults map[string]tooltypes.StructuredToolResult
-	userMessageSources    any
+	messageMetadata       map[string]any
 	pendingReasoning      string
 	operation             *responsesNoSaveOperation
 }
@@ -423,7 +423,7 @@ func (t *Thread) snapshotNoSaveState() responsesNoSaveSnapshot {
 	}
 	snapshot.structuredToolResults = maps.Clone(t.ToolResults)
 	snapshot.compactionHistory = t.CompactionHistory.Clone()
-	snapshot.userMessageSources = t.Metadata[base.UserMessageSourcesMetadataKey]
+	snapshot.messageMetadata = maps.Clone(t.Metadata)
 	t.Mu.Unlock()
 	return snapshot
 }
@@ -453,7 +453,7 @@ func (t *Thread) restoreNoSaveState(snapshot responsesNoSaveSnapshot) {
 		t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
 	}
 	t.Mu.Unlock()
-	t.RestoreUserMessageSources(snapshot.userMessageSources)
+	t.RestoreMessageMetadata(snapshot.messageMetadata)
 	// External appends survive a no-save operation, but its temporary user
 	// items do not. Re-index provenance against the restored display history.
 	for _, appendBatch := range snapshot.operation.externalAppends {
@@ -643,17 +643,39 @@ OUTER:
 			turnCount++
 			finalOutput = exchangeOutput
 
-			if err := base.TriggerTurnEnd(ctx, t, finalOutput, turnCount); err != nil {
+			continued, err := base.TriggerTurnEnd(ctx, t, handler, finalOutput, turnCount)
+			if err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					stoppedErr = err
+					break OUTER
+				}
 				return "", errors.Wrap(err, "failed to dispatch turn end")
+			}
+			if continued {
+				if !opt.NoSaveConversation {
+					if err := t.SaveConversation(context.WithoutCancel(ctx)); err != nil {
+						return "", errors.Wrap(err, "failed to checkpoint extension follow-ups")
+					}
+				}
+				continue OUTER
 			}
 
 			// If no tools were used, check for queued continuations before stopping
 			if !toolsUsed {
 				continued, err := base.HandleAgentStopFollowUps(ctx, t, handler)
 				if err != nil {
+					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+						stoppedErr = err
+						break OUTER
+					}
 					return "", errors.Wrap(err, "failed to dispatch agent end")
 				}
 				if continued {
+					if !opt.NoSaveConversation {
+						if err := t.SaveConversation(context.WithoutCancel(ctx)); err != nil {
+							return "", errors.Wrap(err, "failed to checkpoint extension follow-ups")
+						}
+					}
 					continue OUTER
 				}
 				if (maxTurns == 0 || turnCount < maxTurns) && base.HasPendingSteer(ctx, t.ConversationID) {

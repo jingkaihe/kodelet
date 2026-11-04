@@ -366,32 +366,60 @@ func (r *Runtime) CanStreamToolUpdates() bool {
 }
 
 // DispatchTurnEnd runs turn.end subscriptions.
-func (r *Runtime) DispatchTurnEnd(ctx context.Context, callContext ExtensionCallContext, response string, turnNumber int) {
-	if strings.TrimSpace(response) == "" {
-		return
-	}
-	r.dispatchObservationalEvent(ctx, EventTurnEnd, turnEndPayload{Response: response, TurnNumber: turnNumber}, callContext)
+func (r *Runtime) DispatchTurnEnd(ctx context.Context, callContext ExtensionCallContext, response string, turnNumber int) []FollowUpMessage {
+	return r.dispatchFollowUps(ctx, EventTurnEnd, turnEndPayload{Response: response, TurnNumber: turnNumber}, callContext)
 }
 
 // DispatchAgentEnd runs agent.end subscriptions and returns accumulated follow-up messages.
-func (r *Runtime) DispatchAgentEnd(ctx context.Context, callContext ExtensionCallContext, messages []llmtypes.Message) []string {
+func (r *Runtime) DispatchAgentEnd(ctx context.Context, callContext ExtensionCallContext, messages []llmtypes.Message) []FollowUpMessage {
+	return r.dispatchFollowUps(ctx, EventAgentEnd, agentEndPayload{Messages: messages}, callContext)
+}
+
+func (r *Runtime) dispatchFollowUps(ctx context.Context, eventName string, payload any, callContext ExtensionCallContext) []FollowUpMessage {
 	if r == nil {
 		return nil
 	}
 
-	followUps := []string{}
-	for _, handler := range r.eventHandlers(EventAgentEnd) {
-		result, err := r.dispatchEventToHandler(ctx, handler, EventAgentEnd, agentEndPayload{Messages: messages}, callContext)
+	var followUps []FollowUpMessage
+	remaining := 16 * 1024
+	for _, handler := range r.eventHandlers(eventName) {
+		if ctx.Err() != nil {
+			break
+		}
+		result, err := r.dispatchEventToHandler(ctx, handler, eventName, payload, callContext)
 		if err != nil {
-			logger.G(ctx).WithError(err).WithField("extension", handler.process.Extension.ID).Warn("extension agent.end handler failed")
+			logger.G(ctx).WithError(err).WithField("extension", handler.process.Extension.ID).WithField("event", eventName).Warn("extension follow-up handler failed")
 			continue
 		}
 		if result == nil {
 			continue
 		}
-		followUps = append(followUps, result.FollowUpMessages...)
+		appendFollowUp := func(message FollowUp) {
+			if !message.Valid() || len(followUps) >= 32 || len(message.Text) > remaining {
+				return
+			}
+			if message.Visibility == "" {
+				message.Visibility = "visible"
+			}
+			followUps = append(followUps, FollowUpMessage{FollowUp: message, ExtensionID: handler.process.Extension.ID})
+			remaining -= len(message.Text)
+		}
+		for _, message := range result.FollowUps {
+			appendFollowUp(message)
+		}
+		for _, text := range result.FollowUpMessages {
+			appendFollowUp(FollowUp{Text: text})
+		}
 	}
 	return followUps
+}
+
+// Valid bounds notification payloads independently of general tool output limits.
+func (f FollowUp) Valid() bool {
+	return strings.TrimSpace(f.Text) != "" && len(f.Text) <= 4096 &&
+		(f.Visibility == "" || f.Visibility == "visible" || f.Visibility == "hidden") &&
+		len(f.Key) <= 256 && (f.Key == "" || strings.TrimSpace(f.Key) != "") &&
+		f.Revision >= 0 && (f.Revision == 0 || f.Key != "")
 }
 
 // DispatchAgentFinished runs observational agent.finished subscriptions.

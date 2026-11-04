@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -277,8 +278,8 @@ type Environment interface {
 	DispatchAgentStart(ctx context.Context) error
 	DispatchTurnStart(ctx context.Context, turnNumber int) error
 	ProcessAgentInit(ctx context.Context, systemPrompt string, allowedTools []string) (AgentInitDecision, error)
-	DispatchTurnEnd(ctx context.Context, finalOutput string, turnCount int) error
-	DispatchAgentEnd(ctx context.Context, messages []llmtypes.Message) ([]string, error)
+	DispatchTurnEnd(ctx context.Context, finalOutput string, turnCount int) ([]extensions.FollowUpMessage, error)
+	DispatchAgentEnd(ctx context.Context, messages []llmtypes.Message) ([]extensions.FollowUpMessage, error)
 	DispatchToolCall(ctx context.Context, request ToolRequest) (ToolCallDecision, error)
 	DispatchToolUpdate(ctx context.Context, request ToolOutputRequest) (ToolOutputDecision, error)
 	DispatchToolResult(ctx context.Context, request ToolOutputRequest) (ToolOutputDecision, error)

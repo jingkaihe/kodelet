@@ -341,21 +341,21 @@ func (e *LocalEnvironment) ProcessAgentInit(ctx context.Context, systemPrompt st
 }
 
 // DispatchTurnEnd applies turn.end extension handlers.
-func (e *LocalEnvironment) DispatchTurnEnd(ctx context.Context, finalOutput string, turnCount int) error {
+func (e *LocalEnvironment) DispatchTurnEnd(ctx context.Context, finalOutput string, turnCount int) ([]extensions.FollowUpMessage, error) {
 	runtime, callContext := e.runContext()
 	if runtime != nil {
-		runtime.DispatchTurnEnd(ctx, callContext, finalOutput, turnCount)
+		return runtime.DispatchTurnEnd(ctx, callContext, finalOutput, turnCount), ctx.Err()
 	}
-	return nil
+	return nil, ctx.Err()
 }
 
 // DispatchAgentEnd applies agent.end extension handlers.
-func (e *LocalEnvironment) DispatchAgentEnd(ctx context.Context, messages []llmtypes.Message) ([]string, error) {
+func (e *LocalEnvironment) DispatchAgentEnd(ctx context.Context, messages []llmtypes.Message) ([]extensions.FollowUpMessage, error) {
 	runtime, callContext := e.runContext()
 	if runtime == nil {
 		return nil, nil
 	}
-	return runtime.DispatchAgentEnd(ctx, callContext, messages), nil
+	return runtime.DispatchAgentEnd(ctx, callContext, messages), ctx.Err()
 }
 
 // DispatchToolCall applies tool.call extension policy without executing the tool.

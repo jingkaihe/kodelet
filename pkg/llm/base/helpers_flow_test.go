@@ -2,6 +2,8 @@ package base
 
 import (
 	"context"
+	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 
@@ -171,13 +173,17 @@ func (e *recordingAgentEnvironment) ProcessAgentInit(_ context.Context, _ string
 	return e.agentInitDecision, e.agentInitErr
 }
 
-func (e *recordingAgentEnvironment) DispatchTurnEnd(_ context.Context, finalOutput string, _ int) error {
+func (e *recordingAgentEnvironment) DispatchTurnEnd(_ context.Context, finalOutput string, _ int) ([]extensions.FollowUpMessage, error) {
 	e.turnEndCalls = append(e.turnEndCalls, finalOutput)
-	return e.turnEndErr
+	return nil, e.turnEndErr
 }
 
-func (e *recordingAgentEnvironment) DispatchAgentEnd(context.Context, []llmtypes.Message) ([]string, error) {
-	return append([]string(nil), e.followUps...), e.agentEndErr
+func (e *recordingAgentEnvironment) DispatchAgentEnd(context.Context, []llmtypes.Message) ([]extensions.FollowUpMessage, error) {
+	var messages []extensions.FollowUpMessage
+	for _, text := range e.followUps {
+		messages = append(messages, extensions.FollowUpMessage{FollowUp: extensions.FollowUp{Text: text}, ExtensionID: "test"})
+	}
+	return messages, e.agentEndErr
 }
 
 func (e *recordingAgentEnvironment) DispatchToolCall(context.Context, agentenv.ToolRequest) (agentenv.ToolCallDecision, error) {
@@ -386,8 +392,12 @@ func TestTurnFlowUsesPinnedAgentEnvironment(t *testing.T) {
 	prompt, err := ProcessSystemPrompt(t.Context(), thread, "base prompt")
 	require.NoError(t, err)
 	assert.Equal(t, "runner prompt", prompt)
-	require.NoError(t, TriggerTurnEnd(t.Context(), thread, "final response", 3))
-	require.NoError(t, TriggerTurnEnd(t.Context(), thread, "", 4))
+	_, err = TriggerTurnEnd(t.Context(), thread, nil, "final response", 3)
+	require.NoError(t, err)
+	_, err = TriggerTurnEnd(t.Context(), thread, nil, "", 4)
+	require.NoError(t, err)
+	_, err = TriggerTurnEnd(t.Context(), thread, nil, " \n\t", 5)
+	require.NoError(t, err)
 
 	handler := &recordingHandler{}
 	continued, err := HandleAgentStopFollowUps(t.Context(), thread, handler)
@@ -398,7 +408,7 @@ func TestTurnFlowUsesPinnedAgentEnvironment(t *testing.T) {
 	assert.Contains(t, handler.texts[0], "inspect the logs")
 	assert.Equal(t, 1, environment.agentStartCalls)
 	assert.Equal(t, []int{3}, environment.turnStartCalls)
-	assert.Equal(t, []string{"final response"}, environment.turnEndCalls)
+	assert.Equal(t, []string{"final response", "", " \n\t"}, environment.turnEndCalls)
 }
 
 func TestTurnFlowPropagatesEnvironmentFailures(t *testing.T) {
@@ -420,7 +430,8 @@ func TestTurnFlowPropagatesEnvironmentFailures(t *testing.T) {
 	require.ErrorIs(t, DispatchTurnStart(t.Context(), thread, 1), sentinel)
 	_, err = ProcessAgentInit(t.Context(), thread, "prompt")
 	require.ErrorIs(t, err, sentinel)
-	require.ErrorIs(t, TriggerTurnEnd(t.Context(), thread, "output", 1), sentinel)
+	_, err = TriggerTurnEnd(t.Context(), thread, nil, "output", 1)
+	require.ErrorIs(t, err, sentinel)
 	_, err = HandleAgentStopFollowUps(t.Context(), thread, &recordingHandler{})
 	require.ErrorIs(t, err, sentinel)
 
@@ -460,9 +471,94 @@ func TestBase64ImageSourceMediaType(t *testing.T) {
 	}
 }
 
+type provenanceThread struct {
+	llmtypes.Thread
+	base *Thread
+	raw  []map[string]string
+}
+
+func (t *provenanceThread) GetMetadata() map[string]any { return t.base.GetMetadata() }
+func (t *provenanceThread) AddUserMessage(ctx context.Context, text string, _ ...string) {
+	t.raw = append(t.raw, map[string]string{"role": "user", "content": text})
+	t.base.RecordUserMessageSource(ctx, llmtypes.UserMessageSource(ctx), t.raw)
+}
+
+func TestExtensionFollowUpsPersistExactProvenanceAndMonotonicRevisions(t *testing.T) {
+	ctx := llmtypes.WithUserMessageSource(t.Context(), "human-steer")
+	thread := &provenanceThread{base: NewThread(llmtypes.Config{}, "conversation")}
+	handler := &recordingHandler{}
+	notification := extensions.FollowUpMessage{
+		ExtensionID: "mailbox",
+		FollowUp:    extensions.FollowUp{Text: "same text", Visibility: "hidden", Key: "inbox", Revision: math.MaxInt64 - 1},
+	}
+	appendMessage := func(message extensions.FollowUpMessage) bool {
+		return appendExtensionFollowUps(ctx, thread, handler, []extensions.FollowUpMessage{message})
+	}
+	thread.AddUserMessage(ctx, "same text")
+	assert.True(t, appendMessage(notification))
+	assert.False(t, appendMessage(notification))
+	older := notification
+	older.Revision--
+	assert.False(t, appendMessage(older))
+	assert.Empty(t, handler.texts, "hidden notifications never emit visible text")
+	assert.Equal(t, map[string]string{"0": "human-steer"}, thread.GetMetadata()[UserMessageSourcesMetadataKey])
+	assert.Equal(t, map[string]ExtensionMessageMetadata{"1": {ExtensionID: "mailbox", Visibility: "hidden"}}, thread.GetMetadata()[ExtensionMessagesMetadataKey])
+
+	// Persisted JSON and compaction must not lose the int64 watermark or ordinal.
+	raw, err := json.Marshal(thread.raw)
+	require.NoError(t, err)
+	require.NoError(t, thread.base.ArchiveCompactionLocked(raw, 1, "summary", "summary"))
+	thread.raw = []map[string]string{{"role": "user", "content": "summary"}}
+	metadataJSON, err := json.Marshal(thread.GetMetadata())
+	require.NoError(t, err)
+	var restored map[string]any
+	require.NoError(t, json.Unmarshal(metadataJSON, &restored))
+	resumed := NewThread(llmtypes.Config{}, "conversation")
+	resumed.SetMetadata(restored)
+	resumed.SetCompactionHistory(thread.base.GetCompactionHistory())
+	thread.base = resumed
+	assert.False(t, appendMessage(notification))
+	notification.Revision++
+	assert.True(t, appendMessage(notification))
+	thread.AddUserMessage(context.Background(), "same text")
+	assert.Equal(t, map[string]ExtensionMessageMetadata{
+		"1": {ExtensionID: "mailbox", Visibility: "hidden"},
+		"2": {ExtensionID: "mailbox", Visibility: "hidden"},
+	}, thread.GetMetadata()[ExtensionMessagesMetadataKey])
+
+	// Different source extensions and conversations do not suppress each other.
+	other := notification
+	other.ExtensionID, other.Visibility = "other", "visible"
+	assert.True(t, appendMessage(other))
+	require.Len(t, handler.texts, 1)
+	assert.Contains(t, handler.texts[0], "other")
+	fresh := &provenanceThread{base: NewThread(llmtypes.Config{}, "other-conversation")}
+	assert.True(t, appendExtensionFollowUps(ctx, fresh, handler, []extensions.FollowUpMessage{notification}))
+
+	// Temporary messages roll back both provenance and accepted revisions.
+	snapshot := thread.GetMetadata()
+	original := thread.raw
+	temporary := notification
+	temporary.Key = "temporary"
+	assert.True(t, appendMessage(temporary))
+	thread.raw = original
+	thread.base.RestoreMessageMetadata(snapshot)
+	assert.Equal(t, snapshot, thread.GetMetadata())
+	assert.True(t, appendMessage(temporary), "rolled-back messages can be emitted again")
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	temporary.Key = "cancelled"
+	beforeCancel := thread.GetMetadata()
+	assert.False(t, appendExtensionFollowUps(cancelled, thread, handler, []extensions.FollowUpMessage{temporary}))
+	assert.Equal(t, beforeCancel, thread.GetMetadata())
+	assert.True(t, appendMessage(temporary), "cancellation does not advance the watermark")
+}
+
 func TestTriggerTurnEnd(t *testing.T) {
 	thread := &threadStub{}
-	require.NoError(t, TriggerTurnEnd(context.Background(), thread, "final response", 7))
+	continued, err := TriggerTurnEnd(context.Background(), thread, nil, "final response", 7)
+	require.NoError(t, err)
+	assert.False(t, continued)
 }
 
 func TestHasPendingSteer(t *testing.T) {

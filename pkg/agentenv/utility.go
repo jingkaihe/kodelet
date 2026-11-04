@@ -3,6 +3,7 @@ package agentenv
 import (
 	"context"
 
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
@@ -42,12 +43,12 @@ func (*UtilityEnvironment) ProcessAgentInit(ctx context.Context, prompt string, 
 	return AgentInitDecision{SystemPrompt: prompt, AllowedTools: []string{}, ToolsModified: true}, ctx.Err()
 }
 
-func (*UtilityEnvironment) DispatchTurnEnd(ctx context.Context, _ string, _ int) error {
-	return ctx.Err()
+func (*UtilityEnvironment) DispatchTurnEnd(ctx context.Context, _ string, _ int) ([]extensions.FollowUpMessage, error) {
+	return nil, ctx.Err()
 }
 
-func (*UtilityEnvironment) DispatchAgentEnd(ctx context.Context, _ []llmtypes.Message) ([]string, error) {
-	return []string{}, ctx.Err()
+func (*UtilityEnvironment) DispatchAgentEnd(ctx context.Context, _ []llmtypes.Message) ([]extensions.FollowUpMessage, error) {
+	return nil, ctx.Err()
 }
 
 func (*UtilityEnvironment) DispatchToolCall(context.Context, ToolRequest) (ToolCallDecision, error) {

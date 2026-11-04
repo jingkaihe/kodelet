@@ -20,6 +20,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/codemode"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -1318,12 +1319,23 @@ func TestExecuteToolsParallelHandlesEmptyCancelledAndSubscriptionNames(t *testin
 
 type terminationOutcomeEnvironment struct {
 	agentenv.UtilityEnvironment
-	outcomes []llmtypes.AgentRunOutcome
+	outcomes      []llmtypes.AgentRunOutcome
+	turnFollowUps bool
 }
 
-func (*terminationOutcomeEnvironment) DispatchAgentEnd(context.Context, []llmtypes.Message) ([]string, error) {
+func (e *terminationOutcomeEnvironment) DispatchTurnEnd(_ context.Context, _ string, turn int) ([]extensions.FollowUpMessage, error) {
+	if !e.turnFollowUps {
+		return nil, nil
+	}
+	return []extensions.FollowUpMessage{{FollowUp: extensions.FollowUp{Text: "continue", Visibility: "hidden", Key: "mailbox", Revision: int64(turn)}, ExtensionID: "test"}}, nil
+}
+
+func (e *terminationOutcomeEnvironment) DispatchAgentEnd(context.Context, []llmtypes.Message) ([]extensions.FollowUpMessage, error) {
+	if e.turnFollowUps {
+		return nil, nil
+	}
 	// Keep requesting follow-ups so successful exchanges reach the turn limit.
-	return []string{"continue"}, nil
+	return []extensions.FollowUpMessage{{FollowUp: extensions.FollowUp{Text: "continue"}, ExtensionID: "test"}}, nil
 }
 
 func (e *terminationOutcomeEnvironment) CloseWithOutcome(ctx context.Context, outcome llmtypes.AgentRunOutcome) error {
@@ -1333,17 +1345,25 @@ func (e *terminationOutcomeEnvironment) CloseWithOutcome(ctx context.Context, ou
 
 func TestAnthropicReportsTerminationOutcome(t *testing.T) {
 	for _, test := range []struct {
-		name        string
-		providerErr error
-		status      llmtypes.AgentRunStatus
-		reason      llmtypes.AgentRunReason
-		requests    int
+		name          string
+		providerErr   error
+		status        llmtypes.AgentRunStatus
+		reason        llmtypes.AgentRunReason
+		requests      int
+		turnFollowUps bool
 	}{
 		{
 			name:     "turn limit",
 			status:   llmtypes.AgentRunStatusSucceeded,
 			reason:   llmtypes.AgentRunReasonTurnLimit,
 			requests: 2,
+		},
+		{
+			name:          "empty turn.end followups respect turn limit",
+			turnFollowUps: true,
+			status:        llmtypes.AgentRunStatusSucceeded,
+			reason:        llmtypes.AgentRunReasonTurnLimit,
+			requests:      2,
 		},
 		{
 			name:        "provider cancellation without canceled parent",
@@ -1355,7 +1375,7 @@ func TestAnthropicReportsTerminationOutcome(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := t.Context()
-			environment := &terminationOutcomeEnvironment{}
+			environment := &terminationOutcomeEnvironment{turnFollowUps: test.turnFollowUps}
 			requests := 0
 			client := anthropic.NewClient(
 				option.WithAPIKey("test-key"),
@@ -1401,6 +1421,8 @@ data: {"type":"message_stop"}
 			assert.Equal(t, test.status, environment.outcomes[0].Status)
 			assert.Equal(t, test.reason, environment.outcomes[0].Reason)
 			assert.False(t, environment.IsOpen())
+			assert.NotContains(t, thread.GetMetadata(), base.ExtensionMessagesMetadataKey)
+			assert.NotContains(t, thread.GetMetadata(), base.FollowUpRevisionsMetadataKey)
 		})
 	}
 }

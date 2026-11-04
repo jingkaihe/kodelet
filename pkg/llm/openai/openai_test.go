@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
@@ -1692,12 +1694,33 @@ func TestOpenAISendMessageRestoresMessagesWhenNoSaveConversation(t *testing.T) {
 
 type terminationOutcomeEnvironment struct {
 	agentenv.UtilityEnvironment
-	outcomes []llm.AgentRunOutcome
+	outcomes      []llm.AgentRunOutcome
+	turnFollowUps bool
+	cancelAt      string
+	cancel        context.CancelFunc
 }
 
-func (*terminationOutcomeEnvironment) DispatchAgentEnd(context.Context, []llm.Message) ([]string, error) {
+func (e *terminationOutcomeEnvironment) DispatchTurnEnd(ctx context.Context, _ string, turn int) ([]extensions.FollowUpMessage, error) {
+	if e.cancelAt == "turn.end" {
+		e.cancel()
+		return nil, ctx.Err()
+	}
+	if !e.turnFollowUps {
+		return nil, nil
+	}
+	return []extensions.FollowUpMessage{{FollowUp: extensions.FollowUp{Text: "continue", Visibility: "hidden", Key: "mailbox", Revision: int64(turn)}, ExtensionID: "test"}}, nil
+}
+
+func (e *terminationOutcomeEnvironment) DispatchAgentEnd(ctx context.Context, _ []llm.Message) ([]extensions.FollowUpMessage, error) {
+	if e.cancelAt == "agent.end" {
+		e.cancel()
+		return nil, ctx.Err()
+	}
+	if e.turnFollowUps {
+		return nil, nil
+	}
 	// Keep requesting follow-ups so successful exchanges reach the turn limit.
-	return []string{"continue"}, nil
+	return []extensions.FollowUpMessage{{FollowUp: extensions.FollowUp{Text: "continue"}, ExtensionID: "test"}}, nil
 }
 
 func (e *terminationOutcomeEnvironment) CloseWithOutcome(ctx context.Context, outcome llm.AgentRunOutcome) error {
@@ -1707,17 +1730,25 @@ func (e *terminationOutcomeEnvironment) CloseWithOutcome(ctx context.Context, ou
 
 func TestOpenAIReportsTerminationOutcome(t *testing.T) {
 	for _, test := range []struct {
-		name        string
-		providerErr error
-		status      llm.AgentRunStatus
-		reason      llm.AgentRunReason
-		requests    int
+		name          string
+		providerErr   error
+		status        llm.AgentRunStatus
+		reason        llm.AgentRunReason
+		requests      int
+		turnFollowUps bool
 	}{
 		{
 			name:     "turn limit",
 			status:   llm.AgentRunStatusSucceeded,
 			reason:   llm.AgentRunReasonTurnLimit,
 			requests: 2,
+		},
+		{
+			name:          "turn.end followups respect turn limit",
+			turnFollowUps: true,
+			status:        llm.AgentRunStatusSucceeded,
+			reason:        llm.AgentRunReasonTurnLimit,
+			requests:      2,
 		},
 		{
 			name:        "provider cancellation without canceled parent",
@@ -1729,7 +1760,7 @@ func TestOpenAIReportsTerminationOutcome(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := t.Context()
-			environment := &terminationOutcomeEnvironment{}
+			environment := &terminationOutcomeEnvironment{turnFollowUps: test.turnFollowUps}
 			requests := 0
 			client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(req *http.Request) (*http.Response, error) {
 				requests++
@@ -1760,7 +1791,61 @@ func TestOpenAIReportsTerminationOutcome(t *testing.T) {
 			assert.Equal(t, test.status, environment.outcomes[0].Status)
 			assert.Equal(t, test.reason, environment.outcomes[0].Reason)
 			assert.False(t, environment.IsOpen())
+			assert.NotContains(t, thread.GetMetadata(), base.ExtensionMessagesMetadataKey)
+			assert.NotContains(t, thread.GetMetadata(), base.FollowUpRevisionsMetadataKey)
 		})
+	}
+}
+
+func TestOpenAIEndHooksCheckpointBeforeErrorsAndFinalizeCancellation(t *testing.T) {
+	for _, hook := range []string{"turn.end", "agent.end"} {
+		for _, cancelHook := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/cancel=%t", hook, cancelHook), func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				environment := &terminationOutcomeEnvironment{turnFollowUps: hook == "turn.end", cancel: cancel}
+				if cancelHook {
+					environment.cancelAt = hook
+				}
+				requests := 0
+				client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(_ *http.Request) (*http.Response, error) {
+					requests++
+					if requests > 1 {
+						return nil, errors.New("provider unavailable after notification")
+					}
+					return jsonOpenAIResponse(http.StatusOK, `{
+						"id":"chatcmpl-checkpoint","model":"gpt-4o",
+						"choices":[{"index":0,"message":{"role":"assistant","content":"completed answer"},"finish_reason":"stop"}]
+					}`), nil
+				}))
+				thread := newTestOpenAIExchangeThread(client, llm.Config{Provider: "openai", Model: "gpt-4o"})
+				store := &MockConversationStore{}
+				thread.Store, thread.Persisted = store, true
+				thread.SetEnvironment(environment)
+				handler := &captureOpenAIMessageHandler{}
+				output, err := thread.SendMessage(ctx, "hello", handler, llm.MessageOpt{MaxTurns: 3, DisableUsageLog: true})
+				if cancelHook {
+					require.NoError(t, err)
+					assert.Equal(t, "completed answer", output)
+					assert.Equal(t, 1, handler.done)
+					assert.Equal(t, 1, requests)
+				} else {
+					require.ErrorContains(t, err, "provider unavailable")
+				}
+				require.NotEmpty(t, store.SavedRecords)
+				record := store.SavedRecords[len(store.SavedRecords)-1]
+				assert.Contains(t, string(record.RawMessages), "completed answer")
+				if cancelHook {
+					assert.NotContains(t, record.Metadata, base.ExtensionMessagesMetadataKey)
+				} else {
+					assert.Contains(t, string(record.RawMessages), "continue")
+					assert.Contains(t, record.Metadata, base.ExtensionMessagesMetadataKey)
+					if hook == "turn.end" {
+						assert.Equal(t, map[string]map[string]string{"test": {"mailbox": "1"}}, record.Metadata[base.FollowUpRevisionsMetadataKey])
+					}
+				}
+			})
+		}
 	}
 }
 

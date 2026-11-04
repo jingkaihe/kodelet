@@ -3,10 +3,12 @@ package responses
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -46,9 +48,9 @@ func (*reloadCheckpointEnvironment) ProcessAgentInit(_ context.Context, prompt s
 	return agentenv.AgentInitDecision{SystemPrompt: prompt}, nil
 }
 
-func (e *reloadCheckpointEnvironment) DispatchTurnEnd(_ context.Context, _ string, turn int) error {
+func (e *reloadCheckpointEnvironment) DispatchTurnEnd(_ context.Context, _ string, turn int) ([]extensions.FollowUpMessage, error) {
 	e.turnEnd = turn
-	return nil
+	return nil, nil
 }
 
 type reloadCheckpointHandler struct {
@@ -194,6 +196,14 @@ type finishedEnvironment struct {
 	followUps int
 	outcomes  []llmtypes.AgentRunOutcome
 	closeErr  error
+	turnEnd   func(string, int) []extensions.FollowUpMessage
+}
+
+func (e *finishedEnvironment) DispatchTurnEnd(_ context.Context, output string, turn int) ([]extensions.FollowUpMessage, error) {
+	if e.turnEnd != nil {
+		return e.turnEnd(output, turn), nil
+	}
+	return nil, nil
 }
 
 func (e *finishedEnvironment) DispatchAgentStart(context.Context) error {
@@ -203,10 +213,10 @@ func (e *finishedEnvironment) DispatchAgentStart(context.Context) error {
 	return nil
 }
 
-func (e *finishedEnvironment) DispatchAgentEnd(context.Context, []llmtypes.Message) ([]string, error) {
+func (e *finishedEnvironment) DispatchAgentEnd(context.Context, []llmtypes.Message) ([]extensions.FollowUpMessage, error) {
 	if e.followUps > 0 {
 		e.followUps--
-		return []string{"continue"}, nil
+		return []extensions.FollowUpMessage{{FollowUp: extensions.FollowUp{Text: "continue"}, ExtensionID: "test"}}, nil
 	}
 	return nil, nil
 }
@@ -264,6 +274,64 @@ func TestResponsesReportsTerminationOutcome(t *testing.T) {
 			assert.Equal(t, test.exchanges, exchanges)
 			assert.NoError(t, environment.closeErr, "cleanup must not inherit cancellation")
 			assert.False(t, environment.IsOpen())
+		})
+	}
+}
+
+func TestResponsesTurnFollowUpsPersistAndRollBackWithHistory(t *testing.T) {
+	for _, noSave := range []bool{false, true} {
+		t.Run(fmt.Sprintf("noSave=%t", noSave), func(t *testing.T) {
+			t.Setenv("KODELET_BASE_PATH", t.TempDir())
+			thread := &Thread{Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}, "followups")}
+			store := &mockResponsesConversationStore{}
+			thread.Store, thread.Persisted = store, true
+			thread.AddUserMessage(t.Context(), "original prefix")
+			thread.AddAssistantMessage(t.Context(), "earlier assistant")
+			prefix := thread.snapshotHistory()
+			environment := &finishedEnvironment{}
+			thread.SetEnvironment(environment)
+			var outputs []string
+			environment.turnEnd = func(output string, turn int) []extensions.FollowUpMessage {
+				outputs = append(outputs, output)
+				assert.Equal(t, len(outputs), turn)
+				return []extensions.FollowUpMessage{{
+					ExtensionID: "mailbox",
+					FollowUp:    extensions.FollowUp{Text: "hidden notification", Visibility: "hidden", Key: "inbox", Revision: 42},
+				}}
+			}
+			exchanges := 0
+			var originalPrompt string
+			thread.processMessageExchangeFunc = func(_ context.Context, _ llmtypes.MessageHandler, _ string, _ int, prompt string, _ llmtypes.MessageOpt) (string, bool, bool, error) {
+				exchanges++
+				if exchanges == 1 {
+					originalPrompt = prompt
+					return "", false, true, nil
+				}
+				assert.Equal(t, originalPrompt, prompt, "follow-ups do not mutate the system prompt")
+				history := thread.snapshotHistory()
+				assert.Equal(t, prefix.storedItems, history.storedItems[:len(prefix.storedItems)])
+				last := history.storedItems[len(history.storedItems)-1]
+				assert.Equal(t, "user", last.Role)
+				assert.Contains(t, fmt.Sprint(last.Content), "hidden notification")
+				return " \t", false, true, nil
+			}
+			handler := &llmtypes.StringCollectorHandler{Silent: true}
+			_, err := thread.SendMessage(t.Context(), "typed input", handler, llmtypes.MessageOpt{MaxTurns: 4, NoSaveConversation: noSave})
+			require.NoError(t, err)
+			assert.Equal(t, []string{"", " \t"}, outputs, "equal revisions must not keep the loop alive")
+			assert.Equal(t, 2, exchanges)
+			if noSave {
+				assert.Equal(t, prefix.storedItems, thread.snapshotHistory().storedItems)
+				assert.NotContains(t, thread.GetMetadata(), base.ExtensionMessagesMetadataKey)
+				assert.NotContains(t, thread.GetMetadata(), base.FollowUpRevisionsMetadataKey)
+				assert.Empty(t, store.savedRecords)
+			} else {
+				require.NotEmpty(t, store.savedRecords)
+				record := store.savedRecords[len(store.savedRecords)-1]
+				assert.Contains(t, string(record.RawMessages), "hidden notification")
+				assert.Equal(t, map[string]base.ExtensionMessageMetadata{"2": {ExtensionID: "mailbox", Visibility: "hidden"}}, record.Metadata[base.ExtensionMessagesMetadataKey])
+				assert.Equal(t, map[string]map[string]string{"mailbox": {"inbox": "42"}}, record.Metadata[base.FollowUpRevisionsMetadataKey])
+			}
 		})
 	}
 }

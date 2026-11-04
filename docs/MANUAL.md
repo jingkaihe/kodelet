@@ -1839,12 +1839,14 @@ Extensions subscribe to dot-separated lifecycle events with `ext.on(...)`. Mutat
 | `tool.call` | Before a tool runs | Yes | Tool input |
 | `tool.update` | While a streaming tool runs | No | Accumulated tool result snapshot |
 | `tool.result` | After a tool runs | No | Tool result |
-| `turn.end` | After one assistant turn completes | No | No |
+| `turn.end` | After each completed iteration, including tool-only iterations and their results | No | Follow-up messages |
 | `agent.end` | Agent loop completes and may continue | No | Follow-up messages |
 | `agent.finished` | Started run reaches a handled terminal exit | No | No |
 | `session.end` | Extension runtime shuts down | No | No |
 
-`agent.end` handlers can return `followUpMessages` to continue the loop. `agent.finished` reports the final outcome once per started run, including failure and cancellation. It is notification-only: handler results and errors do not affect the run. Each `agent.finished` handler is capped at 30 seconds, even when `timeoutInSec` is larger or disables timeouts. Abrupt process termination may prevent delivery.
+`turn.end` and `agent.end` handlers can return `followUpMessages: ["text"]` or structured `followUps: [{text, visibility?, key?, revision?}]` to continue the loop, subject to cancellation and turn limits. Visibility defaults to `visible`; `hidden` keeps input in model/raw history but omits it from normal TUI/Web transcripts. The host records the originating extension. Supplying a stable `key` and positive, increasing `revision` suppresses duplicates and older notifications across turns and resumes; the watermark advances only when the host appends the message. Follow-ups do not modify the system prompt or wake idle conversations.
+
+`agent.finished` reports the final outcome once per started run, including failure and cancellation. It is notification-only: handler results and errors do not affect the run. Each `agent.finished` handler is capped at 30 seconds, even when `timeoutInSec` is larger or disables timeouts. Abrupt process termination may prevent delivery.
 
 The payload contains `status` (`succeeded`, `failed`, or `canceled`), optional `reason` (`completed`, `error`, `canceled`, `deadline_exceeded`, or `turn_limit`), and optional `error` text. Turn limits count as success; deadline expiry counts as cancellation.
 

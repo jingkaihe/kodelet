@@ -273,6 +273,24 @@ type EventResult struct {
 	SystemPrompt     *SystemPromptPatch `json:"systemPrompt,omitempty"`
 	Tools            *ToolListPatch     `json:"tools,omitempty"`
 	FollowUpMessages []string           `json:"followUpMessages,omitempty"`
+	FollowUps        []FollowUp         `json:"followUps,omitempty"`
+}
+
+// FollowUp is an extension notification appended after a completed model turn.
+// Only hidden suppresses display; an empty visibility means visible. A key and
+// positive revision enable conversation-local, per-extension deduplication.
+type FollowUp struct {
+	Text       string `json:"text"`
+	Visibility string `json:"visibility,omitempty"`
+	Key        string `json:"key,omitempty"`
+	Revision   int64  `json:"revision,omitempty"`
+}
+
+// FollowUpMessage is a validated notification stamped by the host, never decoded
+// from an extension result. The runner carries it to the conversation owner.
+type FollowUpMessage struct {
+	FollowUp
+	ExtensionID string `json:"extensionId"`
 }
 
 // EventBlock asks Kodelet to block a mutable/blocking event.

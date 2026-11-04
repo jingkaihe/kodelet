@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -179,23 +180,26 @@ func agentInitEnvironmentToolNames(config llmtypes.Config, environmentTools []to
 	return allowedTools
 }
 
-// TriggerTurnEnd notifies extension handlers when assistant output is finalized for a turn.
+// TriggerTurnEnd runs after every completed exchange, including its tool results.
+// It returns whether follow-ups were appended and require another model turn.
 func TriggerTurnEnd(
 	ctx context.Context,
 	thread llmtypes.Thread,
+	handler llmtypes.MessageHandler,
 	finalOutput string,
 	turnCount int,
-) error {
-	if finalOutput == "" {
-		return nil
-	}
+) (bool, error) {
+	var followUps []extensions.FollowUpMessage
 	if environment := EnvironmentForThread(thread); environment != nil && environment.IsOpen() {
-		return environment.DispatchTurnEnd(ctx, finalOutput, turnCount)
+		var err error
+		followUps, err = environment.DispatchTurnEnd(ctx, finalOutput, turnCount)
+		if err != nil {
+			return false, err
+		}
+	} else if runtime := extensionRuntime(thread); runtime != nil {
+		followUps = runtime.DispatchTurnEnd(ctx, buildExtensionCallContext(thread, threadState(thread)), finalOutput, turnCount)
 	}
-	if runtime := extensionRuntime(thread); runtime != nil {
-		runtime.DispatchTurnEnd(ctx, buildExtensionCallContext(thread, threadState(thread)), finalOutput, turnCount)
-	}
-	return nil
+	return appendExtensionFollowUps(ctx, thread, handler, followUps), nil
 }
 
 // HasPendingSteer reports whether steering arrived while the current model turn was in flight.
@@ -236,38 +240,16 @@ func HandleAgentStopFollowUps(
 	if err != nil {
 		return false, nil
 	}
+	var followUps []extensions.FollowUpMessage
 	if environment := EnvironmentForThread(thread); environment != nil && environment.IsOpen() {
-		followUps, err := environment.DispatchAgentEnd(ctx, messages)
+		followUps, err = environment.DispatchAgentEnd(ctx, messages)
 		if err != nil {
 			return false, err
 		}
-		if len(followUps) == 0 {
-			return false, nil
-		}
-
-		logger.G(ctx).WithField("count", len(followUps)).Info("agent end follow-up messages returned, continuing conversation")
-		for _, msg := range followUps {
-			thread.AddUserMessage(ctx, msg)
-			handler.HandleText(fmt.Sprintf("\n📨 Extension follow-up: %s\n", msg))
-		}
-		return true, nil
+	} else if runtime := extensionRuntime(thread); runtime != nil {
+		followUps = runtime.DispatchAgentEnd(ctx, buildExtensionCallContext(thread, threadState(thread)), messages)
 	}
-
-	if runtime := extensionRuntime(thread); runtime != nil {
-		followUps := runtime.DispatchAgentEnd(ctx, buildExtensionCallContext(thread, threadState(thread)), messages)
-		if len(followUps) == 0 {
-			return false, nil
-		}
-
-		logger.G(ctx).WithField("count", len(followUps)).Info("agent end follow-up messages returned, continuing conversation")
-		for _, msg := range followUps {
-			thread.AddUserMessage(ctx, msg)
-			handler.HandleText(fmt.Sprintf("\n📨 Extension follow-up: %s\n", msg))
-		}
-
-		return true, nil
-	}
-	return false, nil
+	return appendExtensionFollowUps(ctx, thread, handler, followUps), nil
 }
 
 func threadState(thread llmtypes.Thread) tooltypes.State {
