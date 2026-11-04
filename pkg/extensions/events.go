@@ -515,6 +515,16 @@ func eventTimeout(eventName string, handler eventHandler) time.Duration {
 	return timeout
 }
 
+// HasEventSubscribers reports whether the current runtime handles an event.
+func (r *Runtime) HasEventSubscribers(eventName string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.eventHandlersByName[eventName]) > 0
+}
+
 func (r *Runtime) eventHandlers(eventName string) []eventHandler {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

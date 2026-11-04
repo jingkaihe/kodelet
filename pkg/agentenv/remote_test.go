@@ -603,6 +603,70 @@ func TestRemoteEnvironmentRejectsMismatchedContextDigest(t *testing.T) {
 	assert.Equal(t, protocol.RunStatusFailed, controller.closedStatus)
 }
 
+func TestRemoteEnvironmentSkipsOnlyKnownUnsubscribedTurnEnd(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		subscribed *bool
+		calls      int
+	}{
+		{name: "old runner", calls: 1},
+		{name: "subscribed", subscribed: new(true), calls: 1},
+		{name: "no subscribers", subscribed: new(false)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			controller := &fakeRemoteController{manifest: runnerpayload.Manifest{TurnEndSubscribed: test.subscribed}}
+			environment := NewRemoteEnvironment(controller, "runner")
+			_, err := environment.Open(t.Context(), RunSpec{ConversationID: "conversation"})
+			require.NoError(t, err)
+			_, err = environment.DispatchTurnEnd(t.Context(), "", 1)
+			require.NoError(t, err)
+			assert.Len(t, controller.calls, test.calls)
+			if test.calls == 0 {
+				ctx, cancel := context.WithCancel(t.Context())
+				cancel()
+				_, err = environment.DispatchTurnEnd(ctx, "", 2)
+				assert.ErrorIs(t, err, context.Canceled)
+				assert.Empty(t, controller.calls)
+			}
+			require.NoError(t, environment.Close(t.Context()))
+			_, err = environment.DispatchTurnEnd(t.Context(), "", 3)
+			assert.ErrorContains(t, err, "not open")
+		})
+	}
+}
+
+func TestRemoteEnvironmentRefreshesTurnEndSubscriptionOnReload(t *testing.T) {
+	controller := &reloadRemoteController{fakeRemoteController: fakeRemoteController{manifest: runnerpayload.Manifest{
+		RunID: "run", WorkingDirectory: "/workspace", EnvironmentRevision: 1,
+		TurnEndSubscribed: new(false), Capabilities: runnerpayload.EnvironmentCapabilities{EnvironmentReload: true},
+	}}}
+	environment := NewRemoteEnvironment(controller, "runner", WithRemoteRunIDGenerator(func() (string, error) { return "run", nil }))
+	_, err := environment.Open(t.Context(), RunSpec{ConversationID: "conversation"})
+	require.NoError(t, err)
+	for _, subscribed := range []bool{true, false} {
+		controller.reload = func(_ context.Context, params protocol.RunReloadParams) (runnerpayload.RunReloadResult, error) {
+			fresh := controller.manifest
+			fresh.EnvironmentRevision = params.ExpectedEnvironmentRevision + 1
+			fresh.TurnEndSubscribed = new(subscribed)
+			return runnerpayload.RunReloadResult{Manifest: fresh}, nil
+		}
+		_, err = environment.ExecuteTool(t.Context(), ToolRequest{Name: ReloadResourcesToolName, Input: "{}"}, nil)
+		require.NoError(t, err)
+		outcome, err := environment.ReloadPendingResources(t.Context())
+		require.NoError(t, err)
+		require.True(t, outcome.Reloaded)
+		controller.calls = nil
+		_, err = environment.DispatchTurnEnd(t.Context(), "", 1)
+		require.NoError(t, err)
+		if subscribed {
+			assert.Equal(t, []string{protocol.MethodLifecycleDispatch}, controller.calls)
+		} else {
+			assert.Empty(t, controller.calls)
+		}
+	}
+	require.NoError(t, environment.Close(t.Context()))
+}
+
 func TestRemoteEnvironmentFollowUpWireCompatibility(t *testing.T) {
 	largeLegacy := runnerpayload.LifecycleDispatchResult{}
 	var largeExpected []extensions.FollowUpMessage

@@ -477,6 +477,8 @@ func TestRuntimeDispatchesAgentInitAndEndEvents(t *testing.T) {
 }
 
 func TestRuntimeFollowUpsAreValidatedAndHostAttributed(t *testing.T) {
+	assert.False(t, (*Runtime)(nil).HasEventSubscribers(EventTurnEnd))
+	assert.False(t, EmptyRuntime().HasEventSubscribers(EventTurnEnd))
 	rootDir := t.TempDir()
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	writeExecutable(t, filepath.Join(rootDir, "events", "kodelet-extension-events"), helperExtensionScript(t))
@@ -484,6 +486,8 @@ func TestRuntimeFollowUpsAreValidatedAndHostAttributed(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, runtime.Close()) })
 	callContext := ExtensionCallContext{ConversationID: "conversation", CWD: rootDir}
+	assert.True(t, runtime.HasEventSubscribers(EventTurnEnd))
+	assert.False(t, runtime.HasEventSubscribers("unknown.event"))
 	fixture := map[string]any{
 		"followUps": []map[string]any{
 			{"text": "hidden", "visibility": "hidden", "key": "mailbox", "revision": 42, "extensionId": "human"},

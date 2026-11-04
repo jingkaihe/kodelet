@@ -152,6 +152,7 @@ func buildWireManifest(
 		},
 		ExtensionGeneration: 1,
 		ExtensionCount:      new(runtime.ExtensionCount()),
+		TurnEndSubscribed:   new(runtime.HasEventSubscribers(extensions.EventTurnEnd)),
 		Capabilities: runnerpayload.EnvironmentCapabilities{
 			CodeExecution:      codeExecution,
 			ToolUpdates:        true,

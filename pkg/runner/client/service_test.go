@@ -1480,6 +1480,7 @@ func TestBuildWireManifestSortsContentAndRejectsReservedToolCollisions(t *testin
 	}, nil, "runner-1", "run-1", 4, []string{"reserved_tool", " "})
 	require.NoError(t, err)
 	assert.Equal(t, new(0), manifest.ExtensionCount, "no runtime is an explicitly known zero")
+	assert.Equal(t, new(false), manifest.TurnEndSubscribed, "no runtime explicitly has no turn.end subscribers")
 	require.Len(t, manifest.ContextFiles, 2)
 	assert.Equal(t, "a/AGENTS.md", manifest.ContextFiles[0].Path)
 	assert.Equal(t, "z/AGENTS.md", manifest.ContextFiles[1].Path)

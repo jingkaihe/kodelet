@@ -90,7 +90,8 @@ type Manifest struct {
 	Commands            []slashcommands.Command       `json:"commands"`
 	Config              EnvironmentConfig             `json:"config"`
 	ExtensionGeneration int64                         `json:"extensionGeneration"`
-	ExtensionCount      *int                          `json:"extensionCount,omitempty"` // Advisory; nil means unknown.
+	ExtensionCount      *int                          `json:"extensionCount,omitempty"`    // Advisory; nil means unknown.
+	TurnEndSubscribed   *bool                         `json:"turnEndSubscribed,omitempty"` // Advisory; nil means unknown.
 	Capabilities        EnvironmentCapabilities       `json:"capabilities"`
 }
 
@@ -122,6 +123,9 @@ func ComputeManifestDigest(manifest Manifest) (string, error) {
 	manifest.ExtensionGeneration = 0
 	// Display-only metadata must not change execution or discovery identity.
 	manifest.ExtensionCount = nil
+	// Subscriber hints only avoid no-op RPCs; omit them from protocol-v1 digests
+	// so older hosts can still verify manifests after dropping unknown fields.
+	manifest.TurnEndSubscribed = nil
 	manifest.Shortcuts = append([]protocol.ShortcutDescriptor(nil), manifest.Shortcuts...)
 	for i := range manifest.Shortcuts {
 		manifest.Shortcuts[i].Generation = 0

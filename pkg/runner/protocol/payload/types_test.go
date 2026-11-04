@@ -30,6 +30,28 @@ func TestLifecycleFollowUpFieldsAreOptionalAndCompatible(t *testing.T) {
 	assert.Equal(t, result, restored)
 }
 
+func TestTurnEndSubscriptionHintIsOptionalAndDigestNeutral(t *testing.T) {
+	legacy := Manifest{}
+	digest, err := ComputeManifestDigest(legacy)
+	require.NoError(t, err)
+	for _, subscribed := range []*bool{nil, new(false), new(true)} {
+		manifest := legacy
+		manifest.TurnEndSubscribed = subscribed
+		raw, err := json.Marshal(manifest)
+		require.NoError(t, err)
+		var restored Manifest
+		require.NoError(t, json.Unmarshal(raw, &restored))
+		assert.Equal(t, subscribed, restored.TurnEndSubscribed)
+		if subscribed == nil {
+			assert.NotContains(t, string(raw), "turnEndSubscribed")
+		}
+		actual, err := ComputeManifestDigest(restored)
+		require.NoError(t, err)
+		assert.Equal(t, digest, actual, "old decoders dropping this hint must still verify the digest")
+		assert.Equal(t, subscribed, restored.TurnEndSubscribed, "hashing must not mutate the manifest")
+	}
+}
+
 func TestManifestProfilesWireCompatibilityAndDigest(t *testing.T) {
 	data, err := json.Marshal(Manifest{})
 	require.NoError(t, err)

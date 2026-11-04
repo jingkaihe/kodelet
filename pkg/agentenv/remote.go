@@ -310,6 +310,13 @@ func (e *RemoteEnvironment) ProcessAgentInit(ctx context.Context, systemPrompt s
 
 // DispatchTurnEnd applies runner-owned turn.end handlers.
 func (e *RemoteEnvironment) DispatchTurnEnd(ctx context.Context, finalOutput string, turnCount int) ([]extensions.FollowUpMessage, error) {
+	e.mu.RLock()
+	noSubscribers := e.opened && !e.closing && !e.reloading && !e.reloadFailed &&
+		e.wireManifest.TurnEndSubscribed != nil && !*e.wireManifest.TurnEndSubscribed
+	e.mu.RUnlock()
+	if noSubscribers {
+		return nil, ctx.Err()
+	}
 	result, err := e.dispatchLifecycle(ctx, runnerpayload.LifecycleDispatchParams{
 		Event:       runnerpayload.LifecycleTurnEnd,
 		FinalOutput: finalOutput,
