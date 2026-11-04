@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.8.21-beta
+
+Added structured extension `followUps` to `turn.end` and `agent.end`, with typed Go and TypeScript SDK support. Follow-ups accept `text`, optional `visibility`, and optional `key`/`revision` fields; existing `followUpMessages` remain supported. See [Extension events](docs/MANUAL.md#extension-events).
+
+Changed `turn.end` to run after every completed model iteration and its tool results, including tool-only iterations, and allow follow-ups to continue the run. Follow-ups respect cancellation and turn limits; repeated unkeyed follow-ups can continue indefinitely with `--max-turns 0`. Runners without subscribers skip the extra turn-end round trip.
+
+Added per-extension, per-conversation deduplication using stable keys and increasing positive revisions, preserved across turns and saved conversation resumes. With persistence enabled, accepted follow-ups are checkpointed before the next model request; a checkpoint save failure stops the run rather than continuing with unsaved input.
+
+Attributed visible extension follow-ups in live and saved CLI, TUI, Web UI, and ACP transcripts. Visibility defaults to `visible`; `hidden` omits follow-ups from normal transcripts and `conversation show` text, Markdown, and JSON output while retaining them in model history, raw output, and conversation exports.
+
 ## 0.8.20-beta
 
 Updated local and release builds of Kodelet and the native MCP extension to use Go's `-trimpath`, removing build-machine filesystem paths from the compiled binaries.
