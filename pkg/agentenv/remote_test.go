@@ -615,6 +615,8 @@ func TestRemoteEnvironmentFollowUpWireCompatibility(t *testing.T) {
 	}
 	largeReply, err := json.Marshal(largeLegacy)
 	require.NoError(t, err)
+	emptyReply, err := json.Marshal(runnerpayload.LifecycleDispatchResult{FollowUps: []extensions.FollowUpMessage{}})
+	require.NoError(t, err)
 	for _, test := range []struct {
 		name  string
 		reply string
@@ -639,7 +641,12 @@ func TestRemoteEnvironmentFollowUpWireCompatibility(t *testing.T) {
 			},
 		},
 		{
-			name:  "explicit empty structured decision wins",
+			name:  "current runner omits empty structured decision",
+			reply: string(emptyReply),
+		},
+		{
+			// A decoder edge case, not output from the current Go runner's omitempty fields.
+			name:  "explicit empty structured decision from another encoder wins",
 			reply: "{\"followUps\":[],\"followUpMessages\":[\"stale\"]}",
 			want:  []extensions.FollowUpMessage{},
 		},

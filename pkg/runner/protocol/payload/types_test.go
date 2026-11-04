@@ -15,6 +15,9 @@ func TestLifecycleFollowUpFieldsAreOptionalAndCompatible(t *testing.T) {
 	raw, err := json.Marshal(LifecycleDispatchResult{})
 	require.NoError(t, err)
 	assert.JSONEq(t, "{}", string(raw))
+	raw, err = json.Marshal(LifecycleDispatchResult{FollowUps: []extensions.FollowUpMessage{}})
+	require.NoError(t, err)
+	assert.JSONEq(t, "{}", string(raw), "the Go runner omits an explicitly empty slice")
 	var result LifecycleDispatchResult
 	require.NoError(t, json.Unmarshal([]byte("{\"followUpMessages\":[\"legacy\"]}"), &result))
 	assert.Nil(t, result.FollowUps)
