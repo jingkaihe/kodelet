@@ -14,11 +14,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-// ResourceSettingsLoader supplies trusted top-level extensions, skills and
-// context settings. It is called only when opening or explicitly reloading an
-// environment; other settings and profile definitions remain pinned.
-type ResourceSettingsLoader func() (map[string]any, error)
-
 // NewWorkspaceConfigLoader pins runner defaults and resolves each execution's
 // environment settings from its own directory. It never loads model credentials,
 // daemon endpoints, or authentication policy from repository configuration.
@@ -34,7 +29,8 @@ func NewWorkspaceConfigLoader(defaults map[string]any, resources ResourceSetting
 		if err := json.Unmarshal(snapshot, &settings); err != nil {
 			return llmtypes.Config{}, errors.Wrap(err, "failed to decode runner settings snapshot")
 		}
-		if err := refreshResourceSettings(settings, resources); err != nil {
+		settings, err := refreshResourceSettings(settings, resources)
+		if err != nil {
 			return llmtypes.Config{}, err
 		}
 		host, err := llm.GetConfigFromSettingsWithEnvironmentProfile(settings, profile)
@@ -67,33 +63,6 @@ func NewWorkspaceConfigLoader(defaults map[string]any, resources ResourceSetting
 		config.WorkingDirectory = cwd
 		return config, nil
 	}, nil
-}
-
-func refreshResourceSettings(settings map[string]any, load ResourceSettingsLoader) error {
-	if load == nil {
-		return nil
-	}
-	values, err := load()
-	if err != nil {
-		return errors.Wrap(err, "failed to refresh runner resource settings")
-	}
-	// Replace rather than merge so deleted settings do not survive a reload.
-	// Clone the projection: Viper merges must not mutate a loader's maps.
-	projected := make(map[string]any)
-	for _, key := range []string{"extensions", "skills", "context"} {
-		delete(settings, key)
-		if value, ok := values[key]; ok {
-			projected[key] = value
-		}
-	}
-	data, err := json.Marshal(projected)
-	if err != nil {
-		return errors.Wrap(err, "failed to snapshot runner resource settings")
-	}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return errors.Wrap(err, "failed to decode runner resource settings")
-	}
-	return nil
 }
 
 func environmentSettings(settings map[string]any) map[string]any {

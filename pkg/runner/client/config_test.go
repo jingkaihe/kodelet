@@ -66,6 +66,18 @@ func TestRunnerConfigLoadersRefreshResourceSnapshots(t *testing.T) {
 	}
 }
 
+func TestRefreshResourceSettingsAllocatesMissingSettings(t *testing.T) {
+	settings, err := refreshResourceSettings(nil, func() (map[string]any, error) {
+		return map[string]any{"skills": map[string]any{"enabled": false}, "sysprompt": "ignored"}, nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"skills": map[string]any{"enabled": false}}, settings)
+
+	settings, err = refreshResourceSettings(nil, nil)
+	require.NoError(t, err)
+	assert.Nil(t, settings)
+}
+
 func TestWorkspaceConfigLoaderConcurrentSnapshots(t *testing.T) {
 	processCWD, err := os.Getwd()
 	require.NoError(t, err)

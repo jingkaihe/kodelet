@@ -49,9 +49,11 @@ func NewEmbeddedConfigLoader(defaults, overrides map[string]any, resources Resou
 		if err := json.Unmarshal(data, &settings); err != nil {
 			return llmtypes.Config{}, errors.Wrap(err, "failed to decode embedded runner settings")
 		}
-		if err := refreshResourceSettings(settings.Defaults, resources); err != nil {
+		defaults, err := refreshResourceSettings(settings.Defaults, resources)
+		if err != nil {
 			return llmtypes.Config{}, err
 		}
+		settings.Defaults = defaults
 		profile := strings.TrimSpace(modelProfile)
 		v := viper.New()
 		if err := v.MergeConfigMap(settings.Defaults); err != nil {
