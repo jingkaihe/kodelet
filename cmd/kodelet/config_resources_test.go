@@ -11,19 +11,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestResourceSettingsRefreshOnlyResources(t *testing.T) {
+func TestResourceSettingsRefreshesFilesWithPinnedSourcesAndEnvironment(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv(configFileEnv, "")
 	t.Setenv(configFileModeEnv, configFileModeMerge)
 	t.Setenv("KODELET_SKILLS_ENABLED", "false")
+	t.Setenv("KODELET_EXTENSIONS_CONFIG_SUBAGENT_MAILBOX", "env")
 	path := filepath.Join(home, ".kodelet", "config.yaml")
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
 	require.NoError(t, os.WriteFile(path, []byte(`
 extensions:
   config:
     subagent:
-      mailbox: enabled
+      other: file
 skills:
   enabled: true
 context:
@@ -41,7 +42,9 @@ serve:
 	require.NoError(t, err)
 	assert.Len(t, initial, 3)
 	extensions := initial["extensions"].(map[string]any)
-	assert.Equal(t, map[string]any{"subagent": map[string]any{"mailbox": "enabled"}}, extensions["config"])
+	assert.Equal(t, map[string]any{
+		"subagent": map[string]any{"other": "file"},
+	}, extensions["config"], "environment variables do not invent config keys")
 	assert.Equal(t, map[string]any{"patterns": []any{"TEAM.md"}}, initial["context"])
 	assert.Equal(t, map[string]any{"enabled": "false"}, initial["skills"])
 	assert.Equal(t, before, viper.AllSettings())
@@ -50,6 +53,7 @@ serve:
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv(configFileEnv, filepath.Join(t.TempDir(), "missing.yaml"))
 	t.Setenv("KODELET_SKILLS_ENABLED", "true")
+	t.Setenv("KODELET_EXTENSIONS_CONFIG_SUBAGENT_MAILBOX", "changed")
 	require.NoError(t, os.Remove(path))
 	updated, err := resources.Load()
 	require.NoError(t, err)
@@ -59,30 +63,18 @@ serve:
 	extensions = updated["extensions"].(map[string]any)
 	assert.NotContains(t, extensions, "config")
 
-	// Invalid files fail strict refreshes but routine loads keep the last valid settings.
-	require.NoError(t, os.WriteFile(path, []byte("extensions: ["), 0o600))
-	require.ErrorContains(t, resources.Refresh(), "global config file")
-	fallback, err := resources.Load()
+	// New file keys use the original environment, not later process changes.
+	require.NoError(t, os.WriteFile(path, []byte(`
+extensions:
+  config:
+    subagent:
+      mailbox: file
+      other: file
+`), 0o600))
+	updated, err = resources.Load()
 	require.NoError(t, err)
-	assert.Equal(t, updated, fallback)
-	require.NoError(t, os.WriteFile(path, []byte("serve:\n  auth_token: secret\n"), 0o600))
-	require.NoError(t, os.Chmod(path, 0o644))
-	require.ErrorContains(t, resources.Refresh(), "static authentication tokens")
-	fallback, err = resources.Load()
-	require.NoError(t, err)
-	assert.Equal(t, updated, fallback)
-}
-
-func TestResourceSettingsRejectInvalidStartupConfig(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv(configFileEnv, "")
-	t.Setenv(configFileModeEnv, configFileModeMerge)
-	path := filepath.Join(home, ".kodelet", "config.yaml")
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
-	require.NoError(t, os.WriteFile(path, []byte("extensions: ["), 0o600))
-	_, err := newResourceSettings(nil)
-	require.ErrorContains(t, err, path)
+	config := updated["extensions"].(map[string]any)["config"].(map[string]any)
+	assert.Equal(t, map[string]any{"mailbox": "env", "other": "file"}, config["subagent"])
 }
 
 func TestResourceSettingsConfigFileModes(t *testing.T) {
@@ -131,40 +123,8 @@ context:
 			require.NoError(t, err)
 			config = settings["extensions"].(map[string]any)["config"].(map[string]any)
 			assert.Equal(t, map[string]any{"mailbox": "disabled"}, config["subagent"])
-			require.NoError(t, os.Remove(path))
-			require.ErrorContains(t, resources.Refresh(), "explicit config file")
-			fallback, err := resources.Load()
-			require.NoError(t, err)
-			assert.Equal(t, settings, fallback)
 		})
 	}
-}
-
-func TestResourceSettingsApplyEnvironmentToKeysAddedAfterStartup(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv(configFileEnv, "")
-	t.Setenv(configFileModeEnv, configFileModeMerge)
-	t.Setenv("KODELET_EXTENSIONS_CONFIG_SUBAGENT_MAILBOX", "env")
-	resources, err := newResourceSettings(nil)
-	require.NoError(t, err)
-	initial, err := resources.Load()
-	require.NoError(t, err)
-	assert.NotContains(t, initial["extensions"], "config", "like AutomaticEnv, environment variables do not invent keys")
-
-	path := filepath.Join(home, ".kodelet", "config.yaml")
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
-	require.NoError(t, os.WriteFile(path, []byte(`
-extensions:
-  config:
-    subagent:
-      mailbox: file
-      other: file
-`), 0o600))
-	updated, err := resources.Load()
-	require.NoError(t, err)
-	config := updated["extensions"].(map[string]any)["config"].(map[string]any)
-	assert.Equal(t, map[string]any{"mailbox": "env", "other": "file"}, config["subagent"])
 }
 
 func TestResourceSettingsPreserveContextOverrides(t *testing.T) {

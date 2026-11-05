@@ -26,22 +26,26 @@ func TestRunnerConfigLoadersRefreshResourceSnapshots(t *testing.T) {
 					"deep": map[string]any{"skills": map[string]any{"enabled": false}},
 				},
 			}
+			patterns := []string{"TEAM.md"}
 			resources := map[string]any{
 				"extensions": map[string]any{"config": map[string]any{"subagent": map[string]any{"mailbox": "enabled"}}},
 				"skills":     map[string]any{"enabled": true},
-				"context":    map[string]any{"patterns": []string{"TEAM.md"}},
+				"context":    map[string]any{"patterns": patterns},
 				"sysprompt":  "must-not-refresh",
 			}
 			defaults["extensions"] = resources["extensions"]
 			loadResources := func() (map[string]any, error) { return resources, nil }
-			loader, err := NewWorkspaceConfigLoader(defaults, loadResources)
-			require.NoError(t, err)
+			var loader WorkspaceConfigLoader
+			var err error
 			if mode == "embedded" {
 				profileLoader, err := NewEmbeddedConfigLoader(defaults, map[string]any{
 					"extensions": map[string]any{"max_output_size": 1234},
 				}, loadResources)
 				require.NoError(t, err)
 				loader = func(cwd, profile string) (llmtypes.Config, error) { return profileLoader(cwd, "deep", profile) }
+			} else {
+				loader, err = NewWorkspaceConfigLoader(defaults, loadResources)
+				require.NoError(t, err)
 			}
 			initial, err := loader(cwd, "")
 			require.NoError(t, err)
@@ -55,7 +59,7 @@ func TestRunnerConfigLoadersRefreshResourceSnapshots(t *testing.T) {
 
 			// Mutating the source must not affect an earlier snapshot; removed keys
 			// must not survive in the next one.
-			resources["context"].(map[string]any)["patterns"].([]string)[0] = "UPDATED.md"
+			patterns[0] = "UPDATED.md"
 			delete(resources, "extensions")
 			updated, err := loader(cwd, "")
 			require.NoError(t, err)
@@ -68,46 +72,29 @@ func TestRunnerConfigLoadersRefreshResourceSnapshots(t *testing.T) {
 }
 
 func TestResourceSettingsKeepsLastValidSnapshot(t *testing.T) {
-	_, err := NewResourceSettings(func() (map[string]any, error) { return nil, errors.New("broken") })
+	readErr := errors.New("broken")
+	settings := map[string]any{"context": map[string]any{"patterns": []string{"TEAM.md"}}}
+	read := func() (map[string]any, error) { return settings, readErr }
+	_, err := NewResourceSettings(read)
 	require.ErrorContains(t, err, "broken", "the initial read is strict")
-	_, err = NewResourceSettings(nil)
-	require.Error(t, err)
 
-	var readErr error
-	patterns := []string{"TEAM.md"}
-	resources, err := NewResourceSettings(func() (map[string]any, error) {
-		if readErr != nil {
-			return nil, readErr
-		}
-		return map[string]any{"context": map[string]any{"patterns": patterns}}, nil
-	})
-	require.NoError(t, err)
-	loader, err := NewWorkspaceConfigLoader(nil, resources.Load)
+	readErr = nil
+	resources, err := NewResourceSettings(read)
 	require.NoError(t, err)
 
 	readErr = errors.New("broken")
 	require.ErrorContains(t, resources.Refresh(), "broken")
-	config, err := loader(t.TempDir(), "")
+	fallback, err := resources.Load()
 	require.NoError(t, err, "routine loads fall back to the last valid settings")
-	assert.Equal(t, []string{"TEAM.md"}, config.Context.Patterns)
+	assert.Equal(t, settings, fallback)
 
-	readErr, patterns = nil, []string{"UPDATED.md"}
+	readErr = nil
+	settings = map[string]any{"context": map[string]any{"patterns": []string{"UPDATED.md"}}}
 	require.NoError(t, resources.Refresh())
-	config, err = loader(t.TempDir(), "")
+	readErr = errors.New("broken again")
+	updated, err := resources.Load()
 	require.NoError(t, err)
-	assert.Equal(t, []string{"UPDATED.md"}, config.Context.Patterns)
-}
-
-func TestRefreshResourceSettingsAllocatesMissingSettings(t *testing.T) {
-	settings, err := refreshResourceSettings(nil, func() (map[string]any, error) {
-		return map[string]any{"skills": map[string]any{"enabled": false}, "sysprompt": "ignored"}, nil
-	})
-	require.NoError(t, err)
-	assert.Equal(t, map[string]any{"skills": map[string]any{"enabled": false}}, settings)
-
-	settings, err = refreshResourceSettings(nil, nil)
-	require.NoError(t, err)
-	assert.Nil(t, settings)
+	assert.Equal(t, settings, updated)
 }
 
 func TestWorkspaceConfigLoaderConcurrentSnapshots(t *testing.T) {

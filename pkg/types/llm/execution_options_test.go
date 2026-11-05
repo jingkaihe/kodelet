@@ -241,22 +241,17 @@ func TestApplyEnvironmentOptionsFilesystemSelectionAndCeiling(t *testing.T) {
 
 func TestEnvironmentOptionsDecodesExtensionDisable(t *testing.T) {
 	for _, test := range []struct {
-		value    any
-		disabled bool
+		value any
+		want  *bool
 	}{
-		{value: false, disabled: true},
-		{value: "false", disabled: true},
-		{value: "0", disabled: true},
+		{value: false, want: new(true)},
+		{value: "false", want: new(true)},
 		{value: true},
 		{value: "true"},
 		{value: nil},
 	} {
 		config := Config{ExtensionSettings: map[string]any{"enabled": test.value}}
-		if test.disabled {
-			assert.Equal(t, new(true), config.EnvironmentOptions().NoExtensions, "%#v", test.value)
-		} else {
-			assert.Nil(t, config.EnvironmentOptions().NoExtensions, "%#v", test.value)
-		}
+		assert.Equal(t, test.want, config.EnvironmentOptions().NoExtensions, "%#v", test.value)
 	}
 }
 

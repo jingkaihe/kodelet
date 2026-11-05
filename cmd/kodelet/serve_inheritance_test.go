@@ -21,12 +21,9 @@ func TestServeInstallsPinnedEmbeddedProfileLoader(t *testing.T) {
 		require.NoError(t, viper.MergeConfigMap(previous))
 	})
 	workspace := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv(configFileEnv, "")
-	t.Setenv(configFileModeEnv, configFileModeMerge)
-	require.NoError(t, os.MkdirAll(filepath.Join(home, ".kodelet"), 0o700))
-	configPath := filepath.Join(home, ".kodelet", "config.yaml")
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv(configFileEnv, configPath)
+	t.Setenv(configFileModeEnv, configFileModeIsolate)
 	require.NoError(t, os.WriteFile(configPath, []byte("context:\n  patterns: [TEAM.md]\n"), 0o600))
 	t.Setenv("KODELET_BROWSER_EXECUTABLE", "/host/chrome")
 	t.Setenv("KODELET_BROWSER_DEVTOOLS_DIR", "/host/devtools")
@@ -67,11 +64,11 @@ func TestServeInstallsPinnedEmbeddedProfileLoader(t *testing.T) {
 	assert.Nil(t, server.EmbeddedRunner.ServiceOptions.ConfigLoader)
 	assert.Nil(t, server.EmbeddedRunner.ServiceOptions.WorkspaceConfigLoader)
 	require.NotNil(t, server.EmbeddedRunner.ServiceOptions.RefreshResourceSettings)
-	require.NoError(t, server.EmbeddedRunner.ServiceOptions.RefreshResourceSettings())
 
 	// Shared resources refresh, but model profiles and explicit runner settings
 	// remain pinned. Loading must not mutate the daemon's Viper snapshot.
 	require.NoError(t, os.WriteFile(configPath, []byte("context:\n  patterns: [UPDATED.md]\n"), 0o600))
+	require.NoError(t, server.EmbeddedRunner.ServiceOptions.RefreshResourceSettings())
 	viper.Set("profile", "flair")
 	viper.Set("profiles.deep.tool_mode", "full")
 	viper.Set("serve.runner_settings.bash.timeout", "1s")
@@ -92,12 +89,12 @@ func TestServeInstallsPinnedEmbeddedProfileLoader(t *testing.T) {
 		assert.Equal(t, 17*time.Second, config.BashTimeout())
 		require.NotNil(t, config.Context)
 		assert.Equal(t, []string{"UPDATED.md"}, config.Context.Patterns)
-		assert.Equal(t, []string{"TEAM.md"}, viper.GetStringSlice("context.patterns"))
 		assert.Equal(t, []string{"bash"}, config.AllowedTools)
 		assert.Empty(t, config.Model)
 		assert.Empty(t, config.Provider)
 		assert.Nil(t, config.OpenAI)
 	}
+	assert.Equal(t, []string{"TEAM.md"}, viper.GetStringSlice("context.patterns"))
 }
 
 func TestServePinsBrowserConfigAtStartup(t *testing.T) {
