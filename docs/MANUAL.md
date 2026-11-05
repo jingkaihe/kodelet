@@ -215,7 +215,9 @@ Use `/about` to show the TUI's version, build commit, and build date alongside t
 
 #### Reloading extensions
 
-Use `/reload` to reload runner-owned extensions and refresh their tools and commands without restarting Kodelet or starting a new conversation. It is supported in runner-backed CLI, TUI, Web UI, and ACP sessions. Agents can use the built-in `reload_resources` tool to refresh the current conversation's resources between tool batches and continue the same run; retained background workers and SDK-attached extensions prevent reload. If an extension fails to start, `/reload` reports the error, while `reload_resources` continues the run without that extension and reports the error to the agent.
+Use `/reload` to reload runner-owned extensions and refresh their tools and commands without restarting Kodelet or starting a new conversation. It is supported in runner-backed CLI, TUI, Web UI, and ACP sessions. Agents can use the built-in `reload_resources` tool to refresh the current conversation's resources between tool batches and continue the same run; retained background workers and SDK-attached extensions prevent reload. Extensions restart with a fresh initialization handshake. If an extension fails to start, `/reload` reports the error, while `reload_resources` continues the run without that extension and reports the error to the agent.
+
+Embedded and standalone runners reread top-level `extensions`, `skills`, and `context` from runner-machine global/explicit config when opening or reloading an environment, preserving merge/isolated semantics. Workspace YAML is also reread. Other trusted settings, including profiles, explicit `serve.runner_settings`, model and server/auth settings, require restarting their owning `serve` or runner process. Reload affects only this execution, preserves pinned permission ceilings, and refuses invalid configuration before replacing old resources.
 
 #### Custom TUI themes
 
@@ -900,7 +902,7 @@ Configuration files are loaded in this order:
 2. **Global Config**: `config.yaml` in `$HOME/.kodelet/` directory
 3. **Explicit Config**: `KODELET_CONFIG_FILE`, when supplied
 
-`KODELET_CONFIG_FILE_MODE=isolated` skips the global file, but runners still apply repository settings. Restart the daemon or runner after changing its defaults.
+`KODELET_CONFIG_FILE_MODE=isolated` skips the global file, but runners still apply repository settings. Trusted top-level `extensions`, `skills`, and `context` are reread as described under [Reloading extensions](#reloading-extensions); other defaults require restarting the responsible daemon or runner.
 
 ```yaml
 # Global config (~/.kodelet/config.yaml)
@@ -1895,7 +1897,7 @@ extensions:
       units: celsius
 ```
 
-`extensions.config.<discovered-id>` holds an extension's YAML settings; plugins use the full `org@repo/name` ID. Kodelet sends this mapping as `extension.config` in the JSON-RPC initialization request (default `{}`). Strings, booleans, numbers, lists and nested mappings are supported; keys follow Viper's case-insensitive, lowercase convention. Extensions validate their own settings. Resource reload rereads the workspace's `kodelet-config.yaml`; global config changes require a runner restart.
+`extensions.config.<discovered-id>` holds an extension's YAML settings; plugins use the full `org@repo/name` ID. Kodelet sends this mapping as `extension.config` in the JSON-RPC initialization request (default `{}`). Strings, booleans, numbers, lists and nested mappings are supported; keys follow Viper's case-insensitive, lowercase convention. Extensions validate their own settings. Resource reload rereads workspace YAML and trusted top-level resource sections; see [Reloading extensions](#reloading-extensions) for boundaries.
 
 Extension subprocesses inherit Kodelet's environment. Start Kodelet with any environment variables required by extension tools.
 

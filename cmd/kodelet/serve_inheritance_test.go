@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -19,6 +21,13 @@ func TestServeInstallsPinnedEmbeddedProfileLoader(t *testing.T) {
 		require.NoError(t, viper.MergeConfigMap(previous))
 	})
 	workspace := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv(configFileEnv, "")
+	t.Setenv(configFileModeEnv, configFileModeMerge)
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".kodelet"), 0o700))
+	configPath := filepath.Join(home, ".kodelet", "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("context:\n  patterns: [TEAM.md]\n"), 0o600))
 	t.Setenv("KODELET_BROWSER_EXECUTABLE", "/host/chrome")
 	t.Setenv("KODELET_BROWSER_DEVTOOLS_DIR", "/host/devtools")
 	t.Setenv("KODELET_BROWSER_IDLE_TIMEOUT", "7m")
@@ -58,7 +67,9 @@ func TestServeInstallsPinnedEmbeddedProfileLoader(t *testing.T) {
 	assert.Nil(t, server.EmbeddedRunner.ServiceOptions.ConfigLoader)
 	assert.Nil(t, server.EmbeddedRunner.ServiceOptions.WorkspaceConfigLoader)
 
-	// Later global changes cannot silently reconfigure the embedded runner.
+	// Shared resources refresh, but model profiles and explicit runner settings
+	// remain pinned. Loading must not mutate the daemon's Viper snapshot.
+	require.NoError(t, os.WriteFile(configPath, []byte("context:\n  patterns: [UPDATED.md]\n"), 0o600))
 	viper.Set("profile", "flair")
 	viper.Set("profiles.deep.tool_mode", "full")
 	viper.Set("serve.runner_settings.bash.timeout", "1s")
@@ -78,7 +89,8 @@ func TestServeInstallsPinnedEmbeddedProfileLoader(t *testing.T) {
 		assert.Equal(t, test.search, config.EnableFSSearchTools)
 		assert.Equal(t, 17*time.Second, config.BashTimeout())
 		require.NotNil(t, config.Context)
-		assert.Equal(t, []string{"TEAM.md"}, config.Context.Patterns)
+		assert.Equal(t, []string{"UPDATED.md"}, config.Context.Patterns)
+		assert.Equal(t, []string{"TEAM.md"}, viper.GetStringSlice("context.patterns"))
 		assert.Equal(t, []string{"bash"}, config.AllowedTools)
 		assert.Empty(t, config.Model)
 		assert.Empty(t, config.Provider)

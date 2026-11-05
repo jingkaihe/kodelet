@@ -21,6 +21,7 @@ import (
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -572,6 +573,122 @@ extensions:
 	}
 	require.NoError(t, service.closeRun(t.Context(), "run"))
 	assertBackgroundProcessStopped(t, previousPID)
+}
+
+func TestReloadRunRefreshesGlobalResourceSettings(t *testing.T) {
+	for _, mode := range []string{"standalone", "embedded"} {
+		t.Run(mode, func(t *testing.T) {
+			service, workspace := newBackgroundTestService(t, "config")
+			// The trusted config is outside the workspace and each read uses private Viper state.
+			configPath := filepath.Join(t.TempDir(), "config.yaml")
+			require.NoError(t, os.WriteFile(configPath, []byte(`
+skills:
+  enabled: false
+extensions:
+  discover_path: false
+  config:
+    lifetime:
+      tool: before
+      obsolete: true
+`), 0o600))
+			loadResources := func() (map[string]any, error) {
+				v := viper.New()
+				v.SetConfigFile(configPath)
+				if err := v.ReadInConfig(); err != nil {
+					return nil, err
+				}
+				return v.AllSettings(), nil
+			}
+			defaults, err := loadResources()
+			require.NoError(t, err)
+			if mode == "embedded" {
+				service.profileConfigLoader, err = NewEmbeddedConfigLoader(defaults, nil, loadResources)
+			} else {
+				service.workspaceConfigLoader, err = NewWorkspaceConfigLoader(defaults, loadResources)
+			}
+			require.NoError(t, err)
+
+			before := make(map[string]struct {
+				manifest runnerpayload.Manifest
+				runtime  *extensions.Runtime
+				state    backgroundHelperState
+			})
+			for _, id := range []string{"first", "second"} {
+				manifest, err := service.openRun(t.Context(), protocol.RunOpenParams{
+					RunID: id, ConversationID: id, EnvironmentReload: true,
+				})
+				require.NoError(t, err)
+				assert.Equal(t, int64(1), manifest.EnvironmentRevision)
+				assert.Contains(t, manifestToolNames(manifest), "before")
+				state := backgroundState(t, workspace, id)
+				assert.Equal(t, map[string]any{"tool": "before", "obsolete": true}, state.Config)
+				snapshot := before[id]
+				snapshot.manifest = manifest
+				snapshot.runtime = service.runs[id].runtime
+				snapshot.state = state
+				before[id] = snapshot
+			}
+			assert.NotEqual(t, before["first"].state.PID, before["second"].state.PID)
+			assertUnchanged := func(id string) {
+				t.Helper()
+				run, snapshot := service.runs[id], before[id]
+				assert.Equal(t, snapshot.manifest, run.manifest)
+				assert.Equal(t, defaults["extensions"], run.config.ExtensionSettings)
+				assert.Same(t, snapshot.runtime, run.runtime)
+				assert.Equal(t, snapshot.state, backgroundState(t, workspace, id))
+				require.NoError(t, syscall.Kill(snapshot.state.PID, 0), "the original extension must remain alive")
+				result, err := service.executeTool(t.Context(), runnerpayload.ToolExecuteParams{
+					RunID: id, EnvironmentRevision: 1, ToolCallID: "state", Name: "before",
+					Input: json.RawMessage(`{"operation":"state"}`),
+				})
+				require.NoError(t, err)
+				assert.Empty(t, result.Result.Error)
+				assert.Contains(t, result.Result.AssistantFacing, "handled state for "+id)
+			}
+
+			// A parse failure must refuse before tearing down the current environment.
+			require.NoError(t, os.WriteFile(configPath, []byte("extensions: [\n"), 0o600))
+			result, err := service.reloadRun(t.Context(), protocol.RunReloadParams{
+				RunID: "first", ExpectedEnvironmentRevision: 1,
+			})
+			require.NoError(t, err)
+			require.Contains(t, result.Refusal, "failed to refresh runner resource settings")
+			assert.Empty(t, result.Warning)
+			assertUnchanged("first")
+			assertUnchanged("second")
+
+			require.NoError(t, os.WriteFile(configPath, []byte(`
+skills:
+  enabled: false
+extensions:
+  discover_path: false
+  config:
+    lifetime:
+      tool: after
+`), 0o600))
+			for _, id := range []string{"first", "second"} {
+				result, err := service.reloadRun(t.Context(), protocol.RunReloadParams{
+					RunID: id, ExpectedEnvironmentRevision: 1,
+				})
+				require.NoError(t, err)
+				require.Empty(t, result.Refusal, "a fixed config must allow retry at the unchanged revision")
+				assert.Empty(t, result.Warning)
+				assert.Equal(t, int64(2), result.Manifest.EnvironmentRevision)
+				assert.Contains(t, manifestToolNames(result.Manifest), "after")
+				assert.NotContains(t, manifestToolNames(result.Manifest), "before")
+				state := backgroundState(t, workspace, id)
+				assert.Equal(t, map[string]any{"tool": "after"}, state.Config, "deleted global settings must not survive reload")
+				assert.NotEqual(t, before[id].state.PID, state.PID)
+				assert.NotSame(t, before[id].runtime, service.runs[id].runtime)
+				assertBackgroundProcessStopped(t, before[id].state.PID)
+				if id == "first" {
+					assertUnchanged("second")
+				}
+				require.NoError(t, service.closeRun(t.Context(), id))
+				assertBackgroundProcessStopped(t, state.PID)
+			}
+		})
+	}
 }
 
 func TestReloadRunContinuesWithoutExtensionsThatFailToStart(t *testing.T) {

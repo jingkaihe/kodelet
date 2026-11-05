@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
@@ -18,7 +19,8 @@ type ProfileConfigLoader func(cwd, modelProfile, environmentProfile string) (llm
 // NewEmbeddedConfigLoader pins the environment-only projection of the daemon's
 // defaults and profiles. Explicit runner settings override inherited preferences;
 // the ordinary workspace loader then applies repository policy and runner profiles.
-func NewEmbeddedConfigLoader(defaults, overrides map[string]any) (ProfileConfigLoader, error) {
+// Optional resource loaders refresh shared resources without changing these layers.
+func NewEmbeddedConfigLoader(defaults, overrides map[string]any, resources ...ResourceSettingsLoader) (ProfileConfigLoader, error) {
 	type settingsSnapshot struct {
 		Defaults  map[string]any
 		Overrides map[string]any
@@ -47,6 +49,9 @@ func NewEmbeddedConfigLoader(defaults, overrides map[string]any) (ProfileConfigL
 		if err := json.Unmarshal(data, &settings); err != nil {
 			return llmtypes.Config{}, errors.Wrap(err, "failed to decode embedded runner settings")
 		}
+		if err := refreshResourceSettings(settings.Defaults, resources); err != nil {
+			return llmtypes.Config{}, err
+		}
 		profile := strings.TrimSpace(modelProfile)
 		v := viper.New()
 		if err := v.MergeConfigMap(settings.Defaults); err != nil {
@@ -68,6 +73,15 @@ func NewEmbeddedConfigLoader(defaults, overrides map[string]any) (ProfileConfigL
 		if err != nil {
 			return llmtypes.Config{}, err
 		}
+		inheritedExtensions, err := extensions.LoadConfigFromSettings(inherited.ExtensionSettings)
+		if err != nil {
+			return llmtypes.Config{}, errors.Wrap(err, "failed to load inherited extension policy")
+		}
+		inheritedOptions := inherited.EnvironmentOptions()
+		// Environment values may be strings; enforce the typed disable ceiling.
+		if !inheritedExtensions.Enabled {
+			inheritedOptions.NoExtensions = new(true)
+		}
 		if err := v.MergeConfigMap(settings.Overrides); err != nil {
 			return llmtypes.Config{}, errors.Wrap(err, "failed to apply embedded runner overrides")
 		}
@@ -83,6 +97,6 @@ func NewEmbeddedConfigLoader(defaults, overrides map[string]any) (ProfileConfigL
 		}
 		// Intersect the effective runner policy with inherited daemon ceilings,
 		// including discovery where no model turn supplies request options.
-		return llmtypes.ApplyEnvironmentOptions(config, inherited.EnvironmentOptions())
+		return llmtypes.ApplyEnvironmentOptions(config, inheritedOptions)
 	}, nil
 }

@@ -215,7 +215,11 @@ func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
 	if err := os.Setenv(controlPlaneServerEnv, strings.TrimSpace(config.Server)); err != nil {
 		return errors.Wrap(err, "failed to pass the server address to runner subprocesses")
 	}
-	loader, err := runnerclient.NewWorkspaceConfigLoader(viper.AllSettings())
+	resources, err := newResourceSettingsLoader(rootCmd.PersistentFlags())
+	if err != nil {
+		return err
+	}
+	loader, err := runnerclient.NewWorkspaceConfigLoader(viper.AllSettings(), resources)
 	if err != nil {
 		return err
 	}

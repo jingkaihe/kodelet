@@ -10,10 +10,121 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRunnerConfigLoadersRefreshResourceSnapshots(t *testing.T) {
+	for _, embedded := range []bool{false, true} {
+		name := "standalone"
+		if embedded {
+			name = "embedded"
+		}
+		t.Run(name, func(t *testing.T) {
+			cwd := t.TempDir()
+			defaults := map[string]any{
+				"allowed_tools": []string{"file_read"},
+				"sysprompt":     "pinned",
+				"extensions":    map[string]any{"config": map[string]any{"stale": map[string]any{"old": true}}},
+				"environment_profiles": map[string]any{
+					"review": map[string]any{"context": map[string]any{"patterns": []string{"REVIEW.md"}}},
+				},
+				"profiles": map[string]any{
+					"deep": map[string]any{"skills": map[string]any{"enabled": false}},
+				},
+			}
+			resources := map[string]any{
+				"extensions":           map[string]any{"config": map[string]any{"subagent": map[string]any{"mailbox": "enabled"}}},
+				"skills":               map[string]any{"enabled": true},
+				"context":              map[string]any{"patterns": []string{"TEAM.md"}},
+				"sysprompt":            "must-not-refresh",
+				"allowed_tools":        []string{"bash"},
+				"environment_profiles": map[string]any{"review": map[string]any{"sysprompt": "must-not-refresh"}},
+				"model":                "must-not-load",
+				"openai":               map[string]any{"api_key": "must-not-load"},
+			}
+			var loadErr error
+			loadResources := func() (map[string]any, error) { return resources, loadErr }
+			loader, err := NewWorkspaceConfigLoader(defaults, loadResources)
+			require.NoError(t, err)
+			if embedded {
+				profileLoader, err := NewEmbeddedConfigLoader(defaults, map[string]any{
+					"extensions": map[string]any{"max_output_size": 1234},
+				}, loadResources)
+				require.NoError(t, err)
+				loader = func(cwd, profile string) (llmtypes.Config, error) { return profileLoader(cwd, "deep", profile) }
+			}
+			initial, err := loader(cwd, "")
+			require.NoError(t, err)
+			assert.Equal(t, "pinned", initial.Sysprompt)
+			assert.Equal(t, []string{"file_read"}, initial.AllowedTools)
+			assert.Empty(t, initial.Model)
+			assert.Nil(t, initial.OpenAI)
+			assert.Equal(t, []string{"TEAM.md"}, initial.Context.Patterns)
+			assert.Equal(t, !embedded, initial.Skills.Enabled)
+			assert.NotContains(t, initial.ExtensionSettings["config"], "stale")
+			profiled, err := loader(cwd, "review")
+			require.NoError(t, err)
+			assert.Equal(t, []string{"REVIEW.md"}, profiled.Context.Patterns)
+			assert.Equal(t, "pinned", profiled.Sysprompt)
+			if embedded {
+				assert.EqualValues(t, 1234, initial.ExtensionSettings["max_output_size"])
+			}
+
+			// Shared callback maps and pinned defaults stay immutable under concurrent
+			// loads, even when an individual caller mutates its returned snapshot.
+			var wg sync.WaitGroup
+			for range 12 {
+				wg.Go(func() {
+					config, err := loader(cwd, "review")
+					if assert.NoError(t, err) {
+						config.Context.Patterns[0] = "mutated"
+						config.ExtensionSettings["config"].(map[string]any)["changed"] = true
+					}
+				})
+			}
+			wg.Wait()
+			assert.Equal(t, []string{"TEAM.md"}, resources["context"].(map[string]any)["patterns"])
+			assert.NotContains(t, resources["extensions"].(map[string]any)["config"], "changed")
+
+			resources = map[string]any{"context": map[string]any{"patterns": []string{"UPDATED.md"}}}
+			updated, err := loader(cwd, "")
+			require.NoError(t, err)
+			assert.Equal(t, []string{"UPDATED.md"}, updated.Context.Patterns)
+			assert.NotContains(t, updated.ExtensionSettings, "config")
+			assert.Equal(t, []string{"TEAM.md"}, initial.Context.Patterns)
+			assert.Contains(t, initial.ExtensionSettings, "config")
+
+			resources = map[string]any{
+				"skills":     map[string]any{"enabled": false},
+				"extensions": map[string]any{"allow": []string{"inspect"}},
+			}
+			require.NoError(t, os.WriteFile(filepath.Join(cwd, "kodelet-config.yaml"), []byte("extensions:\n  allow: [other]\n"), 0o600))
+			_, err = loader(cwd, "")
+			require.ErrorContains(t, err, "cannot widen runner restrictions")
+			resources = map[string]any{"extensions": map[string]any{"enabled": "false"}}
+			require.NoError(t, os.WriteFile(filepath.Join(cwd, "kodelet-config.yaml"), []byte("extensions:\n  enabled: true\n"), 0o600))
+			_, err = loader(cwd, "")
+			require.ErrorContains(t, err, "cannot enable extensions")
+			if embedded {
+				require.NoError(t, os.Remove(filepath.Join(cwd, "kodelet-config.yaml")))
+				profileLoader, err := NewEmbeddedConfigLoader(defaults, map[string]any{
+					"extensions": map[string]any{"enabled": true},
+				}, loadResources)
+				require.NoError(t, err)
+				config, err := profileLoader(cwd, "", "")
+				require.NoError(t, err)
+				assert.Equal(t, new(true), config.ExecutionOptions.NoExtensions)
+				assert.Equal(t, false, config.ExtensionSettings["enabled"])
+			}
+			loadErr = errors.New("malformed trusted config")
+			_, err = loader(cwd, "")
+			require.ErrorContains(t, err, "malformed trusted config")
+		})
+	}
+}
 
 func TestWorkspaceConfigLoaderConcurrentSnapshots(t *testing.T) {
 	processCWD, err := os.Getwd()

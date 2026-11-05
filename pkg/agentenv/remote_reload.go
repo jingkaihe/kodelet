@@ -28,11 +28,19 @@ type ReloadOutcome struct {
 }
 
 // reloadResourcesDescription tells the model when a reload helps, not how it works.
-const reloadResourcesDescription = `Reload this workspace's Kodelet resources so the rest of this run uses your changes: extensions and their tools, skills, recipes, AGENTS.md and other context files, and kodelet-config.yaml settings. Global Kodelet configuration and model settings are not reloaded.
+const reloadResourcesDescription = `Refresh this run's Kodelet resources after the current tool batch.
 
-Call it once after editing these resources, rebuilding compiled extensions first. Ordinary file changes don't need it.
+What it reloads: Extensions/tools, skills, recipes, context files (including AGENTS.md), kodelet-config.yaml, and top-level extensions, skills and context settings from the runner's global/explicit config.
+What it does not reload: Model settings, profile definitions, serve.runner_settings, or other process settings (including server/auth). Restart their owning process to change them.
 
-The reload runs after the current tool batch; your next turn has the refreshed tools and starts with a message reporting the outcome. If refused, the old resources stay. Extensions that fail to start are listed; fix them and reload again.`
+Before reloading:
+- Rebuild any compiled extensions you changed.
+- Ordinary project file edits do not require a reload.
+
+After reloading:
+- The next turn reports the outcome.
+- If reload is refused, existing resources stay active.
+- If an extension fails to start, fix the reported error and reload again.`
 
 func reloadResourcesDefinition() ToolDefinition {
 	wire := runnerpayload.ToolDefinition{

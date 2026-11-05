@@ -99,7 +99,9 @@ exec kodelet-extension-node ./dist/index.js
 
 During local development, a wrapper can run `tsx` against `src/index.ts`, as shown in `examples/extensions/workspace/kodelet-extension-workspace`.
 
-After changing an installed extension, users can use `/reload` in a runner-backed conversation, or agents can call `reload_resources` to refresh resources between tool batches and continue the same run. Rebuild compiled output first; reload does not compile source or watch files. Retained background workers and SDK-attached extensions prevent reload. If the extension fails to start, `/reload` reports the error, while `reload_resources` continues the run without it and reports the error to the agent, which can fix it and reload again.
+After changing an installed extension, users can use `/reload` in a runner-backed conversation, or agents can call `reload_resources` to refresh resources between tool batches and continue the same run. Rebuild compiled output first; reload does not compile source or watch files. Extensions restart as fresh processes with a new initialization handshake. Retained background workers and SDK-attached extensions prevent reload. Configuration parse or validation failures refuse reload before old resources are torn down. If the extension fails to start, `/reload` reports the error, while `reload_resources` continues the run without it and reports the error to the agent, which can fix it and reload again.
+
+Embedded and standalone runners also reread trusted top-level `extensions`, `skills`, and `context` settings; other trusted settings remain pinned. See [reload boundaries](../../../docs/MANUAL.md#reloading-extensions).
 
 ### Tools, commands, events, and UI helpers
 
@@ -232,7 +234,7 @@ Config semantics:
 - `max_output_size`: maximum assistant-facing extension tool output.
 - `allow` / `deny`: extension allow/deny lists; deny wins when both match.
 - `tools`: per-tool enablement.
-- `config`: YAML settings keyed by discovered extension ID (full `org@repo/name` for plugins). Each extension's mapping is sent as `extension.config` in the JSON-RPC initialization request (default `{}`). Strings, booleans, numbers, lists and nested mappings are supported; keys follow Viper's case-insensitive, lowercase convention. Extensions validate their own settings. Resource reload rereads workspace YAML; global config changes require a runner restart.
+- `config`: YAML settings keyed by discovered extension ID (full `org@repo/name` for plugins). Each extension's mapping is sent as `extension.config` in the JSON-RPC initialization request (default `{}`). Strings, booleans, numbers, lists and nested mappings are supported; keys follow Viper's case-insensitive, lowercase convention. Extensions validate their own settings. Resource reload rereads workspace YAML and trusted top-level resource sections, not pinned profile or explicit runner settings.
 
 Disable for one run:
 

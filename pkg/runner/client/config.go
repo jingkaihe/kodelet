@@ -14,10 +14,17 @@ import (
 	"github.com/spf13/viper"
 )
 
+// ResourceSettingsLoader supplies trusted top-level extensions, skills and
+// context settings. It is called only when opening or explicitly reloading an
+// environment; other settings and profile definitions remain pinned.
+type ResourceSettingsLoader func() (map[string]any, error)
+
 // NewWorkspaceConfigLoader pins runner defaults and resolves each execution's
 // environment settings from its own directory. It never loads model credentials,
 // daemon endpoints, or authentication policy from repository configuration.
-func NewWorkspaceConfigLoader(defaults map[string]any) (WorkspaceConfigLoader, error) {
+// Optional resource loaders replace the three resource sections before applying
+// workspace settings and the pinned environment profile.
+func NewWorkspaceConfigLoader(defaults map[string]any, resources ...ResourceSettingsLoader) (WorkspaceConfigLoader, error) {
 	snapshot, err := json.Marshal(environmentSettings(defaults))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to snapshot runner settings")
@@ -26,6 +33,9 @@ func NewWorkspaceConfigLoader(defaults map[string]any) (WorkspaceConfigLoader, e
 		var settings map[string]any
 		if err := json.Unmarshal(snapshot, &settings); err != nil {
 			return llmtypes.Config{}, errors.Wrap(err, "failed to decode runner settings snapshot")
+		}
+		if err := refreshResourceSettings(settings, resources); err != nil {
+			return llmtypes.Config{}, err
 		}
 		host, err := llm.GetConfigFromSettingsWithEnvironmentProfile(settings, profile)
 		if err != nil {
@@ -57,6 +67,32 @@ func NewWorkspaceConfigLoader(defaults map[string]any) (WorkspaceConfigLoader, e
 		config.WorkingDirectory = cwd
 		return config, nil
 	}, nil
+}
+
+func refreshResourceSettings(settings map[string]any, loaders []ResourceSettingsLoader) error {
+	for _, load := range loaders {
+		values, err := load()
+		if err != nil {
+			return errors.Wrap(err, "failed to refresh runner resource settings")
+		}
+		// Replace rather than merge so deleted settings do not survive a reload.
+		// Clone the projection: Viper merges must not mutate a loader's maps.
+		projected := make(map[string]any)
+		for _, key := range []string{"extensions", "skills", "context"} {
+			delete(settings, key)
+			if value, ok := values[key]; ok {
+				projected[key] = value
+			}
+		}
+		data, err := json.Marshal(projected)
+		if err != nil {
+			return errors.Wrap(err, "failed to snapshot runner resource settings")
+		}
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return errors.Wrap(err, "failed to decode runner resource settings")
+		}
+	}
+	return nil
 }
 
 func environmentSettings(settings map[string]any) map[string]any {
@@ -99,11 +135,6 @@ func validateWorkspacePolicy(host, config llmtypes.Config) error {
 	if strings.TrimSpace(host.AllowedDomainsFile) != "" && config.AllowedDomainsFile != host.AllowedDomainsFile {
 		return errors.New("workspace allowed_domains_file cannot replace runner policy")
 	}
-	if enabled, ok := host.ExtensionSettings["enabled"].(bool); ok && !enabled {
-		if enabled, ok := config.ExtensionSettings["enabled"].(bool); !ok || enabled {
-			return errors.New("workspace cannot enable extensions disabled by runner policy")
-		}
-	}
 	if host.Skills != nil && !host.Skills.Enabled && (config.Skills == nil || config.Skills.Enabled) {
 		return errors.New("workspace cannot enable skills disabled by runner policy")
 	}
@@ -123,6 +154,9 @@ func validateWorkspacePolicy(host, config llmtypes.Config) error {
 	workspaceExtensions, err := extensions.LoadConfigFromSettings(config.ExtensionSettings)
 	if err != nil {
 		return errors.Wrap(err, "failed to load workspace extension policy")
+	}
+	if !hostExtensions.Enabled && workspaceExtensions.Enabled {
+		return errors.New("workspace cannot enable extensions disabled by runner policy")
 	}
 	if workspaceExtensions.Enabled {
 		if err := validateWorkspaceAllowlist("extensions.allow", hostExtensions.Allow, workspaceExtensions.Allow); err != nil {
