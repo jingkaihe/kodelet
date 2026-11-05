@@ -87,7 +87,7 @@ func TestWorkspaceConfigLoaderConcurrentSnapshots(t *testing.T) {
 		},
 		"model": "not-a-runner-model",
 	}
-	loader, err := NewWorkspaceConfigLoader(defaults)
+	loader, err := NewWorkspaceConfigLoader(defaults, nil)
 	require.NoError(t, err)
 	// Neither later caller mutations nor returned configurations may change the snapshot.
 	defaults["sysprompt_args"].(map[string]any)["default_only"] = "changed"
@@ -166,9 +166,9 @@ extensions:
         extra: workspace
       values: [true, 2.5, CaseSensitive]
 `), 0o600))
-	standalone, err := NewWorkspaceConfigLoader(defaults.AllSettings())
+	standalone, err := NewWorkspaceConfigLoader(defaults.AllSettings(), nil)
 	require.NoError(t, err)
-	embedded, err := NewEmbeddedConfigLoader(defaults.AllSettings(), nil)
+	embedded, err := NewEmbeddedConfigLoader(defaults.AllSettings(), nil, nil)
 	require.NoError(t, err)
 	for _, profile := range []string{"", "review"} {
 		for _, loader := range []WorkspaceConfigLoader{
@@ -201,7 +201,7 @@ func TestWorkspaceConfigLoaderReloadOnlyAffectsLaterSnapshots(t *testing.T) {
 	cwd := t.TempDir()
 	path := filepath.Join(cwd, "kodelet-config.yaml")
 	require.NoError(t, os.WriteFile(path, []byte("sysprompt_args:\n  version: before\n"), 0o600))
-	loader, err := NewWorkspaceConfigLoader(nil)
+	loader, err := NewWorkspaceConfigLoader(nil, nil)
 	require.NoError(t, err)
 	before, err := loader(cwd, "")
 	require.NoError(t, err)
@@ -232,7 +232,7 @@ func TestWorkspaceConfigLoaderEnforcesHostPolicy(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			cwd := t.TempDir()
 			require.NoError(t, os.WriteFile(filepath.Join(cwd, "kodelet-config.yaml"), []byte(test.yaml), 0o600))
-			loader, err := NewWorkspaceConfigLoader(test.defaults)
+			loader, err := NewWorkspaceConfigLoader(test.defaults, nil)
 			require.NoError(t, err)
 			_, err = loader(cwd, "")
 			if test.wantErr == "" {
@@ -245,9 +245,9 @@ func TestWorkspaceConfigLoaderEnforcesHostPolicy(t *testing.T) {
 }
 
 func TestWorkspaceConfigLoaderErrors(t *testing.T) {
-	_, err := NewWorkspaceConfigLoader(map[string]any{"sysprompt_args": make(chan string)})
+	_, err := NewWorkspaceConfigLoader(map[string]any{"sysprompt_args": make(chan string)}, nil)
 	require.ErrorContains(t, err, "snapshot runner settings")
-	loader, err := NewWorkspaceConfigLoader(nil)
+	loader, err := NewWorkspaceConfigLoader(nil, nil)
 	require.NoError(t, err)
 	cwd := t.TempDir()
 	_, err = loader(cwd, "")

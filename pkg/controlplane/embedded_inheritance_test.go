@@ -30,7 +30,7 @@ func TestEmbeddedDiscoveryAndRemoteRunShareInheritedPermissionCeilings(t *testin
 		"tool_mode": "full", "allowed_tools": []string{"bash", "file_read"},
 		"allowed_commands": []string{"git diff", "git status"},
 		"skills":           map[string]any{"enabled": true}, "extensions": map[string]any{"enabled": true},
-	})
+	}, nil)
 	require.NoError(t, err)
 	config.EmbeddedRunner.ServiceOptions.ProfileConfigLoader = loader
 	server, _, _ := startEmbeddedRunnerTestServer(t, config, "127.0.0.1:0")

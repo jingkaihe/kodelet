@@ -2250,9 +2250,9 @@ func TestServerChatRunnerSavedProfileEnvironmentSelection(t *testing.T) {
 				options.WorkspaceConfigLoader, err = runnerclient.NewWorkspaceConfigLoader(map[string]any{
 					"tool_mode": "patch", "extensions": map[string]any{"enabled": false},
 					"environment_profiles": viper.Get("environment_profiles"),
-				})
+				}, nil)
 			} else {
-				options.ProfileConfigLoader, err = runnerclient.NewEmbeddedConfigLoader(viper.AllSettings(), nil)
+				options.ProfileConfigLoader, err = runnerclient.NewEmbeddedConfigLoader(viper.AllSettings(), nil, nil)
 			}
 			require.NoError(t, err)
 			service, err := runnerclient.NewService(t.Context(), root, options)

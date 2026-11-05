@@ -129,7 +129,7 @@ func TestEmbeddedConfigInheritsEnvironmentOnly(t *testing.T) {
 			case "serve overrides":
 				overrides = settings
 			}
-			loader, err := NewEmbeddedConfigLoader(defaults, overrides)
+			loader, err := NewEmbeddedConfigLoader(defaults, overrides, nil)
 			require.NoError(t, err)
 			config, err := loader(cwd, modelProfile, "")
 			require.NoError(t, err)
@@ -166,7 +166,7 @@ func TestEmbeddedConfigModelProfilesConcurrent(t *testing.T) {
 			"default": map[string]any{"sysprompt_args": map[string]any{"origin": "not-the-default"}},
 		},
 	}
-	loader, err := NewEmbeddedConfigLoader(defaults, nil)
+	loader, err := NewEmbeddedConfigLoader(defaults, nil, nil)
 	require.NoError(t, err)
 	directories := []string{t.TempDir(), t.TempDir()}
 	for _, cwd := range directories {
@@ -223,7 +223,7 @@ func TestEmbeddedConfigSnapshotsDoNotLeak(t *testing.T) {
 		"sysprompt_args": map[string]any{"origin": "daemon"},
 		"extensions":     map[string]any{"max_output_size": 4096},
 	}
-	loader, err := NewEmbeddedConfigLoader(defaults, overrides)
+	loader, err := NewEmbeddedConfigLoader(defaults, overrides, nil)
 	require.NoError(t, err)
 
 	defaults["profile"] = "missing"
@@ -291,7 +291,7 @@ func TestEmbeddedConfigServeOverridesWinModelProfile(t *testing.T) {
 	}
 	overrides := embeddedConfigTestSettings(cwd)
 	overrides["enable_fs_search_tools"] = false
-	loader, err := NewEmbeddedConfigLoader(defaults, overrides)
+	loader, err := NewEmbeddedConfigLoader(defaults, overrides, nil)
 	require.NoError(t, err)
 	config, err := loader(cwd, "deep", "")
 	require.NoError(t, err)
@@ -363,7 +363,7 @@ environment_profiles:
 			}}
 		}
 		t.Run(name, func(t *testing.T) {
-			loader, err := NewEmbeddedConfigLoader(defaults, overrides)
+			loader, err := NewEmbeddedConfigLoader(defaults, overrides, nil)
 			require.NoError(t, err)
 			for _, modelProfile := range []string{"", "deep"} {
 				config, err := loader(cwd, modelProfile, "review")
@@ -473,7 +473,7 @@ func TestEmbeddedConfigRepositoryRestrictions(t *testing.T) {
 			// Restrictions inherited from the selected model profile remain host policy.
 			loader, err := NewEmbeddedConfigLoader(map[string]any{
 				"profiles": map[string]any{"deep": embeddedConfigTestSettings(cwd)},
-			}, nil)
+			}, nil, nil)
 			require.NoError(t, err)
 			config, err := loader(cwd, "deep", "")
 			if test.wantErr {
@@ -487,7 +487,7 @@ func TestEmbeddedConfigRepositoryRestrictions(t *testing.T) {
 	for _, feature := range []string{"skills", "extensions"} {
 		t.Run("cannot reenable "+feature, func(t *testing.T) {
 			cwd := t.TempDir()
-			loader, err := NewEmbeddedConfigLoader(map[string]any{feature: map[string]any{"enabled": false}}, nil)
+			loader, err := NewEmbeddedConfigLoader(map[string]any{feature: map[string]any{"enabled": false}}, nil, nil)
 			require.NoError(t, err)
 			config, err := loader(cwd, "", "")
 			require.NoError(t, err)
@@ -508,6 +508,7 @@ func TestEmbeddedConfigPreservesStringExtensionDisable(t *testing.T) {
 	loader, err := NewEmbeddedConfigLoader(
 		map[string]any{"extensions": map[string]any{"enabled": "false"}},
 		map[string]any{"extensions": map[string]any{"enabled": true}},
+		nil,
 	)
 	require.NoError(t, err)
 	config, err := loader(t.TempDir(), "", "")
@@ -517,9 +518,9 @@ func TestEmbeddedConfigPreservesStringExtensionDisable(t *testing.T) {
 }
 
 func TestEmbeddedConfigErrors(t *testing.T) {
-	_, err := NewEmbeddedConfigLoader(map[string]any{"sysprompt_args": make(chan string)}, nil)
+	_, err := NewEmbeddedConfigLoader(map[string]any{"sysprompt_args": make(chan string)}, nil, nil)
 	require.Error(t, err)
-	_, err = NewEmbeddedConfigLoader(nil, map[string]any{"sysprompt_args": make(chan string)})
+	_, err = NewEmbeddedConfigLoader(nil, map[string]any{"sysprompt_args": make(chan string)}, nil)
 	require.Error(t, err)
 	// Discarded provider settings need not even be serializable by the runner.
 	loader, err := NewEmbeddedConfigLoader(map[string]any{
@@ -527,7 +528,7 @@ func TestEmbeddedConfigErrors(t *testing.T) {
 		"profiles": map[string]any{
 			"deep": map[string]any{"anthropic": make(chan string)},
 		},
-	}, map[string]any{"openai": make(chan string)})
+	}, map[string]any{"openai": make(chan string)}, nil)
 	require.NoError(t, err)
 	cwd := t.TempDir()
 	_, err = loader(cwd, "deep", "")

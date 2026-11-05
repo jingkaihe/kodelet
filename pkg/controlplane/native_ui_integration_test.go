@@ -385,7 +385,7 @@ func TestNativeUIReleaseRunnerProcess(t *testing.T) {
 	loader, err := runnerclient.NewWorkspaceConfigLoader(map[string]any{
 		"extensions": map[string]any{"enabled": true},
 		"skills":     map[string]any{"enabled": false},
-	})
+	}, nil)
 	require.NoError(t, err)
 	store, err := localstate.NewStoreAt(os.Getenv("KODELET_NATIVE_UI_RUNNER_STORE"))
 	require.NoError(t, err)

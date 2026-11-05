@@ -22,9 +22,9 @@ type ResourceSettingsLoader func() (map[string]any, error)
 // NewWorkspaceConfigLoader pins runner defaults and resolves each execution's
 // environment settings from its own directory. It never loads model credentials,
 // daemon endpoints, or authentication policy from repository configuration.
-// Optional resource loaders replace the three resource sections before applying
-// workspace settings and the pinned environment profile.
-func NewWorkspaceConfigLoader(defaults map[string]any, resources ...ResourceSettingsLoader) (WorkspaceConfigLoader, error) {
+// A non-nil resources loader replaces the trusted resource sections before
+// workspace settings and the pinned environment profile apply.
+func NewWorkspaceConfigLoader(defaults map[string]any, resources ResourceSettingsLoader) (WorkspaceConfigLoader, error) {
 	snapshot, err := json.Marshal(environmentSettings(defaults))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to snapshot runner settings")
@@ -69,28 +69,29 @@ func NewWorkspaceConfigLoader(defaults map[string]any, resources ...ResourceSett
 	}, nil
 }
 
-func refreshResourceSettings(settings map[string]any, loaders []ResourceSettingsLoader) error {
-	for _, load := range loaders {
-		values, err := load()
-		if err != nil {
-			return errors.Wrap(err, "failed to refresh runner resource settings")
+func refreshResourceSettings(settings map[string]any, load ResourceSettingsLoader) error {
+	if load == nil {
+		return nil
+	}
+	values, err := load()
+	if err != nil {
+		return errors.Wrap(err, "failed to refresh runner resource settings")
+	}
+	// Replace rather than merge so deleted settings do not survive a reload.
+	// Clone the projection: Viper merges must not mutate a loader's maps.
+	projected := make(map[string]any)
+	for _, key := range []string{"extensions", "skills", "context"} {
+		delete(settings, key)
+		if value, ok := values[key]; ok {
+			projected[key] = value
 		}
-		// Replace rather than merge so deleted settings do not survive a reload.
-		// Clone the projection: Viper merges must not mutate a loader's maps.
-		projected := make(map[string]any)
-		for _, key := range []string{"extensions", "skills", "context"} {
-			delete(settings, key)
-			if value, ok := values[key]; ok {
-				projected[key] = value
-			}
-		}
-		data, err := json.Marshal(projected)
-		if err != nil {
-			return errors.Wrap(err, "failed to snapshot runner resource settings")
-		}
-		if err := json.Unmarshal(data, &settings); err != nil {
-			return errors.Wrap(err, "failed to decode runner resource settings")
-		}
+	}
+	data, err := json.Marshal(projected)
+	if err != nil {
+		return errors.Wrap(err, "failed to snapshot runner resource settings")
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return errors.Wrap(err, "failed to decode runner resource settings")
 	}
 	return nil
 }

@@ -76,7 +76,7 @@ func TestRunnerShortcutDiscoveryMatchesIdleRunWithTools(t *testing.T) {
 	loader, err := NewEmbeddedConfigLoader(map[string]any{
 		"skills":     map[string]any{"enabled": false},
 		"extensions": map[string]any{"discover_path": false},
-	}, nil)
+	}, nil, nil)
 	require.NoError(t, err)
 	service.profileConfigLoader = loader
 	probe, err := service.ProbeManifestForCWD(t.Context(), workspace, "")

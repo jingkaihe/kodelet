@@ -37,7 +37,7 @@ func TestEmbeddedProfilesReachRunAndDiscoveryManifests(t *testing.T) {
 			},
 			"flair": map[string]any{"tool_mode": "full", "enable_fs_search_tools": true, "skills": map[string]any{"enabled": false}},
 		},
-	}, nil)
+	}, nil, nil)
 	require.NoError(t, err)
 	service, err := NewService(t.Context(), root, ServiceOptions{ProfileConfigLoader: loader})
 	require.NoError(t, err)
@@ -108,7 +108,7 @@ func TestStandaloneRunnerDoesNotApplyDaemonModelProfile(t *testing.T) {
 	loader, err := NewWorkspaceConfigLoader(map[string]any{
 		"tool_mode": "full", "extensions": map[string]any{"enabled": false},
 		"profiles": map[string]any{"deep": map[string]any{"tool_mode": "patch"}},
-	})
+	}, nil)
 	require.NoError(t, err)
 	service, err := NewService(t.Context(), root, ServiceOptions{WorkspaceConfigLoader: loader})
 	require.NoError(t, err)

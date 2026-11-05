@@ -544,7 +544,7 @@ func TestReloadRunReinitializesExtensionsWithConfig(t *testing.T) {
 					return v.AllSettings(), nil
 				})
 			} else {
-				service.workspaceConfigLoader, err = NewWorkspaceConfigLoader(defaults)
+				service.workspaceConfigLoader, err = NewWorkspaceConfigLoader(defaults, nil)
 			}
 			require.NoError(t, err)
 

@@ -166,7 +166,7 @@ func (s *Server) newEmbeddedRunner(ctx context.Context, endpoint string) (*runne
 	}
 	options := config.ServiceOptions
 	if options.ConfigLoader == nil && options.WorkspaceConfigLoader == nil && options.ProfileConfigLoader == nil {
-		options.WorkspaceConfigLoader, err = runnerclient.NewWorkspaceConfigLoader(config.Settings)
+		options.WorkspaceConfigLoader, err = runnerclient.NewWorkspaceConfigLoader(config.Settings, nil)
 		if err != nil {
 			return nil, err
 		}

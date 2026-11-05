@@ -19,8 +19,8 @@ type ProfileConfigLoader func(cwd, modelProfile, environmentProfile string) (llm
 // NewEmbeddedConfigLoader pins the environment-only projection of the daemon's
 // defaults and profiles. Explicit runner settings override inherited preferences;
 // the ordinary workspace loader then applies repository policy and runner profiles.
-// Optional resource loaders refresh shared resources without changing these layers.
-func NewEmbeddedConfigLoader(defaults, overrides map[string]any, resources ...ResourceSettingsLoader) (ProfileConfigLoader, error) {
+// A non-nil resources loader refreshes shared resources without changing these layers.
+func NewEmbeddedConfigLoader(defaults, overrides map[string]any, resources ResourceSettingsLoader) (ProfileConfigLoader, error) {
 	type settingsSnapshot struct {
 		Defaults  map[string]any
 		Overrides map[string]any
@@ -87,7 +87,7 @@ func NewEmbeddedConfigLoader(defaults, overrides map[string]any, resources ...Re
 		}
 		// Use the shared loader to keep workspace validation and environment
 		// profile semantics identical for standalone and embedded runners.
-		loader, err := NewWorkspaceConfigLoader(v.AllSettings())
+		loader, err := NewWorkspaceConfigLoader(v.AllSettings(), nil)
 		if err != nil {
 			return llmtypes.Config{}, err
 		}
