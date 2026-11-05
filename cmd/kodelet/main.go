@@ -124,6 +124,12 @@ func loadConfigFiles() error {
 			return err
 		}
 		logger.G(context.TODO()).WithField("config_file", viper.ConfigFileUsed()).Debug("Using global config file")
+	} else {
+		// Only a missing global file is optional; never run on silently ignored policy.
+		var missing viper.ConfigFileNotFoundError
+		if !errors.As(err, &missing) {
+			return errors.Wrapf(err, "failed to read global config file %q", viper.ConfigFileUsed())
+		}
 	}
 
 	if overrideConfigFile != "" {

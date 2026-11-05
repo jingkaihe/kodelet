@@ -542,6 +542,23 @@ func TestLoadConfigFilesFailsForInvalidExplicitConfigFile(t *testing.T) {
 	}
 }
 
+func TestLoadConfigFilesFailsForMalformedGlobalConfig(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv(configFileEnv, "")
+	t.Setenv(configFileModeEnv, configFileModeMerge)
+	t.Chdir(t.TempDir())
+	require.NoError(t, loadConfigFiles(), "a missing global config is optional")
+
+	configPath := filepath.Join(home, ".kodelet", "config.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o700))
+	require.NoError(t, os.WriteFile(configPath, []byte("model: ["), 0o600))
+	viper.Reset()
+	require.ErrorContains(t, loadConfigFiles(), configPath)
+}
+
 func TestLoadConfigFilesRejectsUnknownExplicitConfigMode(t *testing.T) {
 	viper.Reset()
 	t.Cleanup(viper.Reset)

@@ -902,7 +902,7 @@ Configuration files are loaded in this order:
 2. **Global Config**: `config.yaml` in `$HOME/.kodelet/` directory
 3. **Explicit Config**: `KODELET_CONFIG_FILE`, when supplied
 
-`KODELET_CONFIG_FILE_MODE=isolated` skips the global file, but runners still apply repository settings. Trusted top-level `extensions`, `skills`, and `context` are reread as described under [Reloading extensions](#reloading-extensions); other defaults require restarting the responsible daemon or runner.
+`KODELET_CONFIG_FILE_MODE=isolated` skips the global file, but runners still apply repository settings. Trusted top-level `extensions`, `skills`, and `context` are reread as described under [Reloading extensions](#reloading-extensions); other defaults require restarting the responsible daemon or runner. A missing global file is ignored, but a global or explicit file that cannot be read or parsed stops Kodelet with an error.
 
 ```yaml
 # Global config (~/.kodelet/config.yaml)
