@@ -504,6 +504,18 @@ func TestEmbeddedConfigRepositoryRestrictions(t *testing.T) {
 	}
 }
 
+func TestEmbeddedConfigPreservesStringExtensionDisable(t *testing.T) {
+	loader, err := NewEmbeddedConfigLoader(
+		map[string]any{"extensions": map[string]any{"enabled": "false"}},
+		map[string]any{"extensions": map[string]any{"enabled": true}},
+	)
+	require.NoError(t, err)
+	config, err := loader(t.TempDir(), "", "")
+	require.NoError(t, err)
+	assert.Equal(t, new(true), config.ExecutionOptions.NoExtensions)
+	assert.Equal(t, false, config.ExtensionSettings["enabled"])
+}
+
 func TestEmbeddedConfigErrors(t *testing.T) {
 	_, err := NewEmbeddedConfigLoader(map[string]any{"sysprompt_args": make(chan string)}, nil)
 	require.Error(t, err)

@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	runnerclient "github.com/jingkaihe/kodelet/pkg/runner/client"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -17,7 +16,6 @@ func TestResourceSettingsLoaderRefreshesOnlyResources(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv(configFileEnv, "")
 	t.Setenv(configFileModeEnv, configFileModeMerge)
-	t.Setenv("KODELET_EXTENSIONS_MAX_OUTPUT_SIZE", "2048")
 	t.Setenv("KODELET_SKILLS_ENABLED", "false")
 	path := filepath.Join(home, ".kodelet", "config.yaml")
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
@@ -27,7 +25,7 @@ extensions:
     subagent:
       mailbox: enabled
 skills:
-  enabled: false
+  enabled: true
 context:
   patterns: [TEAM.md]
 profiles:
@@ -43,8 +41,6 @@ serve:
 	require.NoError(t, err)
 	assert.Len(t, initial, 3)
 	extensions := initial["extensions"].(map[string]any)
-	assert.Equal(t, "2048", extensions["max_output_size"])
-	assert.Equal(t, true, extensions["enabled"])
 	assert.Equal(t, map[string]any{"subagent": map[string]any{"mailbox": "enabled"}}, extensions["config"])
 	assert.Equal(t, map[string]any{"patterns": []any{"TEAM.md"}}, initial["context"])
 	assert.Equal(t, map[string]any{"enabled": "false"}, initial["skills"])
@@ -53,7 +49,7 @@ serve:
 	// File deletion resets defaults, while startup sources/environment stay fixed.
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv(configFileEnv, filepath.Join(t.TempDir(), "missing.yaml"))
-	t.Setenv("KODELET_EXTENSIONS_MAX_OUTPUT_SIZE", "8192")
+	t.Setenv("KODELET_SKILLS_ENABLED", "true")
 	require.NoError(t, os.Remove(path))
 	updated, err := load()
 	require.NoError(t, err)
@@ -62,8 +58,6 @@ serve:
 	assert.Equal(t, map[string]any{"patterns": []string{"AGENTS.md"}}, updated["context"])
 	extensions = updated["extensions"].(map[string]any)
 	assert.NotContains(t, extensions, "config")
-	assert.Equal(t, "2048", extensions["max_output_size"])
-	assert.Contains(t, initial, "context", "old snapshots remain intact")
 
 	require.NoError(t, os.WriteFile(path, []byte("extensions: ["), 0o600))
 	_, err = load()
@@ -104,20 +98,22 @@ context:
 			load, err := newResourceSettingsLoader(nil)
 			require.NoError(t, err)
 			t.Chdir(t.TempDir())
-			for _, mailbox := range []string{"enabled", "disabled"} {
-				settings, err := load()
-				require.NoError(t, err)
-				config := settings["extensions"].(map[string]any)["config"].(map[string]any)
-				assert.Equal(t, map[string]any{"mailbox": mailbox}, config["subagent"])
-				if mode == configFileModeMerge {
-					assert.Contains(t, config, "other")
-					assert.Contains(t, settings, "context")
-				} else {
-					assert.NotContains(t, config, "other")
-					assert.Equal(t, map[string]any{"patterns": []string{"AGENTS.md"}}, settings["context"])
-				}
-				require.NoError(t, os.WriteFile(path, []byte(`{"extensions": {"config": {"subagent": {"mailbox": "disabled"}}}}`), 0o600))
+			settings, err := load()
+			require.NoError(t, err)
+			config := settings["extensions"].(map[string]any)["config"].(map[string]any)
+			assert.Equal(t, map[string]any{"mailbox": "enabled"}, config["subagent"])
+			if mode == configFileModeMerge {
+				assert.Contains(t, config, "other")
+				assert.Equal(t, map[string]any{"patterns": []any{"GLOBAL.md"}}, settings["context"])
+			} else {
+				assert.NotContains(t, config, "other")
+				assert.Equal(t, map[string]any{"patterns": []string{"AGENTS.md"}}, settings["context"])
 			}
+			require.NoError(t, os.WriteFile(path, []byte(`{"extensions": {"config": {"subagent": {"mailbox": "disabled"}}}}`), 0o600))
+			settings, err = load()
+			require.NoError(t, err)
+			config = settings["extensions"].(map[string]any)["config"].(map[string]any)
+			assert.Equal(t, map[string]any{"mailbox": "disabled"}, config["subagent"])
 			require.NoError(t, os.Remove(path))
 			_, err = load()
 			require.ErrorContains(t, err, "configuration override")
@@ -126,11 +122,7 @@ context:
 }
 
 func TestResourceSettingsLoaderPreservesContextOverrides(t *testing.T) {
-	for _, explicitFlag := range []bool{false, true} {
-		name := "environment"
-		if explicitFlag {
-			name = "flag"
-		}
+	for _, name := range []string{"environment", "flag"} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
 			t.Setenv(configFileEnv, "")
@@ -138,31 +130,28 @@ func TestResourceSettingsLoaderPreservesContextOverrides(t *testing.T) {
 			t.Setenv("KODELET_CONTEXT_PATTERNS", "ENV.md")
 			flags := pflag.NewFlagSet("resources", pflag.ContinueOnError)
 			flags.StringSlice("context-patterns", []string{"AGENTS.md"}, "")
-			want := []string{"ENV.md"}
-			if explicitFlag {
+			var want any = "ENV.md"
+			if name == "flag" {
 				require.NoError(t, flags.Set("context-patterns", "CLI.md"))
 				want = []string{"CLI.md"}
 			}
-			resources, err := newResourceSettingsLoader(flags)
+			load, err := newResourceSettingsLoader(flags)
 			require.NoError(t, err)
-			standalone, err := runnerclient.NewWorkspaceConfigLoader(nil, resources)
+			initial, err := load()
 			require.NoError(t, err)
-			embedded, err := runnerclient.NewEmbeddedConfigLoader(nil, nil, resources)
+			assert.Equal(t, want, initial["context"].(map[string]any)["patterns"])
+
+			require.NoError(t, flags.Set("context-patterns", "CHANGED.md"))
+			t.Setenv("KODELET_CONTEXT_PATTERNS", "CHANGED.md")
+			dir := filepath.Join(os.Getenv("HOME"), ".kodelet")
+			require.NoError(t, os.MkdirAll(dir, 0o700))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(`
+context:
+  patterns: [FILE.md]
+`), 0o600))
+			updated, err := load()
 			require.NoError(t, err)
-			cwd := t.TempDir()
-			for range 2 {
-				config, err := standalone(cwd, "")
-				require.NoError(t, err)
-				assert.Equal(t, want, config.Context.Patterns)
-				config, err = embedded(cwd, "", "")
-				require.NoError(t, err)
-				assert.Equal(t, want, config.Context.Patterns)
-				require.NoError(t, flags.Set("context-patterns", "CHANGED.md"))
-				t.Setenv("KODELET_CONTEXT_PATTERNS", "CHANGED.md")
-				dir := filepath.Join(os.Getenv("HOME"), ".kodelet")
-				require.NoError(t, os.MkdirAll(dir, 0o700))
-				require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("context:\n  patterns: [FILE.md]\n"), 0o600))
-			}
+			assert.Equal(t, want, updated["context"].(map[string]any)["patterns"])
 		})
 	}
 }
