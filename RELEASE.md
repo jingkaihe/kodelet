@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.8.22-beta
+
+Added live refresh of trusted `extensions`, `skills`, and `context` settings for embedded and standalone runners, including through `/reload` and `reload_resources`. See [Reloading extensions](docs/MANUAL.md#reloading-extensions).
+
+Preserved the last valid resource settings when trusted config becomes unreadable or invalid; explicit reload reports the error without replacing existing resources.
+
+Fixed startup silently ignoring malformed or unreadable global config files.
+
+Fixed `KODELET_EXTENSIONS_ENABLED=false` and other string-valued extension-disable settings not consistently enforcing restrictions.
+
 ## 0.8.21-beta
 
 Added per-extension YAML settings under `extensions.config.<extension-id>`, delivered during initialization and refreshed on workspace resource reload.
