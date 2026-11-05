@@ -13,9 +13,10 @@ import (
 var resourceSettingKeys = []string{"extensions", "skills", "context"}
 
 // ResourceSettingsLoader supplies trusted top-level extensions, skills and
-// context settings. It is called only when opening or explicitly reloading an
-// environment; other settings and profile definitions remain pinned. Callers
-// must not mutate the returned maps.
+// context settings. Runner config loaders call it whenever they resolve an
+// environment: opening or reloading a run, probing a manifest, inspecting a
+// workspace or suggesting directories. Other settings and profile definitions
+// remain pinned. Callers must not mutate the returned maps.
 type ResourceSettingsLoader func() (map[string]any, error)
 
 // ResourceSettings rereads trusted resource settings and retains the last
