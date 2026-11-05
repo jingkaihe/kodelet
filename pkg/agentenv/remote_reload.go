@@ -28,7 +28,7 @@ type ReloadOutcome struct {
 }
 
 // reloadResourcesDescription tells the model when a reload helps, not how it works.
-const reloadResourcesDescription = `Reload this run's Kodelet resources after the current tool batch: extensions and their tools, skills, recipes, AGENTS.md and other context files, kodelet-config.yaml, and the top-level extensions, skills and context settings in the runner's Kodelet config. Model settings, profiles, runner settings and server settings are not reloaded; ask the user to restart Kodelet if those must change.
+const reloadResourcesDescription = `Reload this run's Kodelet resources after the current tool batch: extensions and their tools, skills, recipes, AGENTS.md and other context files, kodelet-config.yaml, and the top-level extensions, skills and context settings in the runner's Kodelet config. Model settings, profiles, runner settings and server settings are not reloaded. If extensions.enabled or skills.enabled was false when Kodelet started, setting it to true has no effect until Kodelet restarts. Ask the user to restart Kodelet if any of these must change.
 
 Call it once after editing these resources, rebuilding compiled extensions first. Ordinary file changes don't need it.
 
