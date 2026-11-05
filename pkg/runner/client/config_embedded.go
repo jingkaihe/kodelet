@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
@@ -75,15 +74,7 @@ func NewEmbeddedConfigLoader(defaults, overrides map[string]any, resources Resou
 		if err != nil {
 			return llmtypes.Config{}, err
 		}
-		inheritedExtensions, err := extensions.LoadConfigFromSettings(inherited.ExtensionSettings)
-		if err != nil {
-			return llmtypes.Config{}, errors.Wrap(err, "failed to load inherited extension policy")
-		}
 		inheritedOptions := inherited.EnvironmentOptions()
-		// Environment values may be strings; enforce the typed disable ceiling.
-		if !inheritedExtensions.Enabled {
-			inheritedOptions.NoExtensions = new(true)
-		}
 		if err := v.MergeConfigMap(settings.Overrides); err != nil {
 			return llmtypes.Config{}, errors.Wrap(err, "failed to apply embedded runner overrides")
 		}

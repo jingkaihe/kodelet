@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/pkg/errors"
 )
 
@@ -239,10 +240,22 @@ func (c Config) EnvironmentOptions() *ExecutionOptions {
 	if c.Skills != nil && !c.Skills.Enabled {
 		o.NoSkills = new(true)
 	}
-	if enabled, ok := c.ExtensionSettings["enabled"].(bool); ok && !enabled {
+	if settingDisabled(c.ExtensionSettings["enabled"]) {
 		o.NoExtensions = new(true)
 	}
 	return o
+}
+
+// settingDisabled reports whether a raw enabled flag decodes to false. It uses
+// the same weak decoding as extension config, so environment overrides such as
+// "false" impose the same restriction as YAML booleans. Undecodable values are
+// left to the extension config validation that rejects them.
+func settingDisabled(value any) bool {
+	if value == nil {
+		return false
+	}
+	var enabled bool
+	return mapstructure.WeakDecode(value, &enabled) == nil && !enabled
 }
 
 // RunnerOptions returns environment restrictions plus the filesystem search
