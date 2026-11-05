@@ -635,18 +635,23 @@ func buildControlPlaneServerConfig(config *ServeConfig) (*controlplane.ServerCon
 				return nil, errors.Wrap(err, "failed to determine the built-in runner's working directory")
 			}
 		}
-		resources, err := newResourceSettingsLoader(rootCmd.PersistentFlags())
+		resources, err := newResourceSettings(rootCmd.PersistentFlags())
 		if err != nil {
 			return nil, err
 		}
-		loader, err := runnerclient.NewEmbeddedConfigLoader(viper.AllSettings(), config.RunnerSettings, resources)
+		loader, err := runnerclient.NewEmbeddedConfigLoader(viper.AllSettings(), config.RunnerSettings, resources.Load)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to load the built-in runner's settings")
+		}
+		serviceOptions := runnerclient.ServiceOptions{
+			ProfileConfigLoader:     loader,
+			RefreshResourceSettings: resources.Refresh,
+			Browser:                 config.Browser,
 		}
 		serverConfig.EmbeddedRunner = &controlplane.EmbeddedRunnerConfig{
 			Workspace:      workspace,
 			Settings:       config.RunnerSettings,
-			ServiceOptions: runnerclient.ServiceOptions{ProfileConfigLoader: loader, Browser: config.Browser},
+			ServiceOptions: serviceOptions,
 		}
 	}
 	if err := serverConfig.Validate(); err != nil {

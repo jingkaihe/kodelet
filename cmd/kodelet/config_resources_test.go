@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestResourceSettingsLoaderRefreshesOnlyResources(t *testing.T) {
+func TestResourceSettingsRefreshOnlyResources(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv(configFileEnv, "")
@@ -35,9 +35,9 @@ serve:
   port: 1234
 `), 0o600))
 	before := viper.AllSettings()
-	load, err := newResourceSettingsLoader(nil)
+	resources, err := newResourceSettings(nil)
 	require.NoError(t, err)
-	initial, err := load()
+	initial, err := resources.Load()
 	require.NoError(t, err)
 	assert.Len(t, initial, 3)
 	extensions := initial["extensions"].(map[string]any)
@@ -51,7 +51,7 @@ serve:
 	t.Setenv(configFileEnv, filepath.Join(t.TempDir(), "missing.yaml"))
 	t.Setenv("KODELET_SKILLS_ENABLED", "true")
 	require.NoError(t, os.Remove(path))
-	updated, err := load()
+	updated, err := resources.Load()
 	require.NoError(t, err)
 	assert.Len(t, updated, 3)
 	assert.Equal(t, map[string]any{"enabled": "false"}, updated["skills"])
@@ -59,16 +59,33 @@ serve:
 	extensions = updated["extensions"].(map[string]any)
 	assert.NotContains(t, extensions, "config")
 
+	// Invalid files fail strict refreshes but routine loads keep the last valid settings.
 	require.NoError(t, os.WriteFile(path, []byte("extensions: ["), 0o600))
-	_, err = load()
-	require.ErrorContains(t, err, "global resource configuration")
+	require.ErrorContains(t, resources.Refresh(), "global resource configuration")
+	fallback, err := resources.Load()
+	require.NoError(t, err)
+	assert.Equal(t, updated, fallback)
 	require.NoError(t, os.WriteFile(path, []byte("serve:\n  auth_token: secret\n"), 0o600))
 	require.NoError(t, os.Chmod(path, 0o644))
-	_, err = load()
-	require.ErrorContains(t, err, "static authentication tokens")
+	require.ErrorContains(t, resources.Refresh(), "static authentication tokens")
+	fallback, err = resources.Load()
+	require.NoError(t, err)
+	assert.Equal(t, updated, fallback)
 }
 
-func TestResourceSettingsLoaderConfigFileModes(t *testing.T) {
+func TestResourceSettingsRejectInvalidStartupConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv(configFileEnv, "")
+	t.Setenv(configFileModeEnv, configFileModeMerge)
+	path := filepath.Join(home, ".kodelet", "config.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, []byte("extensions: ["), 0o600))
+	_, err := newResourceSettings(nil)
+	require.ErrorContains(t, err, path)
+}
+
+func TestResourceSettingsConfigFileModes(t *testing.T) {
 	for _, mode := range []string{configFileModeMerge, configFileModeIsolate} {
 		t.Run(mode, func(t *testing.T) {
 			home := t.TempDir()
@@ -95,10 +112,10 @@ context:
 			if mode == configFileModeIsolate {
 				t.Setenv("HOME", "")
 			}
-			load, err := newResourceSettingsLoader(nil)
+			resources, err := newResourceSettings(nil)
 			require.NoError(t, err)
 			t.Chdir(t.TempDir())
-			settings, err := load()
+			settings, err := resources.Load()
 			require.NoError(t, err)
 			config := settings["extensions"].(map[string]any)["config"].(map[string]any)
 			assert.Equal(t, map[string]any{"mailbox": "enabled"}, config["subagent"])
@@ -110,18 +127,20 @@ context:
 				assert.Equal(t, map[string]any{"patterns": []string{"AGENTS.md"}}, settings["context"])
 			}
 			require.NoError(t, os.WriteFile(path, []byte(`{"extensions": {"config": {"subagent": {"mailbox": "disabled"}}}}`), 0o600))
-			settings, err = load()
+			settings, err = resources.Load()
 			require.NoError(t, err)
 			config = settings["extensions"].(map[string]any)["config"].(map[string]any)
 			assert.Equal(t, map[string]any{"mailbox": "disabled"}, config["subagent"])
 			require.NoError(t, os.Remove(path))
-			_, err = load()
-			require.ErrorContains(t, err, "configuration override")
+			require.ErrorContains(t, resources.Refresh(), "configuration override")
+			fallback, err := resources.Load()
+			require.NoError(t, err)
+			assert.Equal(t, settings, fallback)
 		})
 	}
 }
 
-func TestResourceSettingsLoaderPreservesContextOverrides(t *testing.T) {
+func TestResourceSettingsPreserveContextOverrides(t *testing.T) {
 	for _, name := range []string{"environment", "flag"} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
@@ -135,9 +154,9 @@ func TestResourceSettingsLoaderPreservesContextOverrides(t *testing.T) {
 				require.NoError(t, flags.Set("context-patterns", "CLI.md"))
 				want = []string{"CLI.md"}
 			}
-			load, err := newResourceSettingsLoader(flags)
+			resources, err := newResourceSettings(flags)
 			require.NoError(t, err)
-			initial, err := load()
+			initial, err := resources.Load()
 			require.NoError(t, err)
 			assert.Equal(t, want, initial["context"].(map[string]any)["patterns"])
 
@@ -149,7 +168,7 @@ func TestResourceSettingsLoaderPreservesContextOverrides(t *testing.T) {
 context:
   patterns: [FILE.md]
 `), 0o600))
-			updated, err := load()
+			updated, err := resources.Load()
 			require.NoError(t, err)
 			assert.Equal(t, want, updated["context"].(map[string]any)["patterns"])
 		})

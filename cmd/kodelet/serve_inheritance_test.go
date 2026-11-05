@@ -66,6 +66,8 @@ func TestServeInstallsPinnedEmbeddedProfileLoader(t *testing.T) {
 	require.NotNil(t, loader)
 	assert.Nil(t, server.EmbeddedRunner.ServiceOptions.ConfigLoader)
 	assert.Nil(t, server.EmbeddedRunner.ServiceOptions.WorkspaceConfigLoader)
+	require.NotNil(t, server.EmbeddedRunner.ServiceOptions.RefreshResourceSettings)
+	require.NoError(t, server.EmbeddedRunner.ServiceOptions.RefreshResourceSettings())
 
 	// Shared resources refresh, but model profiles and explicit runner settings
 	// remain pinned. Loading must not mutate the daemon's Viper snapshot.

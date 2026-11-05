@@ -10,6 +10,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -64,6 +65,37 @@ func TestRunnerConfigLoadersRefreshResourceSnapshots(t *testing.T) {
 			assert.Contains(t, initial.ExtensionSettings, "config")
 		})
 	}
+}
+
+func TestResourceSettingsKeepsLastValidSnapshot(t *testing.T) {
+	_, err := NewResourceSettings(func() (map[string]any, error) { return nil, errors.New("broken") })
+	require.ErrorContains(t, err, "broken", "the initial read is strict")
+	_, err = NewResourceSettings(nil)
+	require.Error(t, err)
+
+	var readErr error
+	patterns := []string{"TEAM.md"}
+	resources, err := NewResourceSettings(func() (map[string]any, error) {
+		if readErr != nil {
+			return nil, readErr
+		}
+		return map[string]any{"context": map[string]any{"patterns": patterns}}, nil
+	})
+	require.NoError(t, err)
+	loader, err := NewWorkspaceConfigLoader(nil, resources.Load)
+	require.NoError(t, err)
+
+	readErr = errors.New("broken")
+	require.ErrorContains(t, resources.Refresh(), "broken")
+	config, err := loader(t.TempDir(), "")
+	require.NoError(t, err, "routine loads fall back to the last valid settings")
+	assert.Equal(t, []string{"TEAM.md"}, config.Context.Patterns)
+
+	readErr, patterns = nil, []string{"UPDATED.md"}
+	require.NoError(t, resources.Refresh())
+	config, err = loader(t.TempDir(), "")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"UPDATED.md"}, config.Context.Patterns)
 }
 
 func TestRefreshResourceSettingsAllocatesMissingSettings(t *testing.T) {

@@ -22,10 +22,12 @@ func setResourceConfigDefaults(v *viper.Viper) {
 	v.SetDefault("context.patterns", llmtypes.DefaultContextPatterns())
 }
 
-// newResourceSettingsLoader pins the trusted sources and process environment,
-// not their file contents. Each call reads into a private Viper instance; it
-// never mutates daemon configuration or consults repository files.
-func newResourceSettingsLoader(flags *pflag.FlagSet) (runnerclient.ResourceSettingsLoader, error) {
+// newResourceSettings pins the trusted sources and process environment, not
+// their file contents. Each read uses a private Viper instance; it never
+// mutates daemon configuration or consults repository files. The initial read
+// is strict; later invalid files fall back to the last valid settings except
+// when a reload refreshes them explicitly.
+func newResourceSettings(flags *pflag.FlagSet) (*runnerclient.ResourceSettings, error) {
 	mode, err := configFileMode()
 	if err != nil {
 		return nil, err
@@ -69,7 +71,7 @@ func newResourceSettingsLoader(flags *pflag.FlagSet) (runnerclient.ResourceSetti
 			if err := v.ReadInConfig(); err != nil {
 				var missing viper.ConfigFileNotFoundError
 				if !errors.As(err, &missing) {
-					return nil, errors.Wrap(err, "failed to read global resource configuration")
+					return nil, errors.Wrapf(err, "failed to read global resource configuration %q", v.ConfigFileUsed())
 				}
 			} else if err := validateTrustedConfigPermissions(v.ConfigFileUsed()); err != nil {
 				return nil, err
@@ -78,7 +80,7 @@ func newResourceSettingsLoader(flags *pflag.FlagSet) (runnerclient.ResourceSetti
 		if override != "" {
 			v.SetConfigFile(override)
 			if err := v.MergeInConfig(); err != nil {
-				return nil, errors.Wrap(err, "failed to read resource configuration override")
+				return nil, errors.Wrapf(err, "failed to read resource configuration override %q", override)
 			}
 			if err := validateTrustedConfigPermissions(override); err != nil {
 				return nil, err
@@ -91,7 +93,7 @@ func newResourceSettingsLoader(flags *pflag.FlagSet) (runnerclient.ResourceSetti
 		return nil, err
 	}
 	startupKeys := initial.AllKeys()
-	return func() (map[string]any, error) {
+	return runnerclient.NewResourceSettings(func() (map[string]any, error) {
 		v, err := read()
 		if err != nil {
 			return nil, err
@@ -115,5 +117,5 @@ func newResourceSettingsLoader(flags *pflag.FlagSet) (runnerclient.ResourceSetti
 			}
 		}
 		return settings, nil
-	}, nil
+	})
 }

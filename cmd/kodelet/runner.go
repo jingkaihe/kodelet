@@ -215,13 +215,18 @@ func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
 	if err := os.Setenv(controlPlaneServerEnv, strings.TrimSpace(config.Server)); err != nil {
 		return errors.Wrap(err, "failed to pass the server address to runner subprocesses")
 	}
-	resources, err := newResourceSettingsLoader(rootCmd.PersistentFlags())
+	resources, err := newResourceSettings(rootCmd.PersistentFlags())
 	if err != nil {
 		return err
 	}
-	loader, err := runnerclient.NewWorkspaceConfigLoader(viper.AllSettings(), resources)
+	loader, err := runnerclient.NewWorkspaceConfigLoader(viper.AllSettings(), resources.Load)
 	if err != nil {
 		return err
+	}
+	serviceOptions := runnerclient.ServiceOptions{
+		WorkspaceConfigLoader:   loader,
+		RefreshResourceSettings: resources.Refresh,
+		Browser:                 config.Browser,
 	}
 
 	var registered bool
@@ -230,7 +235,7 @@ func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
 		AuthToken:      config.AuthToken,
 		Workspace:      workspace,
 		DisplayName:    config.DisplayName,
-		ServiceOptions: runnerclient.ServiceOptions{WorkspaceConfigLoader: loader, Browser: config.Browser},
+		ServiceOptions: serviceOptions,
 		OnRegistered: func(result protocol.RegisterResult) {
 			if registered {
 				presenter.Success(fmt.Sprintf("Runner reconnected as %s", result.RunnerID))

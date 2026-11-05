@@ -106,7 +106,7 @@ The `ProfileConfigLoader` hook resolves a concrete model profile identifier agai
 
 Production embedded and standalone config loaders reread trusted top-level `extensions`, `skills`, and `context` from runner-machine `~/.kodelet/config.yaml` and `KODELET_CONFIG_FILE` when opening an environment and on explicit `reload_resources`, preserving merge/isolated semantics. Per-CWD `kodelet-config.yaml` is also reread. Both runners resolve trusted `environment_profiles` before discovery and use independent per-execution snapshots; reload does not affect other active runs or relax pinned request/model permission ceilings.
 
-Other trusted settings, including profiles, explicit `serve.runner_settings`, system prompts and model/server/auth settings, remain pinned until their owning `serve` or runner process restarts. Configuration errors refuse reload before teardown; extension-start failures retain the existing warning behavior.
+Other trusted settings, including profiles, explicit `serve.runner_settings`, system prompts and model/server/auth settings, remain pinned until their owning `serve` or runner process restarts. The initial trusted read is strict. Afterwards, an unreadable or invalid trusted file refuses explicit reload before teardown, while routine resolution keeps the last valid resource settings and logs a warning. Workspace configuration errors refuse reload before teardown; extension-start failures retain the existing warning behavior.
 
 ## SDK option matrix
 

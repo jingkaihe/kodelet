@@ -535,14 +535,19 @@ func TestReloadRunReinitializesExtensionsWithConfig(t *testing.T) {
 			var err error
 			if source == "global" {
 				configPath = filepath.Join(t.TempDir(), "config.yaml")
-				service.profileConfigLoader, err = NewEmbeddedConfigLoader(nil, defaults, func() (map[string]any, error) {
+				resources, err := NewResourceSettings(func() (map[string]any, error) {
 					v := viper.New()
 					v.SetConfigFile(configPath)
-					if err := v.ReadInConfig(); err != nil {
+					if err := v.ReadInConfig(); err != nil && !os.IsNotExist(err) {
 						return nil, err
 					}
 					return v.AllSettings(), nil
 				})
+				require.NoError(t, err)
+				// Production wiring: routine loads fall back, explicit reload is strict.
+				service.refreshResources = resources.Refresh
+				service.profileConfigLoader, err = NewEmbeddedConfigLoader(nil, defaults, resources.Load)
+				require.NoError(t, err)
 			} else {
 				service.workspaceConfigLoader, err = NewWorkspaceConfigLoader(defaults, nil)
 			}
@@ -594,7 +599,7 @@ extensions:
 					require.NoError(t, os.WriteFile(configPath, []byte("extensions: ["), 0o600))
 					result, err := service.reloadRun(t.Context(), protocol.RunReloadParams{RunID: "run", ExpectedEnvironmentRevision: 1})
 					require.NoError(t, err)
-					require.NotEmpty(t, result.Refusal)
+					require.Contains(t, result.Refusal, "failed to load runner configuration")
 					assert.Equal(t, manifest, service.runs["run"].manifest)
 					assert.Equal(t, state, backgroundState(t, workspace, "conversation"))
 					output, err := service.executeTool(t.Context(), runnerpayload.ToolExecuteParams{

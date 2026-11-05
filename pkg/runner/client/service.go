@@ -95,6 +95,9 @@ type ServiceOptions struct {
 	// SnapshotWaitTimeout optionally bounds admission to the serialized snapshot
 	// pipeline. Zero lets the caller's context own the deadline.
 	SnapshotWaitTimeout time.Duration
+	// RefreshResourceSettings strictly rereads trusted resource settings before
+	// an explicit reload, so invalid settings refuse it instead of falling back.
+	RefreshResourceSettings func() error
 }
 
 // Service handles control-plane requests for one workspace-bound runner process.
@@ -109,6 +112,7 @@ type Service struct {
 	configLoader          ConfigLoader
 	workspaceConfigLoader WorkspaceConfigLoader
 	profileConfigLoader   ProfileConfigLoader
+	refreshResources      func() error
 	environmentFactory    EnvironmentFactory
 	instanceProvider      ExecutionInstanceProvider
 	browserManager        *browser.Manager
@@ -206,6 +210,7 @@ func NewService(parent context.Context, workspace string, options ServiceOptions
 		configLoader:          options.ConfigLoader,
 		workspaceConfigLoader: options.WorkspaceConfigLoader,
 		profileConfigLoader:   options.ProfileConfigLoader,
+		refreshResources:      options.RefreshResourceSettings,
 		environmentFactory:    options.EnvironmentFactory,
 		instanceProvider:      options.ExecutionInstanceProvider,
 		cleanupTimeout:        options.CleanupTimeout,
@@ -881,6 +886,11 @@ func (s *Service) reloadRun(ctx context.Context, params protocol.RunReloadParams
 	resources := run.resources
 	runnerID, generation := s.runnerID, s.generation
 	s.mu.Unlock()
+	if s.refreshResources != nil {
+		if err := s.refreshResources(); err != nil {
+			return runnerpayload.RunReloadResult{Refusal: errors.Wrap(err, "failed to load runner configuration").Error()}, nil
+		}
+	}
 	config, extensionConfig, err := s.loadRunConfig(resources.workingDirectory, openParams)
 	if err != nil {
 		return runnerpayload.RunReloadResult{Refusal: err.Error()}, nil
