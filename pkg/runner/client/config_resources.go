@@ -12,11 +12,12 @@ import (
 // resourceSettingKeys are the trusted top-level sections runners reread.
 var resourceSettingKeys = []string{"extensions", "skills", "context"}
 
-// ResourceSettingsLoader supplies trusted top-level extensions, skills and
-// context settings. Runner config loaders call it whenever they resolve an
-// environment: opening or reloading a run, probing a manifest, inspecting a
-// workspace or suggesting directories. Other settings and profile definitions
-// remain pinned. Callers must not mutate the returned maps.
+// ResourceSettingsLoader supplies trusted settings, of which runners use only
+// the top-level extensions, skills and context sections. Runner config loaders
+// call it whenever they resolve an environment: opening or reloading a run,
+// probing a manifest, inspecting a workspace or suggesting directories. Other
+// settings and profile definitions remain pinned. Callers must not mutate the
+// returned maps.
 type ResourceSettingsLoader func() (map[string]any, error)
 
 // ResourceSettings rereads trusted resource settings and retains the last
@@ -71,9 +72,20 @@ func (r *ResourceSettings) refreshLocked() error {
 	if err != nil {
 		return err
 	}
-	r.last = values
+	r.last = resourceSections(values)
 	r.warning = ""
 	return nil
+}
+
+// resourceSections returns only the trusted resource sections of values.
+func resourceSections(values map[string]any) map[string]any {
+	sections := make(map[string]any)
+	for _, key := range resourceSettingKeys {
+		if value, ok := values[key]; ok {
+			sections[key] = value
+		}
+	}
+	return sections
 }
 
 // refreshResourceSettings replaces the resource sections of settings in place
@@ -88,13 +100,7 @@ func refreshResourceSettings(settings map[string]any, load ResourceSettingsLoade
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to refresh runner resource settings")
 	}
-	projected := make(map[string]any)
-	for _, key := range resourceSettingKeys {
-		if value, ok := values[key]; ok {
-			projected[key] = value
-		}
-	}
-	data, err := json.Marshal(projected)
+	data, err := json.Marshal(resourceSections(values))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to snapshot runner resource settings")
 	}

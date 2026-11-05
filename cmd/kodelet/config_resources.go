@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -28,23 +27,9 @@ func setResourceConfigDefaults(v *viper.Viper) {
 // is strict; later invalid files fall back to the last valid settings except
 // when a reload refreshes them explicitly.
 func newResourceSettings(flags *pflag.FlagSet) (*runnerclient.ResourceSettings, error) {
-	mode, err := configFileMode()
+	readConfig, err := trustedConfigReader()
 	if err != nil {
 		return nil, err
-	}
-	override := strings.TrimSpace(os.Getenv(configFileEnv))
-	if override != "" {
-		override, err = filepath.Abs(override)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to resolve resource configuration override")
-		}
-	}
-	var home string
-	if override == "" || mode != configFileModeIsolate {
-		home, err = os.UserHomeDir()
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to locate global resource configuration")
-		}
 	}
 	environment := make(map[string]string)
 	for _, entry := range os.Environ() {
@@ -64,27 +49,8 @@ func newResourceSettings(flags *pflag.FlagSet) (*runnerclient.ResourceSettings, 
 	read := func() (*viper.Viper, error) {
 		v := viper.New()
 		setResourceConfigDefaults(v)
-		if home != "" {
-			v.SetConfigName("config")
-			v.SetConfigType("yaml")
-			v.AddConfigPath(filepath.Join(home, ".kodelet"))
-			if err := v.ReadInConfig(); err != nil {
-				var missing viper.ConfigFileNotFoundError
-				if !errors.As(err, &missing) {
-					return nil, errors.Wrapf(err, "failed to read global resource configuration %q", v.ConfigFileUsed())
-				}
-			} else if err := validateTrustedConfigPermissions(v.ConfigFileUsed()); err != nil {
-				return nil, err
-			}
-		}
-		if override != "" {
-			v.SetConfigFile(override)
-			if err := v.MergeInConfig(); err != nil {
-				return nil, errors.Wrapf(err, "failed to read resource configuration override %q", override)
-			}
-			if err := validateTrustedConfigPermissions(override); err != nil {
-				return nil, err
-			}
+		if err := readConfig(v); err != nil {
+			return nil, err
 		}
 		return v, nil
 	}
@@ -109,13 +75,6 @@ func newResourceSettings(flags *pflag.FlagSet) (*runnerclient.ResourceSettings, 
 		if contextPatterns != nil {
 			v.Set("context.patterns", slices.Clone(*contextPatterns))
 		}
-		settings := make(map[string]any)
-		values := v.AllSettings()
-		for _, key := range []string{"extensions", "skills", "context"} {
-			if value, ok := values[key]; ok {
-				settings[key] = value
-			}
-		}
-		return settings, nil
+		return v.AllSettings(), nil
 	})
 }

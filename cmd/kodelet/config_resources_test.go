@@ -61,7 +61,7 @@ serve:
 
 	// Invalid files fail strict refreshes but routine loads keep the last valid settings.
 	require.NoError(t, os.WriteFile(path, []byte("extensions: ["), 0o600))
-	require.ErrorContains(t, resources.Refresh(), "global resource configuration")
+	require.ErrorContains(t, resources.Refresh(), "global config file")
 	fallback, err := resources.Load()
 	require.NoError(t, err)
 	assert.Equal(t, updated, fallback)
@@ -132,7 +132,7 @@ context:
 			config = settings["extensions"].(map[string]any)["config"].(map[string]any)
 			assert.Equal(t, map[string]any{"mailbox": "disabled"}, config["subagent"])
 			require.NoError(t, os.Remove(path))
-			require.ErrorContains(t, resources.Refresh(), "configuration override")
+			require.ErrorContains(t, resources.Refresh(), "explicit config file")
 			fallback, err := resources.Load()
 			require.NoError(t, err)
 			assert.Equal(t, settings, fallback)

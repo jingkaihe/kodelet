@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -104,38 +105,73 @@ func init() {
 }
 
 func loadConfigFiles() error {
-	overrideConfigFile := strings.TrimSpace(os.Getenv(configFileEnv))
-	mode, err := configFileMode()
+	read, err := trustedConfigReader()
 	if err != nil {
 		return err
 	}
-	if overrideConfigFile != "" && mode == configFileModeIsolate {
-		return readConfigFile(overrideConfigFile, "isolated override")
+	return read(viper.GetViper())
+}
+
+// trustedConfigReader resolves the operator-owned config sources once and
+// returns a function that reads their current contents into a Viper instance:
+// the optional global file, then the explicit file merged over it or, in
+// isolated mode, alone. Repository environment settings are loaded separately
+// by each runner execution CWD.
+func trustedConfigReader() (func(*viper.Viper) error, error) {
+	explicit, mode, err := explicitConfigFile()
+	if err != nil {
+		return nil, err
 	}
-
-	// Process settings belong to the daemon/client/runner operator. Repository
-	// environment settings are loaded separately by each runner execution CWD.
-	viper.SetConfigName("config")
-	viper.SetConfigType("yaml")
-	viper.AddConfigPath("$HOME/.kodelet")
-
-	if err := viper.ReadInConfig(); err == nil {
-		if err := validateTrustedConfigPermissions(viper.ConfigFileUsed()); err != nil {
-			return err
+	var globalDir string
+	if explicit == "" || mode != configFileModeIsolate {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to locate the global config file")
 		}
-		logger.G(context.TODO()).WithField("config_file", viper.ConfigFileUsed()).Debug("Using global config file")
-	} else {
-		// Only a missing global file is optional; never run on silently ignored policy.
-		var missing viper.ConfigFileNotFoundError
-		if !errors.As(err, &missing) {
-			return errors.Wrapf(err, "failed to read global config file %q", viper.ConfigFileUsed())
+		globalDir = filepath.Join(home, ".kodelet")
+	}
+	return func(v *viper.Viper) error {
+		if globalDir != "" {
+			v.SetConfigName("config")
+			v.SetConfigType("yaml")
+			v.AddConfigPath(globalDir)
+			if err := v.ReadInConfig(); err != nil {
+				// Only a missing global file is optional; never run on silently ignored policy.
+				var missing viper.ConfigFileNotFoundError
+				if !errors.As(err, &missing) {
+					return errors.Wrapf(err, "failed to read global config file %q", v.ConfigFileUsed())
+				}
+			} else if err := validateTrustedConfigPermissions(v.ConfigFileUsed()); err != nil {
+				return err
+			}
 		}
-	}
+		if explicit == "" {
+			return nil
+		}
+		v.SetConfigFile(explicit)
+		if err := v.MergeInConfig(); err != nil {
+			return errors.Wrapf(err, "failed to read explicit config file %q", explicit)
+		}
+		return validateTrustedConfigPermissions(explicit)
+	}, nil
+}
 
-	if overrideConfigFile != "" {
-		return mergeConfigFile(overrideConfigFile, "override")
+// explicitConfigFile returns the absolute KODELET_CONFIG_FILE path, if any,
+// and the mode that decides whether it replaces the global file.
+func explicitConfigFile() (string, string, error) {
+	mode, err := configFileMode()
+	if err != nil {
+		return "", "", err
 	}
-	return nil
+	path := strings.TrimSpace(os.Getenv(configFileEnv))
+	if path == "" {
+		return "", mode, nil
+	}
+	path, err = filepath.Abs(path)
+	if err != nil {
+		return "", "", errors.Wrap(err, "failed to resolve the explicit config file")
+	}
+	return path, mode, nil
 }
 
 func configFileMode() (string, error) {
@@ -148,32 +184,6 @@ func configFileMode() (string, error) {
 	default:
 		return "", errors.Errorf("invalid %s value %q: must be %q or %q", configFileModeEnv, mode, configFileModeMerge, configFileModeIsolate)
 	}
-}
-
-func readConfigFile(configFile, label string) error {
-	viper.SetConfigFile(configFile)
-	if err := viper.ReadInConfig(); err == nil {
-		if err := validateTrustedConfigPermissions(configFile); err != nil {
-			return err
-		}
-		logger.G(context.TODO()).WithField("config_file", configFile).Debugf("Read %s config file", label)
-	} else {
-		return errors.Wrapf(err, "failed to read %s config file %q", label, configFile)
-	}
-	return nil
-}
-
-func mergeConfigFile(configFile, label string) error {
-	viper.SetConfigFile(configFile)
-	if err := viper.MergeInConfig(); err == nil {
-		if err := validateTrustedConfigPermissions(configFile); err != nil {
-			return err
-		}
-		logger.G(context.TODO()).WithField("config_file", configFile).Debugf("Merged %s config file", label)
-	} else {
-		return errors.Wrapf(err, "failed to merge %s config file %q", label, configFile)
-	}
-	return nil
 }
 
 func validateTrustedConfigPermissions(configFile string) error {

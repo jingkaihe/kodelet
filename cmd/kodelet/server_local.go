@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -148,21 +147,8 @@ func writeLocalServerFile(directory, name string, data []byte) error {
 	return os.Rename(file.Name(), filepath.Join(directory, name))
 }
 
-func localServerConfigIdentity() (string, string, error) {
-	path := strings.TrimSpace(os.Getenv(configFileEnv))
-	if path != "" {
-		var err error
-		path, err = filepath.Abs(path)
-		if err != nil {
-			return "", "", err
-		}
-	}
-	mode, err := configFileMode()
-	return path, mode, err
-}
-
 func publishLocalServer(directory, endpoint, token, instanceID string, managed bool, webURL string) error {
-	configFile, configMode, err := localServerConfigIdentity()
+	configFile, configMode, err := explicitConfigFile()
 	if err != nil {
 		return err
 	}
@@ -360,7 +346,7 @@ func ensureLocalServer(ctx context.Context, output io.Writer) (localServerConnec
 			return connection, readErr
 		}
 		if readErr == nil {
-			configFile, configMode, err := localServerConfigIdentity()
+			configFile, configMode, err := explicitConfigFile()
 			if err != nil {
 				return connection, err
 			}
