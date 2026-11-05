@@ -140,6 +140,33 @@ context:
 	}
 }
 
+func TestResourceSettingsApplyEnvironmentToKeysAddedAfterStartup(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv(configFileEnv, "")
+	t.Setenv(configFileModeEnv, configFileModeMerge)
+	t.Setenv("KODELET_EXTENSIONS_CONFIG_SUBAGENT_MAILBOX", "env")
+	resources, err := newResourceSettings(nil)
+	require.NoError(t, err)
+	initial, err := resources.Load()
+	require.NoError(t, err)
+	assert.NotContains(t, initial["extensions"], "config", "like AutomaticEnv, environment variables do not invent keys")
+
+	path := filepath.Join(home, ".kodelet", "config.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, []byte(`
+extensions:
+  config:
+    subagent:
+      mailbox: file
+      other: file
+`), 0o600))
+	updated, err := resources.Load()
+	require.NoError(t, err)
+	config := updated["extensions"].(map[string]any)["config"].(map[string]any)
+	assert.Equal(t, map[string]any{"mailbox": "env", "other": "file"}, config["subagent"])
+}
+
 func TestResourceSettingsPreserveContextOverrides(t *testing.T) {
 	for _, name := range []string{"environment", "flag"} {
 		t.Run(name, func(t *testing.T) {
