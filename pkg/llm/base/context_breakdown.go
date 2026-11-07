@@ -250,6 +250,18 @@ func (t *Thread) SetContextBreakdown(breakdown *llmtypes.ContextBreakdown) {
 	t.updateContextThinkingLocked()
 }
 
+// RestoreContextBreakdown restores the estimate and thinking bookkeeping after
+// a no-save call without rolling back billed usage.
+func (t *Thread) RestoreContextBreakdown(usage llmtypes.Usage) {
+	t.Mu.Lock()
+	defer t.Mu.Unlock()
+	if t.Usage == nil {
+		t.Usage = &llmtypes.Usage{}
+	}
+	t.Usage.ContextThinkingByResponse = maps.Clone(usage.ContextThinkingByResponse)
+	t.Usage.ContextBreakdown = cloneContextBreakdown(usage.ContextBreakdown)
+}
+
 // RecordContextThinking retains reported thinking independently of text estimates.
 // Repeated refreshes of the same response ID replace its count rather than add
 // it again. A retry with a new response ID contributes a separate count. Counts

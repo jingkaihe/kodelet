@@ -362,10 +362,7 @@ func (t *Thread) SendMessage(
 			t.SetCompactionHistory(originalHistory)
 			t.SetStructuredToolResults(originalResults)
 			t.RestoreMessageMetadata(originalMetadata)
-			t.Mu.Lock()
-			t.Usage.ContextThinkingByResponse = originalUsage.ContextThinkingByResponse
-			t.Mu.Unlock()
-			t.SetContextBreakdown(originalUsage.ContextBreakdown)
+			t.RestoreContextBreakdown(originalUsage)
 		}()
 	}
 

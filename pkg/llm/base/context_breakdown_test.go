@@ -124,6 +124,45 @@ func TestContextThinkingReportedUsageReplacesReplayedTextEstimate(t *testing.T) 
 	}
 }
 
+func TestRestoreContextBreakdown(t *testing.T) {
+	for _, name := range []string{"existing usage", "nil usage"} {
+		t.Run(name, func(t *testing.T) {
+			thread := NewThread(llmtypes.Config{}, "restore")
+			thread.SetContextBreakdown(&llmtypes.ContextBreakdown{
+				TotalTokens: 5, Tools: []llmtypes.ToolContextUsage{{Name: "bash", InputTokens: 5}},
+			})
+			thread.RecordContextThinking("original", 10)
+			snapshot := thread.GetUsage()
+			thread.RecordContextThinking("temporary", 20)
+			if name == "nil usage" {
+				thread.Usage = nil
+			} else {
+				thread.Usage.OutputTokens = 100
+				thread.Usage.OutputCost = 0.5
+			}
+
+			thread.RestoreContextBreakdown(snapshot)
+			restored := thread.GetUsage()
+			assert.Equal(t, snapshot.ContextBreakdown, restored.ContextBreakdown)
+			assert.Equal(t, snapshot.ContextThinkingByResponse, restored.ContextThinkingByResponse)
+			if name == "existing usage" {
+				assert.Equal(t, 100, restored.OutputTokens)
+				assert.Equal(t, 0.5, restored.OutputCost)
+			}
+
+			snapshot.ContextThinkingByResponse["original"] = 99
+			*snapshot.ContextBreakdown.ThinkingTokens = 99
+			snapshot.ContextBreakdown.Tools[0].InputTokens = 99
+			assert.Equal(t, restored, thread.GetUsage(), "restored state owns its snapshots")
+
+			thread.RestoreContextBreakdown(llmtypes.Usage{})
+			assert.Nil(t, thread.GetUsage().ContextBreakdown)
+			assert.Nil(t, thread.GetUsage().ContextThinkingByResponse)
+			assert.Equal(t, restored.OutputTokens, thread.GetUsage().OutputTokens)
+		})
+	}
+}
+
 func TestContextBreakdownAggregatesToolNamesAndNativeResults(t *testing.T) {
 	history := json.RawMessage(`[
 		{"role":"assistant","content":[
