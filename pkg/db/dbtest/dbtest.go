@@ -2,6 +2,7 @@
 package dbtest
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -26,4 +27,14 @@ func Open(t testing.TB, path string) *db.DB {
 func OpenTemp(t testing.TB) *db.DB {
 	t.Helper()
 	return Open(t, filepath.Join(t.TempDir(), "storage.db"))
+}
+
+// OpenDefault opens the migrated database at the default path. Tests must
+// first point KODELET_BASE_PATH at a temporary directory.
+func OpenDefault(t testing.TB) *db.DB {
+	t.Helper()
+	require.NotEmpty(t, os.Getenv("KODELET_BASE_PATH"), "tests must not open the user's database")
+	path, err := db.DefaultDBPath()
+	require.NoError(t, err)
+	return Open(t, path)
 }

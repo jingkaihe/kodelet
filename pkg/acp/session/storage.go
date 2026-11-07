@@ -1,7 +1,6 @@
 package session
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 	"sync"
@@ -70,49 +69,19 @@ type sessionState struct {
 
 // Storage handles persistence of ACP session updates using SQLite.
 type Storage struct {
-	dbPath string
-	db     *db.DB
+	db *db.DB
 
 	sessionsMu sync.Mutex
 	sessions   map[acptypes.SessionID]*sessionState
 }
 
-// StorageOption configures a Storage instance.
-type StorageOption func(*Storage)
-
-// WithDBPath sets a custom database path for session storage.
-func WithDBPath(path string) StorageOption {
-	return func(s *Storage) {
-		s.dbPath = path
-	}
-}
-
-// NewStorage creates a new SQLite-based session storage.
-// Note: Migrations should be run via db.RunMigrations() at CLI startup before calling this.
-func NewStorage(ctx context.Context, opts ...StorageOption) (*Storage, error) {
-	s := &Storage{
+// NewStorage returns ACP session update storage backed by database, which the
+// caller owns and closes after the storage. Migrations must have been applied.
+func NewStorage(database *db.DB) *Storage {
+	return &Storage{
+		db:       database,
 		sessions: make(map[acptypes.SessionID]*sessionState),
 	}
-
-	for _, opt := range opts {
-		opt(s)
-	}
-
-	if s.dbPath == "" {
-		dbPath, err := db.DefaultDBPath()
-		if err != nil {
-			return nil, err
-		}
-		s.dbPath = dbPath
-	}
-
-	sqlDB, err := db.Open(ctx, s.dbPath)
-	if err != nil {
-		return nil, err
-	}
-	s.db = sqlDB
-
-	return s, nil
 }
 
 func (s *Storage) getOrCreateSession(sessionID acptypes.SessionID) *sessionState {
@@ -294,7 +263,7 @@ func (s *Storage) Exists(sessionID acptypes.SessionID) bool {
 	return exists
 }
 
-// Close flushes all pending updates and closes the database connection.
+// Close flushes all pending updates. The database belongs to the caller.
 func (s *Storage) Close() error {
 	s.sessionsMu.Lock()
 	var flushErr error
@@ -307,11 +276,5 @@ func (s *Storage) Close() error {
 	}
 	s.sessions = make(map[acptypes.SessionID]*sessionState)
 	s.sessionsMu.Unlock()
-
-	if s.db != nil {
-		if err := s.db.Close(); err != nil {
-			return err
-		}
-	}
 	return flushErr
 }

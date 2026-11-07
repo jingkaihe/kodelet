@@ -722,17 +722,6 @@ func TestConversationService_ForkConversation(t *testing.T) {
 	})
 }
 
-func TestGetDefaultConversationServiceUsesDefaultStore(t *testing.T) {
-	t.Setenv("KODELET_BASE_PATH", t.TempDir())
-	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
-
-	service, err := GetDefaultConversationService(context.Background())
-
-	require.NoError(t, err)
-	require.NotNil(t, service)
-	require.NoError(t, service.Close())
-}
-
 func TestConversationService_Close(t *testing.T) {
 	t.Run("successful close", func(t *testing.T) {
 		mockStore := newMockConversationStore()

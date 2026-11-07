@@ -2104,28 +2104,10 @@ func (m *model) submitSteering() tea.Cmd {
 		}
 	}
 
-	steerStore, err := steer.NewSteerStore(m.ctx)
-	if err != nil {
-		m.err = errors.Wrap(err, "failed to initialize steer store")
-		m.steerError = fmt.Sprintf("Failed to queue steering: %v", err)
-		m.status = "steering failed"
-		m.refreshViewport(true)
-		return nil
-	}
-	defer steerStore.Close()
-
-	if _, err := steerStore.Enqueue(m.ctx, m.conversationID, message, nil); err != nil {
-		m.err = errors.Wrap(err, "failed to write steering message")
-		m.steerError = fmt.Sprintf("Failed to queue steering: %v", err)
-		m.status = "steering failed"
-		m.refreshViewport(true)
-		return nil
-	}
-
-	m.textarea.Reset()
-	m.queuedSteering = append(m.queuedSteering, message)
-	m.steerError = ""
-	m.status = "steering queued"
+	// Only the Kodelet server owns the steering queue.
+	m.err = errors.New("steering requires the Kodelet server")
+	m.steerError = "Steering requires the Kodelet server."
+	m.status = "steering failed"
 	m.refreshViewport(true)
 	return nil
 }

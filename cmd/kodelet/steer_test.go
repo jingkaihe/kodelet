@@ -100,10 +100,9 @@ func TestSteerConfigFromFlags(t *testing.T) {
 				}
 			}
 
-			// Mock the GetMostRecentConversationID function for follow tests
+			// Follow resolves the conversation through the server, so only
+			// verify the flag parsing here.
 			if tt.expectedConfig != nil && tt.expectedConfig.Follow {
-				// We can't easily mock the conversations package in this test,
-				// so we'll just verify the flag parsing works correctly
 				follow, err := cmd.Flags().GetBool("follow")
 				require.NoError(t, err)
 				assert.True(t, follow)

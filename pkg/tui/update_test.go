@@ -338,6 +338,12 @@ func TestRemoteSteeringUsesControlPlaneRunner(t *testing.T) {
 	assert.Equal(t, []string{"steer"}, runner.actions)
 	assert.Equal(t, []string{"focus on tests"}, m.queuedSteering)
 	assert.Equal(t, "steering queued", m.status)
+	m.width = 100
+	m.height = 30
+	m.resize()
+	content, _ := m.renderTranscript()
+	assert.Contains(t, content, "queued steering")
+	assert.Contains(t, content, "focus on tests")
 }
 
 func TestRemoteModelUsesControlPlaneProfileSettings(t *testing.T) {

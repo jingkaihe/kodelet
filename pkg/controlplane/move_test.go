@@ -15,6 +15,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	"github.com/jingkaihe/kodelet/pkg/runner/registry"
@@ -37,7 +38,6 @@ func newConversationMoveFixture(t *testing.T) *conversationMoveFixture {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
-	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
 	config := embeddedRunnerTestConfig(t)
 	config.EmbeddedRunner = nil
 	server, err := NewServer(t.Context(), config, testFrontendHandler())
@@ -47,9 +47,7 @@ func newConversationMoveFixture(t *testing.T) *conversationMoveFixture {
 	t.Cleanup(httpServer.Close)
 	client, err := chat.NewClient(httpServer.URL, "web-secret", "")
 	require.NoError(t, err)
-	store, err := conversations.GetConversationStore(t.Context())
-	require.NoError(t, err)
-	t.Cleanup(func() { assert.NoError(t, store.Close()) })
+	store := conversations.NewConversationStore(dbtest.OpenDefault(t))
 	return &conversationMoveFixture{server: server, client: client, store: store, url: httpServer.URL}
 }
 

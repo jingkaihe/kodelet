@@ -9,6 +9,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -41,8 +42,7 @@ func TestManagerLoadSessionRejectsInvalidCompactionHistory(t *testing.T) {
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
-	store, err := conversations.GetConversationStore(t.Context())
-	require.NoError(t, err)
+	store := conversations.NewConversationStore(dbtest.OpenDefault(t))
 	manager := &Manager{
 		config:   ManagerConfig{NoExtensions: true},
 		sessions: make(map[acptypes.SessionID]*Session),
@@ -273,7 +273,7 @@ func TestManagerCreatesAndLoadsSessionsWithLocalEnvironment(t *testing.T) {
 	assert.Equal(t, "loaded-session", loaded.Thread.GetConversationID())
 
 	require.NoError(t, manager.Close(t.Context()))
-	assert.True(t, store.isClosed())
+	assert.False(t, store.isClosed(), "the store belongs to the manager's caller")
 }
 
 func TestManagerBuildExtensionRuntimeHonorsConfiguration(t *testing.T) {

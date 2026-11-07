@@ -21,8 +21,10 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/acp/session"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
+	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
@@ -52,6 +54,8 @@ type Server struct {
 	sessionManager    *session.Manager
 	remoteSessions    *remoteSessionManager
 	sessionStorage    session.SessionStorage
+	database          *db.DB // local sessions only; owned by the caller
+	steer             *steer.Store
 	config            *ServerConfig
 	fragmentProcessor *fragments.Processor
 
@@ -142,6 +146,13 @@ func WithRemoteSessions(config RemoteSessionConfig) Option {
 	}
 }
 
+// WithDatabase persists local sessions, their replayable updates, and their
+// steering in database, which the caller owns and closes after Shutdown.
+// Without it, local sessions are not persisted. Remote sessions ignore it.
+func WithDatabase(database *db.DB) Option {
+	return func(s *Server) { s.database = database }
+}
+
 // NewServer creates a new ACP server
 func NewServer(opts ...Option) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -165,6 +176,12 @@ func NewServer(opts ...Option) *Server {
 	}
 
 	if s.remoteSessions == nil {
+		var storage llm.Storage
+		if s.database != nil {
+			s.steer = steer.NewStore(s.database)
+			storage = llm.Storage{Conversations: conversations.NewConversationStore(s.database), Steering: s.steer}
+			s.sessionStorage = session.NewStorage(s.database)
+		}
 		s.sessionManager = session.NewManager(session.ManagerConfig{
 			Provider:            s.config.Provider,
 			Model:               s.config.Model,
@@ -174,6 +191,7 @@ func NewServer(opts ...Option) *Server {
 			EnableFSSearchTools: s.config.EnableFSSearchTools,
 			MaxTurns:            s.config.MaxTurns,
 			CompactRatio:        s.config.CompactRatio,
+			Storage:             storage,
 		})
 
 		fp, err := fragments.NewFragmentProcessor()
@@ -181,13 +199,6 @@ func NewServer(opts ...Option) *Server {
 			logger.G(ctx).WithError(err).Warn("Failed to create fragment processor for slash commands")
 		}
 		s.fragmentProcessor = fp
-
-		storage, err := session.GetDefaultStorage(ctx)
-		if err != nil {
-			logger.G(ctx).WithError(err).Warn("Failed to create session storage for replay")
-		} else {
-			s.sessionStorage = storage
-		}
 	}
 
 	return s
@@ -439,12 +450,10 @@ func (s *Server) enqueueSessionSteering(sessionID acptypes.SessionID, message st
 		return err
 	}
 
-	store, err := steer.NewSteerStore(steerCtx)
-	if err != nil {
-		return err
+	if s.steer == nil {
+		return errors.New("steering requires a persisted session")
 	}
-	defer store.Close()
-	_, err = store.Enqueue(steerCtx, string(sessionID), message, images)
+	_, err := s.steer.Enqueue(steerCtx, string(sessionID), message, images)
 	return err
 }
 

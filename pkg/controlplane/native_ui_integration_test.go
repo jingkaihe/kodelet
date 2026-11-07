@@ -22,6 +22,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	runnerclient "github.com/jingkaihe/kodelet/pkg/runner/client"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
@@ -470,9 +471,7 @@ KODELET_NATIVE_UI_RELEASE_HELPER=1 exec %q -test.run '^TestNativeUIReleaseExtens
 			} else {
 				runnerID = startNativeReleaseRunnerProcess(t, server, endpoint, workspace)
 			}
-			store, err := conversations.GetConversationStore(t.Context())
-			require.NoError(t, err)
-			defer store.Close()
+			store := conversations.NewConversationStore(dbtest.OpenDefault(t))
 			record := convtypes.NewConversationRecord("native-release")
 			record.Provider, record.CWD, record.RawMessages = "anthropic", workspace, json.RawMessage(`[]`)
 			require.NoError(t, store.Save(t.Context(), record))

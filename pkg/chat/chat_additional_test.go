@@ -427,8 +427,7 @@ func TestResolveExtensionCallContextIncludesRecipeAndPersistedOrigin(t *testing.
 	)
 	child.ID = "conversation-shortcut"
 	child.Metadata["recipe_name"] = " persisted-review "
-	store, err := conversations.GetConversationStore(t.Context())
-	require.NoError(t, err)
+	store := conversations.NewConversationStore(dbtest.OpenDefault(t))
 	require.NoError(t, store.Save(t.Context(), child))
 	require.NoError(t, store.Close())
 
@@ -488,8 +487,7 @@ func TestExecutorExecutesRemoteDirectCommandAndPersistsAffinityMetadata(t *testi
 	child.Provider = "anthropic"
 	child.Metadata[RunnerIDMetadataKey] = "runner-one"
 	child.Metadata[EnvironmentProfileMetadataKey] = "gpu"
-	store, err := conversations.GetConversationStore(t.Context())
-	require.NoError(t, err)
+	store := conversations.NewConversationStore(dbtest.OpenDefault(t))
 	require.NoError(t, store.Save(t.Context(), child))
 	require.NoError(t, store.Close())
 
@@ -530,9 +528,7 @@ func TestExecutorExecutesRemoteDirectCommandAndPersistsAffinityMetadata(t *testi
 	require.NotNil(t, sink.events[2].Result)
 	assert.Equal(t, "runner ready", *sink.events[2].Result)
 
-	service, err := conversations.GetDefaultConversationService(t.Context())
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	service := conversations.NewConversationService(testStorage.Conversations)
 	record, err := service.GetConversation(t.Context(), conversationID)
 	require.NoError(t, err)
 	assert.Equal(t, "/runner/other-project", record.CWD)
@@ -738,14 +734,12 @@ func TestExecutorPersistsFreshChildAndPreservesParentOnResume(t *testing.T) {
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
 	testStorage := openTestStorage(t)
-	store, err := conversations.GetConversationStore(t.Context())
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	store := conversations.NewConversationStore(dbtest.OpenDefault(t))
 	parent := convtypes.NewConversationRecord("parent")
 	require.NoError(t, store.Save(t.Context(), parent))
 	runner := NewExecutor(t.TempDir(), testStorage, &fakeExtensionRuntimeProvider{})
 	t.Cleanup(func() { require.NoError(t, runner.Close()) })
-	_, err = runner.Run(t.Context(), ChatRequest{ConversationID: "child", ParentConversationID: parent.ID, Message: "/rename Child"}, &recordingChatSink{})
+	_, err := runner.Run(t.Context(), ChatRequest{ConversationID: "child", ParentConversationID: parent.ID, Message: "/rename Child"}, &recordingChatSink{})
 	require.NoError(t, err)
 	record, err := store.Load(t.Context(), "child")
 	require.NoError(t, err)
@@ -777,9 +771,7 @@ func TestExecutorValidatesParentAgainAtInitialCheckpoint(t *testing.T) {
 			t.Setenv("KODELET_BASE_PATH", t.TempDir())
 			require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
 			testStorage := openTestStorage(t)
-			store, err := conversations.GetConversationStore(t.Context())
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, store.Close()) })
+			store := conversations.NewConversationStore(dbtest.OpenDefault(t))
 			require.NoError(t, store.Save(t.Context(), convtypes.NewConversationRecord("parent")))
 			environment := &directCommandEnvironment{
 				manifest: agentenv.Manifest{WorkingDirectory: "/runner/project"},
@@ -805,7 +797,7 @@ func TestExecutorValidatesParentAgainAtInitialCheckpoint(t *testing.T) {
 			runner := NewExecutor("", testStorage)
 			runner.SetEnvironmentResolver(&recordingEnvironmentResolver{environment: environment})
 			t.Cleanup(func() { require.NoError(t, runner.Close()) })
-			_, err = runner.Run(t.Context(), ChatRequest{ConversationID: "child", ParentConversationID: "parent", RunnerID: "runner", Message: "inspect"}, &recordingChatSink{})
+			_, err := runner.Run(t.Context(), ChatRequest{ConversationID: "child", ParentConversationID: "parent", RunnerID: "runner", Message: "inspect"}, &recordingChatSink{})
 			if conflict {
 				require.ErrorContains(t, err, "cannot be assigned or changed")
 				record, err := store.Load(t.Context(), "child")

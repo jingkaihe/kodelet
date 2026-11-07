@@ -406,7 +406,7 @@ func TestManagerCancel(t *testing.T) {
 	})
 }
 
-func TestManagerCloseClosesSessionsAndStore(t *testing.T) {
+func TestManagerCloseClosesSessionsAndDetachesStore(t *testing.T) {
 	store := &fakeConversationStore{}
 	session := &Session{ID: "session-1"}
 	manager := &Manager{
@@ -420,24 +420,11 @@ func TestManagerCloseClosesSessionsAndStore(t *testing.T) {
 	require.NoError(t, manager.Close(context.Background()))
 
 	assert.True(t, session.IsCancelled())
-	assert.True(t, store.isClosed())
+	assert.False(t, store.isClosed(), "the store belongs to the manager's caller")
 	assert.Empty(t, manager.sessions)
 	assert.Nil(t, manager.store)
 
 	got, err := manager.GetSession(session.ID)
 	assert.Nil(t, got)
 	assert.ErrorContains(t, err, "session not found")
-}
-
-func TestManagerCloseReturnsStoreCloseError(t *testing.T) {
-	expectedErr := errors.New("close store failed")
-	manager := &Manager{
-		sessions: make(map[acptypes.SessionID]*Session),
-		store:    &fakeConversationStore{closeErr: expectedErr},
-	}
-
-	err := manager.Close(context.Background())
-
-	assert.ErrorIs(t, err, expectedErr)
-	assert.Nil(t, manager.store)
 }

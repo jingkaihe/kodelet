@@ -21,25 +21,12 @@ import (
 // Store implements ConversationStore using SQLite database
 type Store struct {
 	db *db.DB
-	// owned reports whether Close closes db. Only OpenStore owns its handle.
-	owned bool
 }
 
-// NewStore returns a conversation store backed by database. The caller owns
-// database and closes it after the store is no longer used; Store.Close does
-// not close it. Migrations must have been applied.
+// NewStore returns a conversation store backed by database, which the caller
+// owns and closes after the store. Migrations must have been applied.
 func NewStore(database *db.DB) *Store {
 	return &Store{db: database}
-}
-
-// OpenStore opens a conversation store with its own database handle, which
-// Close releases. Prefer NewStore with the process's shared handle.
-func OpenStore(ctx context.Context, dbPath string) (*Store, error) {
-	database, err := db.Open(ctx, dbPath)
-	if err != nil {
-		return nil, err
-	}
-	return &Store{db: database, owned: true}, nil
 }
 
 // Save persists a conversation record to the database using UPSERT to preserve created_at timestamps
@@ -515,11 +502,7 @@ func listCWDs(ctx context.Context, queryer sqlx.QueryerContext) ([]string, error
 	return cwds, nil
 }
 
-// Close closes the database handle if the store opened it with OpenStore.
-// A store from NewStore leaves its handle to the caller.
+// Close releases nothing: the database belongs to the caller of NewStore.
 func (s *Store) Close() error {
-	if s == nil || s.db == nil || !s.owned {
-		return nil
-	}
-	return s.db.Close()
+	return nil
 }

@@ -1,8 +1,6 @@
 package session
 
 import (
-	"context"
-
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 )
 
@@ -17,14 +15,4 @@ type SessionStorage interface {
 	CloseSession(sessionID acptypes.SessionID) error
 	Exists(sessionID acptypes.SessionID) bool
 	Close() error
-}
-
-// GetDefaultStorage returns the default storage implementation (SQLite).
-func GetDefaultStorage(ctx context.Context) (SessionStorage, error) {
-	storage, err := NewStorage(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	return storage, nil
 }

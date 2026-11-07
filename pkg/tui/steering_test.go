@@ -108,48 +108,7 @@ func TestBackgroundQueuedSlashCommandPreservesBothDrafts(t *testing.T) {
 	assert.True(t, background.running)
 }
 
-func TestRunningComposerQueuesSteering(t *testing.T) {
-	homeDir := setupTUIConversationStore(context.Background(), t)
-	t.Setenv("HOME", homeDir)
-
-	m := newModel(context.Background(), Config{ConversationID: "conversation-123456789"})
-	t.Cleanup(m.cancel)
-	m.width = 100
-	m.height = 30
-	m.resize()
-	m.running = true
-	m.activeRunID = 1
-	m.entries = []chatEntry{
-		{kind: entryUser, content: "go on"},
-		{kind: entryAssistant, blocks: []assistantBlock{{kind: blockText, text: "working on it"}}},
-	}
-	m.textarea.SetValue("please focus on tests")
-
-	updated, cmd := m.Update(keyPress(tea.KeyEnter))
-	m = updated.(model)
-
-	assert.Nil(t, cmd)
-	assert.True(t, m.running)
-	assert.Equal(t, "steering queued", m.status)
-	assert.Empty(t, m.textarea.Value())
-	assert.Equal(t, []string{"please focus on tests"}, m.queuedSteering)
-	content, _ := m.renderTranscript()
-	assert.Contains(t, content, "queued steering")
-	assert.Contains(t, content, "please focus on tests")
-
-	steerStore, err := steer.NewSteerStore(context.Background())
-	require.NoError(t, err)
-	defer steerStore.Close()
-	pending, err := steerStore.Peek(context.Background(), "conversation-123456789")
-	require.NoError(t, err)
-	require.Len(t, pending, 1)
-	assert.Equal(t, "please focus on tests", pending[0].Content)
-}
-
-func TestRunningComposerGeneratesConversationBeforeQueueingSteering(t *testing.T) {
-	homeDir := setupTUIConversationStore(context.Background(), t)
-	t.Setenv("HOME", homeDir)
-
+func TestLocalComposerSteeringRequiresServer(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)
 	m.width = 100
@@ -162,15 +121,14 @@ func TestRunningComposerGeneratesConversationBeforeQueueingSteering(t *testing.T
 	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m = updated.(model)
 
+	// Only the Kodelet server owns the steering queue; the TUI never opens it.
 	assert.Nil(t, cmd)
+	assert.True(t, m.running)
 	require.NotEmpty(t, m.conversationID)
-	steerStore, err := steer.NewSteerStore(context.Background())
-	require.NoError(t, err)
-	defer steerStore.Close()
-	pending, err := steerStore.Peek(context.Background(), m.conversationID)
-	require.NoError(t, err)
-	require.Len(t, pending, 1)
-	assert.Equal(t, "new chat steering", pending[0].Content)
+	assert.Equal(t, "steering failed", m.status)
+	assert.Equal(t, "Steering requires the Kodelet server.", m.steerError)
+	assert.Equal(t, "new chat steering", m.textarea.Value(), "the draft must survive")
+	assert.Empty(t, m.queuedSteering)
 }
 
 func TestRunningComposerRejectsOverlongSteering(t *testing.T) {

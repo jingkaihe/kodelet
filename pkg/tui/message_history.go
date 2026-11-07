@@ -8,7 +8,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/jingkaihe/kodelet/pkg/chat"
-	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 )
@@ -117,9 +116,6 @@ func (m *model) persistSubmittedMessageCommandForState(state *conversationState,
 
 	return func() tea.Msg {
 		if scopeCWD == "" {
-			scopeCWD = resolveStoredMessageHistoryScope(context.Background(), conversationID)
-		}
-		if scopeCWD == "" {
 			return nil
 		}
 		entry := messagehistory.Entry{
@@ -133,22 +129,6 @@ func (m *model) persistSubmittedMessageCommandForState(state *conversationState,
 		_ = store.Append(context.Background(), entry)
 		return nil
 	}
-}
-
-func resolveStoredMessageHistoryScope(ctx context.Context, conversationID string) string {
-	if strings.TrimSpace(conversationID) != "" {
-		service, err := conversations.GetDefaultConversationService(ctx)
-		if err == nil {
-			response, loadErr := service.GetConversation(ctx, conversationID)
-			_ = service.Close()
-			if loadErr == nil && strings.TrimSpace(response.CWD) != "" {
-				if scopeCWD, err := messagehistory.ResolveScopeCWD(response.CWD); err == nil {
-					return scopeCWD
-				}
-			}
-		}
-	}
-	return ""
 }
 
 func (m *model) prependMessageHistoryTexts(messages []string) {

@@ -6,6 +6,7 @@ import (
 
 	conversationservice "github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -534,8 +535,7 @@ func TestExecutionOptionsRejectedBeforeEnvironmentEffects(t *testing.T) {
 	record := convtypes.NewConversationRecord("frozen-options")
 	record.Provider = "anthropic"
 	record.Metadata = metadata
-	store, err := conversationservice.GetConversationStore(t.Context())
-	require.NoError(t, err)
+	store := conversationservice.NewConversationStore(dbtest.OpenDefault(t))
 	require.NoError(t, store.Save(t.Context(), record))
 	require.NoError(t, store.Close())
 

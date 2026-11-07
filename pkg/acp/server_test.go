@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +18,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/acp/session"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
@@ -132,24 +132,6 @@ func mustJSONRawMessage(t *testing.T, value any) json.RawMessage {
 	payload, err := json.Marshal(value)
 	require.NoError(t, err)
 	return payload
-}
-
-func lockServerTestDatabase(t *testing.T, dbPath string) func() {
-	t.Helper()
-
-	db, err := sql.Open("sqlite", dbPath)
-	require.NoError(t, err)
-
-	_, err = db.Exec("CREATE TABLE IF NOT EXISTS t (id INTEGER PRIMARY KEY)")
-	require.NoError(t, err)
-
-	_, err = db.Exec("BEGIN EXCLUSIVE")
-	require.NoError(t, err)
-
-	return func() {
-		_, _ = db.Exec("ROLLBACK")
-		_ = db.Close()
-	}
 }
 
 func TestServer_Initialize(t *testing.T) {
@@ -635,12 +617,7 @@ func TestServer_SendTransientUpdateDoesNotPersist(t *testing.T) {
 	assert.Equal(t, "session/update", notif["method"])
 }
 
-func TestServer_SendUpdate_WithUnavailableStorage(t *testing.T) {
-	tmpDir := t.TempDir()
-	unlock := lockServerTestDatabase(t, filepath.Join(tmpDir, "storage.db"))
-	defer unlock()
-	t.Setenv("KODELET_BASE_PATH", tmpDir)
-
+func TestServer_SendUpdate_WithoutDatabase(t *testing.T) {
 	input := bytes.NewBuffer(nil)
 	output := bytes.NewBuffer(nil)
 
@@ -717,12 +694,7 @@ func TestServer_Shutdown(t *testing.T) {
 	}
 }
 
-func TestServer_Shutdown_WithUnavailableStorage(t *testing.T) {
-	tmpDir := t.TempDir()
-	unlock := lockServerTestDatabase(t, filepath.Join(tmpDir, "storage.db"))
-	defer unlock()
-	t.Setenv("KODELET_BASE_PATH", tmpDir)
-
+func TestServer_Shutdown_WithoutDatabase(t *testing.T) {
 	input := bytes.NewBuffer(nil)
 	output := bytes.NewBuffer(nil)
 
@@ -745,14 +717,13 @@ func TestServer_Shutdown_WithUnavailableStorage(t *testing.T) {
 
 func TestServer_SessionSteeringReturnsPromptRequiredWhenIdleAndQueuesDuringPrompt(t *testing.T) {
 	restoreViperExtensionsForTest(t)
-	basePath := t.TempDir()
-	t.Setenv("KODELET_BASE_PATH", basePath)
-	require.NoError(t, db.RunMigrations(context.Background(), migrations.All()))
+	database := dbtest.OpenTemp(t)
 	output := bytes.NewBuffer(nil)
 	server := NewServer(
 		WithOutput(output),
 		WithContext(context.Background()),
 		WithConfig(&ServerConfig{Provider: "anthropic", Model: "claude-test", NoSkills: true}),
+		WithDatabase(database),
 	)
 	t.Cleanup(server.Shutdown)
 	server.initialized.Store(true)
@@ -777,9 +748,7 @@ func TestServer_SessionSteeringReturnsPromptRequiredWhenIdleAndQueuesDuringPromp
 	message := readJSONRPCMessage(t, output)
 	assert.Equal(t, map[string]any{"outcome": "injected"}, message["result"])
 
-	store, err := steer.NewSteerStore(context.Background())
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	store := steer.NewStore(database)
 	pending, err := store.Peek(context.Background(), string(sessionID))
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
@@ -1061,6 +1030,7 @@ func TestServer_ExtensionCommandsAreAvailableForSession(t *testing.T) {
 		WithOutput(io.Discard),
 		WithContext(context.Background()),
 		WithConfig(&ServerConfig{Provider: "anthropic", Model: "claude-test", NoSkills: true}),
+		WithDatabase(dbtest.OpenTemp(t)),
 	)
 	t.Cleanup(func() { server.Shutdown() })
 	sess, err := server.sessionManager.NewSession(context.Background(), acptypes.NewSessionRequest{CWD: workspace})
@@ -1082,6 +1052,7 @@ func TestServer_ExtensionRespondCommandBypassesAgent(t *testing.T) {
 		WithOutput(output),
 		WithContext(context.Background()),
 		WithConfig(&ServerConfig{Provider: "anthropic", Model: "claude-test", NoSkills: true}),
+		WithDatabase(dbtest.OpenTemp(t)),
 	)
 	t.Cleanup(func() { server.Shutdown() })
 	server.initialized.Store(true)
@@ -1123,19 +1094,14 @@ func TestServer_ExtensionRespondCommandBypassesAgent(t *testing.T) {
 
 func TestServer_RenameCommandPersistsWithoutCallingAgent(t *testing.T) {
 	restoreViperExtensionsForTest(t)
-	basePath := t.TempDir()
-	t.Setenv("KODELET_BASE_PATH", basePath)
-	sqlDB, err := db.Open(context.Background(), filepath.Join(basePath, "storage.db"))
-	require.NoError(t, err)
-	require.NoError(t, db.NewMigrationRunner(sqlDB).Run(context.Background(), migrations.All()))
-	require.NoError(t, sqlDB.Close())
-
+	database := dbtest.OpenTemp(t)
 	output := bytes.NewBuffer(nil)
 	server := NewServer(
 		WithInput(bytes.NewBuffer(nil)),
 		WithOutput(output),
 		WithContext(context.Background()),
 		WithConfig(&ServerConfig{Provider: "anthropic", Model: "claude-test", NoSkills: true}),
+		WithDatabase(database),
 	)
 	t.Cleanup(func() { server.Shutdown() })
 	server.initialized.Store(true)
@@ -1168,9 +1134,7 @@ func TestServer_RenameCommandPersistsWithoutCallingAgent(t *testing.T) {
 	assert.Equal(t, string(acptypes.StopReasonEndTurn), result["stopReason"])
 	assert.Contains(t, storage.flushed, sess.ID)
 
-	service, err := conversations.GetDefaultConversationService(context.Background())
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = service.Close() })
+	service := conversations.NewConversationService(conversations.NewConversationStore(database))
 	record, err := service.GetConversation(context.Background(), string(sess.ID))
 	require.NoError(t, err)
 	assert.Equal(t, "Authentication cleanup", record.Summary)
@@ -1185,6 +1149,7 @@ func TestServer_LocalReloadRejectsBeforeCommandOrModelDispatch(t *testing.T) {
 		WithOutput(output),
 		WithContext(t.Context()),
 		WithConfig(&ServerConfig{Provider: "anthropic", Model: "claude-test", NoSkills: true}),
+		WithDatabase(dbtest.OpenTemp(t)),
 	)
 	t.Cleanup(server.Shutdown)
 	server.initialized.Store(true)
@@ -1214,6 +1179,7 @@ func TestServer_ExtensionRunAgentCommandTransformsPrompt(t *testing.T) {
 		WithOutput(io.Discard),
 		WithContext(context.Background()),
 		WithConfig(&ServerConfig{Provider: "anthropic", Model: "claude-test", NoSkills: true}),
+		WithDatabase(dbtest.OpenTemp(t)),
 	)
 	t.Cleanup(func() { server.Shutdown() })
 	sess, err := server.sessionManager.NewSession(context.Background(), acptypes.NewSessionRequest{CWD: workspace})

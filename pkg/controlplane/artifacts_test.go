@@ -215,11 +215,7 @@ func TestImageArtifactRunnerRoundTrip(t *testing.T) {
 	assert.Equal(t, protocol.ErrorCodeStale, rpcErr.Code)
 
 	// History stores IDs, not the advertised host. A restarted server can choose a new host.
-	store, err := conversations.GetConversationStore(t.Context())
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		assert.NoError(t, store.Close())
-	})
+	store := conversations.NewConversationStore(dbtest.OpenDefault(t))
 	require.NoError(t, store.Save(t.Context(), convtypes.ConversationRecord{
 		ID:          "image-conversation",
 		Provider:    "anthropic",

@@ -61,15 +61,6 @@ func (s *ConversationService) SetSearchIndex(index SearchIndex) {
 	s.searchIndex = index
 }
 
-// GetDefaultConversationService returns a service with the default store
-func GetDefaultConversationService(ctx context.Context) (*ConversationService, error) {
-	store, err := GetConversationStore(ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get conversation store")
-	}
-	return NewConversationService(store), nil
-}
-
 // ListConversationsRequest represents a request to list conversations
 type ListConversationsRequest struct {
 	StartDate     *time.Time `json:"startDate,omitempty"`

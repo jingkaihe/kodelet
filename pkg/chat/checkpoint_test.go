@@ -11,6 +11,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -62,9 +63,7 @@ func TestPendingUserCheckpointPreservesLiveContextAcrossProviders(t *testing.T) 
 			after, err := thread.GetMessages()
 			require.NoError(t, err)
 			assert.Equal(t, before, after, "checkpoint must not enter live pre-turn compaction/user.message context")
-			store, err := conversations.GetConversationStore(t.Context())
-			require.NoError(t, err)
-			defer store.Close()
+			store := conversations.NewConversationStore(dbtest.OpenDefault(t))
 			record, err := store.Load(t.Context(), "checkpoint")
 			require.NoError(t, err)
 			assert.Equal(t, config.WorkingDirectory, record.CWD)
@@ -131,9 +130,7 @@ func TestResumeLoadFailurePreservesDurableTranscript(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
 	testStorage := openTestStorage(t)
-	store, err := conversations.GetConversationStore(t.Context())
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	store := conversations.NewConversationStore(dbtest.OpenDefault(t))
 	dbPath, err := db.DefaultDBPath()
 	require.NoError(t, err)
 	sqlDB, err := db.Open(t.Context(), dbPath)

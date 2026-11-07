@@ -13,8 +13,6 @@ import (
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	convdb "github.com/jingkaihe/kodelet/pkg/db"
-	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
@@ -335,17 +333,6 @@ func TestConversationSourcesNeverFallBackToLocalStore(t *testing.T) {
 	assert.Equal(t, "unchanged", string(data))
 }
 
-func setupTUIConversationStore(ctx context.Context, t *testing.T) string {
-	t.Helper()
-	basePath := t.TempDir()
-	t.Setenv("KODELET_BASE_PATH", basePath)
-	database, err := convdb.Open(ctx, filepath.Join(basePath, "storage.db"))
-	require.NoError(t, err)
-	require.NoError(t, convdb.NewMigrationRunner(database).Run(ctx, migrations.All()))
-	require.NoError(t, database.Close())
-	return basePath
-}
-
 func TestInitialHistoryErrorIsVisibleInTranscript(t *testing.T) {
 	m := newModel(context.Background(), Config{ConversationID: "missing-conversation"})
 	t.Cleanup(m.cancel)
@@ -476,41 +463,6 @@ func TestInitialHistoryRefreshesCWDAndScopeForActiveRun(t *testing.T) {
 	assert.Nil(t, m.messageHistory)
 	assert.Nil(t, m.historySearch)
 	assert.Equal(t, []chatEntry{{kind: entryUser, content: "local prompt"}}, m.entries)
-}
-
-func TestFastSubmitBeforeInitialHistoryPersistsToStoredConversationScope(t *testing.T) {
-	ctx := context.Background()
-	basePath := setupTUIConversationStore(ctx, t)
-	shell := t.TempDir()
-	project := t.TempDir()
-
-	store, err := conversations.GetConversationStore(ctx)
-	require.NoError(t, err)
-	record := convtypes.NewConversationRecord("conversation-123456789")
-	record.CWD = project
-	require.NoError(t, store.Save(ctx, record))
-	require.NoError(t, store.Close())
-
-	runner := &recordingRunner{conversationID: record.ID}
-	m := newModel(ctx, Config{ConversationID: record.ID, CWD: shell, Runner: runner})
-	t.Cleanup(m.cancel)
-	assert.True(t, m.initialHistoryPending)
-	assert.Empty(t, m.messageHistoryScopeCWD)
-
-	m.textarea.SetValue(" fast prompt ")
-	cmd := m.submit()
-	require.NotNil(t, cmd)
-	_ = cmd()
-
-	historyStore := messagehistory.NewStoreWithBasePath(basePath)
-	projectEntries, err := historyStore.List(ctx, project, messagehistory.MaxEntriesPerScope)
-	require.NoError(t, err)
-	require.Len(t, projectEntries, 1)
-	assert.Equal(t, "fast prompt", projectEntries[0].Text)
-
-	shellEntries, err := historyStore.List(ctx, shell, messagehistory.MaxEntriesPerScope)
-	require.NoError(t, err)
-	assert.Empty(t, shellEntries)
 }
 
 func TestInitialHistorySeedsEmptyTranscript(t *testing.T) {

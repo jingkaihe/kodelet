@@ -126,7 +126,6 @@ func TestHandlerServesHomeScreenAssets(t *testing.T) {
 
 func TestHandlerComposesWithControlPlaneRoutesAndAuthentication(t *testing.T) {
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
-	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
 
 	frontend, err := NewHandler()

@@ -13,6 +13,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	conversationservice "github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm"
@@ -190,9 +191,7 @@ data: {"type":"message_stop"}
 				assert.Equal(t, profile.Name, name)
 				return ResolveExtensionProfile(profile, effort)
 			})
-			store, err := conversationservice.GetConversationStore(ctx)
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, store.Close()) })
+			store := conversationservice.NewConversationStore(dbtest.OpenDefault(t))
 			conversationID := ""
 			for turn := range 2 {
 				config, err := ResolveRemoteConfigWithReasoning(ctx, testStorage.Conversations, conversationID, profile.Name, "")

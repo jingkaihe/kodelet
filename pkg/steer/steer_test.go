@@ -9,13 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/db"
-	"github.com/jingkaihe/kodelet/pkg/db/migrations"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewSteerStoreUsesMigratedSchema(t *testing.T) {
+func TestNewStoreUsesMigratedSchema(t *testing.T) {
 	store, _ := newTestStore(t)
 
 	var tableCount int
@@ -216,9 +215,8 @@ func TestConcurrentEnqueueDoesNotLoseMessages(t *testing.T) {
 func TestCompetingConsumersDoNotDuplicateMessages(t *testing.T) {
 	ctx := context.Background()
 	firstStore, dbPath := newTestStore(t)
-	secondStore, err := NewSteerStore(ctx, WithDBPath(dbPath))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = secondStore.Close() })
+	// A second handle stands in for another process.
+	secondStore := NewStore(dbtest.Open(t, dbPath))
 
 	for i := 0; i < 5; i++ {
 		_, err := firstStore.Enqueue(ctx, "test-consumers", fmt.Sprintf("Message %d", i), nil)
@@ -255,15 +253,13 @@ func TestConsumeFailureReturnsNoMessages(t *testing.T) {
 	store, dbPath := newTestStore(t)
 	_, err := store.Enqueue(ctx, "test-failure", "Keep me queued", nil)
 	require.NoError(t, err)
-	require.NoError(t, store.Close())
+	require.NoError(t, store.db.Close())
 
 	messages, err := store.Consume(ctx, "test-failure")
 	require.Error(t, err)
 	assert.Empty(t, messages)
 
-	reopened, err := NewSteerStore(ctx, WithDBPath(dbPath))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = reopened.Close() })
+	reopened := NewStore(dbtest.Open(t, dbPath))
 	pending, err := reopened.Peek(ctx, "test-failure")
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
@@ -272,15 +268,6 @@ func TestConsumeFailureReturnsNoMessages(t *testing.T) {
 
 func newTestStore(t *testing.T) (*Store, string) {
 	t.Helper()
-	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "storage.db")
-	database, err := db.Open(ctx, dbPath)
-	require.NoError(t, err)
-	require.NoError(t, db.NewMigrationRunner(database).Run(ctx, migrations.All()))
-	require.NoError(t, database.Close())
-
-	store, err := NewSteerStore(ctx, WithDBPath(dbPath))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-	return store, dbPath
+	return NewStore(dbtest.Open(t, dbPath)), dbPath
 }

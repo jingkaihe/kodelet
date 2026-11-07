@@ -45,61 +45,12 @@ type Message struct {
 // Store manages the steering queue in Kodelet's shared SQLite database.
 type Store struct {
 	db *db.DB
-	// owned reports whether Close closes db. Only NewSteerStore owns its handle.
-	owned bool
 }
 
-// NewStore returns a steering queue backed by database. The caller owns
-// database; Store.Close does not close it. Migrations must have been applied.
+// NewStore returns a steering queue backed by database, which the caller
+// owns and closes after the store. Migrations must have been applied.
 func NewStore(database *db.DB) *Store {
 	return &Store{db: database}
-}
-
-type storeConfig struct {
-	dbPath string
-}
-
-// StoreOption configures a steering store.
-type StoreOption func(*storeConfig)
-
-// WithDBPath overrides the shared database path. It is primarily useful for tests.
-func WithDBPath(dbPath string) StoreOption {
-	return func(config *storeConfig) {
-		config.dbPath = dbPath
-	}
-}
-
-// NewSteerStore opens a steering queue with its own database handle, which
-// Close releases. Prefer NewStore with the process's shared handle.
-// Database migrations must be applied before the store is used.
-func NewSteerStore(ctx context.Context, opts ...StoreOption) (*Store, error) {
-	config := storeConfig{}
-	for _, opt := range opts {
-		opt(&config)
-	}
-
-	if strings.TrimSpace(config.dbPath) == "" {
-		dbPath, err := db.DefaultDBPath()
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to resolve steering database path")
-		}
-		config.dbPath = dbPath
-	}
-
-	database, err := db.Open(ctx, config.dbPath)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to open steering database")
-	}
-
-	return &Store{db: database, owned: true}, nil
-}
-
-// Close closes the database handle if NewSteerStore opened it.
-func (s *Store) Close() error {
-	if s == nil || s.db == nil || !s.owned {
-		return nil
-	}
-	return s.db.Close()
 }
 
 // Enqueue appends a steering message and reports whether messages were already queued.

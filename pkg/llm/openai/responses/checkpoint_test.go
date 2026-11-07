@@ -10,6 +10,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
@@ -254,9 +255,7 @@ func TestResponsesEndHookTurnBudgetPersistsRevisions(t *testing.T) {
 		t.Run(hook, func(t *testing.T) {
 			t.Setenv("KODELET_BASE_PATH", t.TempDir())
 			require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
-			store, err := conversations.GetConversationStore(t.Context())
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, store.Close()) })
+			store := conversations.NewConversationStore(dbtest.OpenDefault(t))
 
 			for run, phase := range []struct {
 				revision  int64

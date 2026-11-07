@@ -15,7 +15,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	pkgerrors "github.com/pkg/errors"
@@ -119,6 +118,9 @@ type ManagerConfig struct {
 	EnableFSSearchTools bool
 	MaxTurns            int
 	CompactRatio        float64
+	// Storage holds the stores session threads use. Its database belongs to
+	// the caller; without a conversation store, sessions are not persisted.
+	Storage llm.Storage
 }
 
 // Manager manages ACP sessions
@@ -127,27 +129,15 @@ type Manager struct {
 
 	sessions map[acptypes.SessionID]*Session
 	store    conversations.ConversationStore
-	steering *steer.Store
 	mu       sync.RWMutex
 }
 
 // NewManager creates a new session manager
 func NewManager(cfg ManagerConfig) *Manager {
-	ctx := context.Background()
-	store, err := conversations.GetConversationStore(ctx)
-	if err != nil {
-		logger.G(ctx).WithError(err).Warn("Failed to create conversation store for ACP sessions")
-	}
-	steering, err := steer.NewSteerStore(ctx)
-	if err != nil {
-		logger.G(ctx).WithError(err).Warn("Failed to open the steering queue for ACP sessions")
-	}
-
 	return &Manager{
 		config:   cfg,
 		sessions: make(map[acptypes.SessionID]*Session),
-		store:    store,
-		steering: steering,
+		store:    cfg.Storage.Conversations,
 	}
 }
 
@@ -379,7 +369,8 @@ func (m *Manager) Cancel(id acptypes.SessionID) error {
 	return nil
 }
 
-// Close releases session-scoped resources and conversation storage.
+// Close releases session-scoped resources and detaches the conversation store,
+// which belongs to the caller.
 func (m *Manager) Close(ctx context.Context) error {
 	m.mu.Lock()
 	sessions := make([]*Session, 0, len(m.sessions))
@@ -387,8 +378,7 @@ func (m *Manager) Close(ctx context.Context) error {
 		sessions = append(sessions, session)
 	}
 	m.sessions = make(map[acptypes.SessionID]*Session)
-	store, steering := m.store, m.steering
-	m.store, m.steering = nil, nil
+	m.store = nil
 	m.mu.Unlock()
 
 	var result error
@@ -400,15 +390,6 @@ func (m *Manager) Close(ctx context.Context) error {
 			result = multierror.Append(result, err)
 		}
 	}
-	if store != nil {
-		if err := store.Close(); err != nil {
-			result = multierror.Append(result, err)
-		}
-	}
-	if err := steering.Close(); err != nil {
-		result = multierror.Append(result, err)
-	}
-
 	return result
 }
 
@@ -416,5 +397,5 @@ func (m *Manager) Close(ctx context.Context) error {
 func (m *Manager) threadStorage() llm.Storage {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return llm.Storage{Conversations: m.store, Steering: m.steering}
+	return llm.Storage{Conversations: m.store, Steering: m.config.Storage.Steering}
 }

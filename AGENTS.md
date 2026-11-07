@@ -15,6 +15,7 @@ Opt-in code mode uses a runner-local QuickJS/WASM runtime and tool catalog in `p
 - Use `github.com/pkg/errors` (`errors.Wrap`/`Wrapf`) rather than `fmt.Errorf` for stack traces.
 - Use `pkg/logger` for diagnostics and `pkg/presenter` for user-facing CLI output.
 - `db.Open` returns separate SQLite pools: use `Writer` for writes and transactions that read before writing (they begin `IMMEDIATE`), and `Reader` for reads, including read-only transactions. Reader connections reject writes, including `... RETURNING` statements.
+- Open one `db.DB` per process where it starts (the control plane's `NewServer`) and pass it to stores and threads; they never open or close the database themselves. In tests, use `pkg/db/dbtest`.
 - Write tests with testify assertions in Go and Vitest in the frontend.
 - Prefer raw multiline strings for embedded scripts and configuration fixtures; split dense Go literals and calls across lines instead of packing multiple operations onto one line.
 - Update documentation when changing the CLI interface.

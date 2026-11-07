@@ -35,11 +35,8 @@ func TestDaemonConversationCLIWithoutLocalStoreOrRunner(t *testing.T) {
 	defer cancel()
 	root := t.TempDir()
 	t.Setenv("KODELET_BASE_PATH", filepath.Join(root, "daemon-state"))
-	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
 	require.NoError(t, db.RunMigrations(ctx, migrations.All()))
-	store, err := conversations.GetConversationStore(ctx)
-	require.NoError(t, err)
-	defer store.Close()
+	store := conversations.NewConversationStore(dbtest.OpenDefault(t))
 	record := convtypes.NewConversationRecord("history-source")
 	record.Provider = "anthropic"
 	record.CWD = "/runner/does-not-exist-on-client"
@@ -49,7 +46,7 @@ func TestDaemonConversationCLIWithoutLocalStoreOrRunner(t *testing.T) {
 	record.Metadata["custom"] = "preserved"
 	record.Usage = llmtypes.Usage{InputTokens: 42, OutputTokens: 7, InputCost: 0.1}
 	require.NoError(t, store.Save(ctx, record))
-	record, err = store.Load(ctx, record.ID)
+	record, err := store.Load(ctx, record.ID)
 	require.NoError(t, err)
 	other := convtypes.NewConversationRecord("other-provider")
 	other.Provider = "openai"
@@ -346,18 +343,15 @@ func TestDaemonConversationMoveCLI(t *testing.T) {
 	t.Setenv("HOME", root)
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("KODELET_BASE_PATH", filepath.Join(root, "daemon-state"))
-	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
 	require.NoError(t, db.RunMigrations(ctx, migrations.All()))
-	store, err := conversations.GetConversationStore(ctx)
-	require.NoError(t, err)
-	defer store.Close()
+	store := conversations.NewConversationStore(dbtest.OpenDefault(t))
 	record := convtypes.NewConversationRecord("cli-legacy-move")
 	record.Provider, record.CWD = "anthropic", "saved/missing directory:history"
 	record.RawMessages = json.RawMessage(`[{"role":"user","content":"preserved history"}]`)
 	record.Metadata[convtypes.RunnerEnvironmentProfileMetadataKey] = "unavailable-profile"
 	record.Metadata["model"] = "retired-model"
 	require.NoError(t, store.Save(ctx, record))
-	record, err = store.Load(ctx, record.ID)
+	record, err := store.Load(ctx, record.ID)
 	require.NoError(t, err)
 	path, err := db.DefaultDBPath()
 	require.NoError(t, err)
