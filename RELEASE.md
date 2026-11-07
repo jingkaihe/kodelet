@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.8.23-beta
+
+Added a Context tab to About Kodelet in the TUI and Web UI, showing context-window utilization, estimated composition, code-mode status, and per-tool call counts and input/output token estimates, with color-coded usage bars.
+
+Added live and persisted context breakdowns for Anthropic, OpenAI Chat Completions, and Responses API conversations, including Codex. Breakdowns describe the active model-visible context rather than cumulative billed usage and exclude archived history and opaque media or encrypted payloads. Thinking uses provider-reported counts when available, with a replayed-text fallback for Chat Completions; its retained context contribution remains an estimate.
+
+Added a local `/about` command in the Web UI that opens About Kodelet without sending a model request, including during active runs and when workspace command discovery is unavailable.
+
 ## 0.8.22-beta
 
 Added live refresh of trusted `extensions`, `skills`, and `context` settings for embedded and standalone runners, including through `/reload` and `reload_resources`. See [Reloading extensions](docs/MANUAL.md#reloading-extensions).
