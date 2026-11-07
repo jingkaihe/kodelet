@@ -58,6 +58,11 @@ export const useSlashCommands = ({
   const [remoteCommands, setCommands] = useState<SlashCommandOption[]>([]);
   const localCommands = useMemo<SlashCommandOption[]>(
     () => [
+      {
+        name: 'about',
+        description: 'About Kodelet',
+        placeholder: 'About Kodelet',
+      },
       ...(dictationEnabled
         ? [
             {

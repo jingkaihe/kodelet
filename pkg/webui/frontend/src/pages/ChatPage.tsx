@@ -1228,6 +1228,11 @@ const ChatPage: React.FC = () => {
 
   const handleSubmit = async () => {
     const prompt = draft.trim();
+    if (slashCommandName(prompt) === 'about') {
+      setDraft('');
+      setInfoDialog('about');
+      return;
+    }
     if (realtime.enabled && /^\/talk(?:\s|$)/.test(prompt)) {
       // Local call control is never submitted as a coding turn or queued recipe.
       if (!realtime.isBusy()) {
@@ -2098,6 +2103,7 @@ const ChatPage: React.FC = () => {
     const name = slashCommandName(message);
     return (
       name !== undefined &&
+      name !== 'about' &&
       !(dictation.enabled && name === 'voice') &&
       !(realtime.enabled && name === 'talk') &&
       slashCommandNames.has(name)
@@ -2189,13 +2195,16 @@ const ChatPage: React.FC = () => {
       ? 'This conversation uses the disabled control-plane workspace and is read-only.'
       : 'The control-plane workspace is disabled. Select a workspace runner to start a chat.'
     : null;
-  const submitActionLabel = steering
-    ? 'Queueing…'
-    : currentConversationIsStreaming
-      ? isQueueableCommand(draft)
-        ? 'Queue command'
-        : 'Steer'
-      : 'Send';
+  const submitActionLabel =
+    slashCommandName(draft) === 'about'
+      ? 'Open About Kodelet'
+      : steering
+        ? 'Queueing…'
+        : currentConversationIsStreaming
+          ? isQueueableCommand(draft)
+            ? 'Queue command'
+            : 'Steer'
+          : 'Send';
   const pendingSteerMessages = conversation?.pendingSteer || [];
   const pendingCommandMessages = (queuedCommands[selectedConversationId || ''] || []).map(
     (command) => ({

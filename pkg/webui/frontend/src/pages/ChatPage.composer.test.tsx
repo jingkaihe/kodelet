@@ -730,6 +730,55 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     );
   });
 
+  it.each([
+    'idle',
+    'running',
+    'no discovery',
+  ])('opens About Kodelet locally from /about when %s', async (state) => {
+    const user = userEvent.setup();
+    mockGetSlashCommands.mockResolvedValue({
+      commands: [{ name: 'about', description: 'Workspace about recipe' }],
+    });
+    if (state === 'no discovery') {
+      mockGetRunners.mockResolvedValue({ runners: [makeRunner({ workspaceDiscovery: false })] });
+    }
+    mockStreamChat.mockImplementation(() => new Promise(() => undefined));
+    await renderChatWithRunner();
+    const textarea = screen.getByTestId('composer-textarea');
+    if (state === 'running') {
+      fireEvent.change(textarea, { target: { value: 'Start working' } });
+      await user.click(screen.getByRole('button', { name: 'Send' }));
+      await waitFor(() => expect(mockStreamChat).toHaveBeenCalledTimes(1));
+    }
+    fireEvent.change(textarea, { target: { value: '/abo' } });
+    const suggestions = screen.getByTestId('slash-command-suggestions');
+    expect(within(suggestions).getAllByRole('button')).toHaveLength(1);
+    expect(suggestions).not.toHaveTextContent('Workspace about recipe');
+    await user.click(within(suggestions).getByRole('button', { name: /About Kodelet/ }));
+    expect(textarea).toHaveValue('/about ');
+    const openAbout = screen.getByRole('button', { name: 'Open About Kodelet' });
+    expect(openAbout).toBeEnabled();
+    if (state === 'running') {
+      textarea.focus();
+      await user.keyboard('{Shift>}{Enter}{/Shift}');
+    } else {
+      await user.click(openAbout);
+    }
+    const dialog = await screen.findByRole('dialog', { name: 'About Kodelet' });
+    expect(within(dialog).getByRole('tab', { name: 'Context' })).toBeInTheDocument();
+    expect(screen.getByTestId('chat-layout')).toHaveAttribute('inert');
+    expect(textarea).toHaveValue('');
+    expect(mockStreamChat).toHaveBeenCalledTimes(state === 'running' ? 1 : 0);
+    expect(mockSteerConversation).not.toHaveBeenCalled();
+    expect(
+      screen.queryByText('Command queued until the current run finishes successfully')
+    ).not.toBeInTheDocument();
+    if (state === 'no discovery') expect(mockGetSlashCommands).not.toHaveBeenCalled();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'About Kodelet' })).not.toBeInTheDocument();
+    if (state === 'running') await waitFor(() => expect(textarea).toHaveFocus());
+  });
+
   it('suggests and inserts slash commands in the composer', async () => {
     await renderChatWithRunner();
 
