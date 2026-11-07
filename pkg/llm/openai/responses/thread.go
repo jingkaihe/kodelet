@@ -1525,6 +1525,7 @@ func (t *Thread) snapshotConversationState(cleanupLive bool) conversationStateSn
 	t.historyMu.Lock()
 	if cleanupLive && t.cleanupOrphanedItemsLocked() {
 		t.historyRevision++
+		t.SetContextBreakdown(nil)
 	}
 	t.Mu.Lock()
 	storedItems := cloneStoredInputItems(t.storedItems)

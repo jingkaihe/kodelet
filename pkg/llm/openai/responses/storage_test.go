@@ -598,12 +598,35 @@ func TestConversationSnapshotRemovesTrailingFunctionCallFromStorage(t *testing.T
 		},
 	}
 
+	thread.Usage.OutputTokens = 30
+	thread.Usage.CurrentContextWindow = 100
+	thread.SetContextBreakdown(&llmtypes.ContextBreakdown{
+		InputTextTokens: 3, TotalTokens: 8,
+		Tools: []llmtypes.ToolContextUsage{{Name: "bash", Calls: 1, InputTokens: 5}},
+	})
+	thread.RecordContextThinking("response-1", 10)
+	originalUsage := thread.GetUsage()
+
 	snapshot := thread.snapshotConversationState(true)
 
 	require.Len(t, thread.inputItems, 1)
 	require.Len(t, thread.storedItems, 1)
 	assert.Equal(t, "message", thread.storedItems[0].Type)
 	assert.Equal(t, thread.storedItems, snapshot.storedItems)
+	assert.Equal(t, uint64(1), thread.historyRevision)
+	expectedUsage := originalUsage
+	expectedUsage.ContextBreakdown = nil
+	assert.Equal(t, expectedUsage, thread.GetUsage(), "cleanup invalidates only the live breakdown")
+	assert.Equal(t, expectedUsage, snapshot.usage, "saved usage must not count removed calls")
+	require.NotNil(t, originalUsage.ContextBreakdown, "previous snapshots remain unchanged")
+	assert.Len(t, originalUsage.ContextBreakdown.Tools, 1)
+
+	// Saving unchanged history must preserve a freshly computed breakdown.
+	thread.SetContextBreakdown(&llmtypes.ContextBreakdown{InputTextTokens: 3, TotalTokens: 3})
+	expectedUsage = thread.GetUsage()
+	snapshot = thread.snapshotConversationState(true)
+	assert.Equal(t, expectedUsage, thread.GetUsage())
+	assert.Equal(t, expectedUsage, snapshot.usage)
 	assert.Equal(t, uint64(1), thread.historyRevision)
 }
 
