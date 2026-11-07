@@ -102,7 +102,7 @@ func (s *authStore) StartUserLogin(ctx context.Context, request userauth.DeviceS
 	}
 
 	now := s.now().UTC()
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return userauth.DeviceStartResponse{}, errors.Wrap(err, "failed to begin user login authorization")
 	}
@@ -188,14 +188,14 @@ func (s *authStore) UserLoginByUserCode(ctx context.Context, userCode string) (u
 		return userLoginAuthorization{}, err
 	}
 	now := s.now().UTC()
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := s.db.Writer.ExecContext(ctx, `
 		UPDATE user_login_authorizations SET status = ?
 		WHERE user_code = ? AND status = ? AND expires_at <= ?
 	`, userauth.DeviceStatusExpired, normalized, userauth.DeviceStatusPending, now); err != nil {
 		return userLoginAuthorization{}, errors.Wrap(err, "failed to expire user login authorization")
 	}
 	var row userLoginAuthorizationRow
-	if err := s.db.GetContext(ctx, &row, userLoginAuthorizationSelect+" WHERE a.user_code = ?", normalized); errors.Is(err, sql.ErrNoRows) {
+	if err := s.db.Reader.GetContext(ctx, &row, userLoginAuthorizationSelect+" WHERE a.user_code = ?", normalized); errors.Is(err, sql.ErrNoRows) {
 		return userLoginAuthorization{}, errUserAuthorizationNotFound
 	} else if err != nil {
 		return userLoginAuthorization{}, errors.Wrap(err, "failed to load user login authorization")
@@ -219,7 +219,7 @@ func (s *authStore) ApproveUserLogin(ctx context.Context, userCode string, princ
 		duration = defaultUserSessionDuration
 	}
 
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return userLoginAuthorization{}, errors.Wrap(err, "failed to begin user login approval")
 	}
@@ -327,7 +327,7 @@ func (s *authStore) DenyUserLogin(ctx context.Context, userCode, deniedBy string
 	if deniedBy == "" {
 		return errors.New("user login denier is required")
 	}
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to begin user login denial")
 	}
@@ -379,7 +379,7 @@ func (s *authStore) PollUserLogin(ctx context.Context, request userauth.DevicePo
 	if err := request.Validate(); err != nil {
 		return userauth.DevicePollResponse{}, err
 	}
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return userauth.DevicePollResponse{}, errors.Wrap(err, "failed to begin user login poll")
 	}
@@ -473,7 +473,7 @@ func (s *authStore) RefreshUserCredential(ctx context.Context, request userauth.
 	if err := request.Validate(); err != nil {
 		return userauth.RefreshResponse{}, errUserCredentialInvalid
 	}
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return userauth.RefreshResponse{}, errors.Wrap(err, "failed to begin user token refresh")
 	}
@@ -558,7 +558,7 @@ func (s *authStore) LoadUserCredential(ctx context.Context, bearerToken string) 
 	if err := userauth.ValidateBearerToken(bearerToken); err != nil {
 		return userCredentialIdentity{}, errUserCredentialInvalid
 	}
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return userCredentialIdentity{}, errors.Wrap(err, "failed to begin user credential load")
 	}
@@ -596,7 +596,7 @@ func (s *authStore) RevokeUserCredential(ctx context.Context, credentialID, reas
 		return errUserCredentialInvalid
 	}
 	now := s.now().UTC()
-	result, err := s.db.ExecContext(ctx, `
+	result, err := s.db.Writer.ExecContext(ctx, `
 		UPDATE user_api_credentials
 		SET revoked_at = ?, revoke_reason = ?
 		WHERE id = ? AND revoked_at IS NULL AND expires_at > ?

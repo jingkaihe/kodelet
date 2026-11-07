@@ -77,7 +77,7 @@ func searchIDs(t *testing.T, store *Store, options conversations.QueryOptions) [
 func searchEntryIDs(t *testing.T, store *Store, conversationID string) []int64 {
 	t.Helper()
 	var ids []int64
-	require.NoError(t, store.db.SelectContext(t.Context(), &ids,
+	require.NoError(t, store.db.Writer.SelectContext(t.Context(), &ids,
 		`SELECT id FROM conversation_search_entries WHERE conversation_id = ? ORDER BY id`, conversationID))
 	return ids
 }
@@ -354,7 +354,7 @@ func TestReplaceSearchIndexGuardsAgainstStaleDocuments(t *testing.T) {
 
 	// Unchanged content only advances the recorded source version: a marker
 	// written behind the indexer's back survives the second pass.
-	_, err = store.db.ExecContext(t.Context(), `UPDATE conversation_search_entries SET payload = 'marker words' WHERE conversation_id = 'conv'`)
+	_, err = store.db.Writer.ExecContext(t.Context(), `UPDATE conversation_search_entries SET payload = 'marker words' WHERE conversation_id = 'conv'`)
 	require.NoError(t, err)
 	require.NoError(t, store.Save(t.Context(), record))
 	indexSearchConversation(t, store, "conv", textEntry(0, "user", "fresh words"))
@@ -388,7 +388,7 @@ func TestDeleteAndPruneRemoveSearchEntries(t *testing.T) {
 	assert.Empty(t, searchEntryIDs(t, store, "deleted"))
 
 	// Simulate a deletion by another process that bypassed Store.Delete.
-	_, err := store.db.ExecContext(t.Context(), `DELETE FROM conversation_summaries WHERE id = 'orphaned'`)
+	_, err := store.db.Writer.ExecContext(t.Context(), `DELETE FROM conversation_summaries WHERE id = 'orphaned'`)
 	require.NoError(t, err)
 	pruned, err := store.PruneSearchIndex(t.Context())
 	require.NoError(t, err)
@@ -397,7 +397,7 @@ func TestDeleteAndPruneRemoveSearchEntries(t *testing.T) {
 	assert.Len(t, searchEntryIDs(t, store, "kept"), 1)
 
 	var states int
-	require.NoError(t, store.db.GetContext(t.Context(), &states, `SELECT COUNT(*) FROM conversation_search_state`))
+	require.NoError(t, store.db.Writer.GetContext(t.Context(), &states, `SELECT COUNT(*) FROM conversation_search_state`))
 	assert.Equal(t, 1, states)
 	assert.Equal(t, []string{"kept"}, searchIDs(t, store, conversations.QueryOptions{SearchTerm: "keyword"}))
 }

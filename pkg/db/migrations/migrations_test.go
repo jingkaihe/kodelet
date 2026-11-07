@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -57,75 +56,75 @@ func TestMigrationsCreateExpectedSchema(t *testing.T) {
 	require.NoError(t, runner.Run(ctx, All()))
 	require.NoError(t, runner.Run(ctx, All()))
 
-	assertTableExists(t, database.DB, "conversations")
-	assertTableExists(t, database.DB, "conversation_summaries")
-	assertTableExists(t, database.DB, "acp_session_updates")
-	assertTableExists(t, database.DB, "steering_messages")
-	assertTableExists(t, database.DB, "realtime_transcript")
-	assertColumnExists(t, database.DB, "steering_messages", "source_id")
-	assertColumnExists(t, database.DB, "steering_messages", "run_id")
-	assertTableExists(t, database.DB, "chat_turns")
-	assertTableExists(t, database.DB, "image_artifacts")
-	assertTableExists(t, database.DB, "conversation_artifacts")
-	assertIndexExists(t, database.DB, "idx_conversation_artifacts_artifact")
-	assertIndexExists(t, database.DB, "idx_chat_turns_active")
-	assertTableExists(t, database.DB, "runner_registrations")
-	assertTableExists(t, database.DB, "runner_runs")
-	assertTableExists(t, database.DB, "conversation_runner_affinity")
-	assertTableExists(t, database.DB, "web_auth_sessions")
-	assertTableExists(t, database.DB, "oidc_login_transactions")
-	assertTableExists(t, database.DB, "runner_credentials")
-	assertTableExists(t, database.DB, "runner_enrollments")
-	assertTableExists(t, database.DB, "runner_dpop_replays")
-	assertTableMissing(t, database.DB, "runner_auth_challenges")
-	assertTableExists(t, database.DB, "user_api_credentials")
-	assertTableExists(t, database.DB, "user_login_authorizations")
-	assertTableExists(t, database.DB, "user_access_tokens")
-	assertTableExists(t, database.DB, "user_refresh_tokens")
-	assertTableExists(t, database.DB, "conversation_search")
-	assertTableExists(t, database.DB, "conversation_search_entries")
-	assertTableExists(t, database.DB, "conversation_search_state")
-	assertIndexExists(t, database.DB, "idx_conversation_search_entries_conversation")
-	assertColumnExists(t, database.DB, "user_login_authorizations", "refresh_token_sha256")
-	assertColumnExists(t, database.DB, "conversations", "background_processes")
-	assertColumnExists(t, database.DB, "conversations", "cwd")
-	assertColumnExists(t, database.DB, "conversations", "compaction_history")
-	assertColumnExists(t, database.DB, "conversation_summaries", "provider")
-	assertColumnExists(t, database.DB, "conversation_summaries", "metadata")
-	assertColumnExists(t, database.DB, "conversation_summaries", "cwd")
-	assertColumnExists(t, database.DB, "runner_runs", "manifest_json")
-	assertColumnExists(t, database.DB, "conversation_runner_affinity", "environment_profile")
-	assertColumnExists(t, database.DB, "web_auth_sessions", "token_sha256")
-	assertColumnExists(t, database.DB, "web_auth_sessions", "csrf_token_sha256")
-	assertColumnExists(t, database.DB, "oidc_login_transactions", "state_sha256")
-	assertColumnExists(t, database.DB, "runner_credentials", "public_key_sha256")
-	assertColumnExists(t, database.DB, "runner_credentials", "approved_by")
-	assertColumnExists(t, database.DB, "runner_enrollments", "device_code_sha256")
-	assertColumnExists(t, database.DB, "runner_enrollments", "approved_by")
-	assertColumnExists(t, database.DB, "runner_enrollments", "denied_by")
-	assertColumnExists(t, database.DB, "runner_dpop_replays", "jti_sha256")
-	assertColumnExists(t, database.DB, "user_api_credentials", "token_sha256")
-	assertColumnExists(t, database.DB, "user_api_credentials", "revoked_at")
-	assertColumnExists(t, database.DB, "user_login_authorizations", "device_code_sha256")
-	assertColumnExists(t, database.DB, "user_login_authorizations", "credential_id")
-	assertIndexExists(t, database.DB, "idx_conversations_created_at")
-	assertIndexExists(t, database.DB, "idx_summaries_provider")
-	assertIndexExists(t, database.DB, "idx_acp_session_updates_session_id")
-	assertIndexExists(t, database.DB, "idx_conversations_cwd_updated_at")
-	assertIndexExists(t, database.DB, "idx_steering_messages_conversation_id")
-	assertIndexExists(t, database.DB, "idx_runner_registrations_status")
-	assertIndexExists(t, database.DB, "idx_runner_runs_conversation_created")
-	assertIndexExists(t, database.DB, "idx_conversation_runner_affinity_runner")
-	assertIndexExists(t, database.DB, "idx_web_auth_sessions_expiry")
-	assertIndexExists(t, database.DB, "idx_web_auth_sessions_principal")
-	assertIndexExists(t, database.DB, "idx_oidc_login_transactions_expiry")
-	assertIndexExists(t, database.DB, "idx_runner_credentials_active_runner")
-	assertIndexExists(t, database.DB, "idx_runner_enrollments_status_expiry")
-	assertIndexExists(t, database.DB, "idx_runner_enrollments_public_key")
-	assertIndexExists(t, database.DB, "idx_runner_dpop_replays_expiry")
-	assertIndexExists(t, database.DB, "idx_user_api_credentials_expiry")
-	assertIndexExists(t, database.DB, "idx_user_api_credentials_principal")
-	assertIndexExists(t, database.DB, "idx_user_login_authorizations_status_expiry")
+	assertTableExists(t, database.Writer.DB, "conversations")
+	assertTableExists(t, database.Writer.DB, "conversation_summaries")
+	assertTableExists(t, database.Writer.DB, "acp_session_updates")
+	assertTableExists(t, database.Writer.DB, "steering_messages")
+	assertTableExists(t, database.Writer.DB, "realtime_transcript")
+	assertColumnExists(t, database.Writer.DB, "steering_messages", "source_id")
+	assertColumnExists(t, database.Writer.DB, "steering_messages", "run_id")
+	assertTableExists(t, database.Writer.DB, "chat_turns")
+	assertTableExists(t, database.Writer.DB, "image_artifacts")
+	assertTableExists(t, database.Writer.DB, "conversation_artifacts")
+	assertIndexExists(t, database.Writer.DB, "idx_conversation_artifacts_artifact")
+	assertIndexExists(t, database.Writer.DB, "idx_chat_turns_active")
+	assertTableExists(t, database.Writer.DB, "runner_registrations")
+	assertTableExists(t, database.Writer.DB, "runner_runs")
+	assertTableExists(t, database.Writer.DB, "conversation_runner_affinity")
+	assertTableExists(t, database.Writer.DB, "web_auth_sessions")
+	assertTableExists(t, database.Writer.DB, "oidc_login_transactions")
+	assertTableExists(t, database.Writer.DB, "runner_credentials")
+	assertTableExists(t, database.Writer.DB, "runner_enrollments")
+	assertTableExists(t, database.Writer.DB, "runner_dpop_replays")
+	assertTableMissing(t, database.Writer.DB, "runner_auth_challenges")
+	assertTableExists(t, database.Writer.DB, "user_api_credentials")
+	assertTableExists(t, database.Writer.DB, "user_login_authorizations")
+	assertTableExists(t, database.Writer.DB, "user_access_tokens")
+	assertTableExists(t, database.Writer.DB, "user_refresh_tokens")
+	assertTableExists(t, database.Writer.DB, "conversation_search")
+	assertTableExists(t, database.Writer.DB, "conversation_search_entries")
+	assertTableExists(t, database.Writer.DB, "conversation_search_state")
+	assertIndexExists(t, database.Writer.DB, "idx_conversation_search_entries_conversation")
+	assertColumnExists(t, database.Writer.DB, "user_login_authorizations", "refresh_token_sha256")
+	assertColumnExists(t, database.Writer.DB, "conversations", "background_processes")
+	assertColumnExists(t, database.Writer.DB, "conversations", "cwd")
+	assertColumnExists(t, database.Writer.DB, "conversations", "compaction_history")
+	assertColumnExists(t, database.Writer.DB, "conversation_summaries", "provider")
+	assertColumnExists(t, database.Writer.DB, "conversation_summaries", "metadata")
+	assertColumnExists(t, database.Writer.DB, "conversation_summaries", "cwd")
+	assertColumnExists(t, database.Writer.DB, "runner_runs", "manifest_json")
+	assertColumnExists(t, database.Writer.DB, "conversation_runner_affinity", "environment_profile")
+	assertColumnExists(t, database.Writer.DB, "web_auth_sessions", "token_sha256")
+	assertColumnExists(t, database.Writer.DB, "web_auth_sessions", "csrf_token_sha256")
+	assertColumnExists(t, database.Writer.DB, "oidc_login_transactions", "state_sha256")
+	assertColumnExists(t, database.Writer.DB, "runner_credentials", "public_key_sha256")
+	assertColumnExists(t, database.Writer.DB, "runner_credentials", "approved_by")
+	assertColumnExists(t, database.Writer.DB, "runner_enrollments", "device_code_sha256")
+	assertColumnExists(t, database.Writer.DB, "runner_enrollments", "approved_by")
+	assertColumnExists(t, database.Writer.DB, "runner_enrollments", "denied_by")
+	assertColumnExists(t, database.Writer.DB, "runner_dpop_replays", "jti_sha256")
+	assertColumnExists(t, database.Writer.DB, "user_api_credentials", "token_sha256")
+	assertColumnExists(t, database.Writer.DB, "user_api_credentials", "revoked_at")
+	assertColumnExists(t, database.Writer.DB, "user_login_authorizations", "device_code_sha256")
+	assertColumnExists(t, database.Writer.DB, "user_login_authorizations", "credential_id")
+	assertIndexExists(t, database.Writer.DB, "idx_conversations_created_at")
+	assertIndexExists(t, database.Writer.DB, "idx_summaries_provider")
+	assertIndexExists(t, database.Writer.DB, "idx_acp_session_updates_session_id")
+	assertIndexExists(t, database.Writer.DB, "idx_conversations_cwd_updated_at")
+	assertIndexExists(t, database.Writer.DB, "idx_steering_messages_conversation_id")
+	assertIndexExists(t, database.Writer.DB, "idx_runner_registrations_status")
+	assertIndexExists(t, database.Writer.DB, "idx_runner_runs_conversation_created")
+	assertIndexExists(t, database.Writer.DB, "idx_conversation_runner_affinity_runner")
+	assertIndexExists(t, database.Writer.DB, "idx_web_auth_sessions_expiry")
+	assertIndexExists(t, database.Writer.DB, "idx_web_auth_sessions_principal")
+	assertIndexExists(t, database.Writer.DB, "idx_oidc_login_transactions_expiry")
+	assertIndexExists(t, database.Writer.DB, "idx_runner_credentials_active_runner")
+	assertIndexExists(t, database.Writer.DB, "idx_runner_enrollments_status_expiry")
+	assertIndexExists(t, database.Writer.DB, "idx_runner_enrollments_public_key")
+	assertIndexExists(t, database.Writer.DB, "idx_runner_dpop_replays_expiry")
+	assertIndexExists(t, database.Writer.DB, "idx_user_api_credentials_expiry")
+	assertIndexExists(t, database.Writer.DB, "idx_user_api_credentials_principal")
+	assertIndexExists(t, database.Writer.DB, "idx_user_login_authorizations_status_expiry")
 
 	versions, err := runner.GetAppliedVersions(ctx)
 	require.NoError(t, err)
@@ -161,12 +160,12 @@ func TestProviderMetadataAndCWDBackfillMigrations(t *testing.T) {
 
 	require.NoError(t, runner.Run(ctx, baseMigrations))
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := database.ExecContext(ctx, `
+	_, err := database.Writer.ExecContext(ctx, `
 		INSERT INTO conversations (id, raw_messages, provider, file_last_access, usage, summary, created_at, updated_at, metadata, tool_results)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, "conv-1", `[]`, "openai", `{}`, `{}`, "summary", now, now, `{"profile":"codex"}`, `{}`)
 	require.NoError(t, err)
-	_, err = database.ExecContext(ctx, `
+	_, err = database.Writer.ExecContext(ctx, `
 		INSERT INTO conversation_summaries (id, message_count, first_message, summary, usage, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`, "conv-1", 1, "hello", "summary", `{}`, now, now)
@@ -175,18 +174,18 @@ func TestProviderMetadataAndCWDBackfillMigrations(t *testing.T) {
 	require.NoError(t, runner.Run(ctx, All()[2:6]))
 
 	var provider, metadata string
-	require.NoError(t, database.QueryRowContext(ctx, `SELECT provider, metadata FROM conversation_summaries WHERE id = ?`, "conv-1").Scan(&provider, &metadata))
+	require.NoError(t, database.Writer.QueryRowContext(ctx, `SELECT provider, metadata FROM conversation_summaries WHERE id = ?`, "conv-1").Scan(&provider, &metadata))
 	assert.Equal(t, "openai", provider)
 	assert.Equal(t, `{"profile":"codex"}`, metadata)
 
-	_, err = database.ExecContext(ctx, `ALTER TABLE conversations ADD COLUMN cwd TEXT`)
+	_, err = database.Writer.ExecContext(ctx, `ALTER TABLE conversations ADD COLUMN cwd TEXT`)
 	require.NoError(t, err)
-	_, err = database.ExecContext(ctx, `UPDATE conversations SET cwd = ? WHERE id = ?`, "/tmp/project", "conv-1")
+	_, err = database.Writer.ExecContext(ctx, `UPDATE conversations SET cwd = ? WHERE id = ?`, "/tmp/project", "conv-1")
 	require.NoError(t, err)
 	require.NoError(t, runner.Run(ctx, All()[6:]))
 
 	var cwd string
-	require.NoError(t, database.QueryRowContext(ctx, `SELECT cwd FROM conversation_summaries WHERE id = ?`, "conv-1").Scan(&cwd))
+	require.NoError(t, database.Writer.QueryRowContext(ctx, `SELECT cwd FROM conversation_summaries WHERE id = ?`, "conv-1").Scan(&cwd))
 	assert.Equal(t, "/tmp/project", cwd)
 }
 
@@ -196,100 +195,100 @@ func TestColumnMigrationsAreIdempotentWhenColumnsAlreadyExist(t *testing.T) {
 	runner := db.NewMigrationRunner(database)
 
 	require.NoError(t, runner.Run(ctx, All()[:2]))
-	_, err := database.ExecContext(ctx, `ALTER TABLE conversation_summaries ADD COLUMN provider TEXT`)
+	_, err := database.Writer.ExecContext(ctx, `ALTER TABLE conversation_summaries ADD COLUMN provider TEXT`)
 	require.NoError(t, err)
-	_, err = database.ExecContext(ctx, `ALTER TABLE conversations ADD COLUMN background_processes TEXT`)
+	_, err = database.Writer.ExecContext(ctx, `ALTER TABLE conversations ADD COLUMN background_processes TEXT`)
 	require.NoError(t, err)
-	_, err = database.ExecContext(ctx, `ALTER TABLE conversation_summaries ADD COLUMN metadata TEXT`)
+	_, err = database.Writer.ExecContext(ctx, `ALTER TABLE conversation_summaries ADD COLUMN metadata TEXT`)
 	require.NoError(t, err)
-	_, err = database.ExecContext(ctx, `ALTER TABLE conversations ADD COLUMN cwd TEXT`)
+	_, err = database.Writer.ExecContext(ctx, `ALTER TABLE conversations ADD COLUMN cwd TEXT`)
 	require.NoError(t, err)
-	_, err = database.ExecContext(ctx, `ALTER TABLE conversation_summaries ADD COLUMN cwd TEXT`)
+	_, err = database.Writer.ExecContext(ctx, `ALTER TABLE conversation_summaries ADD COLUMN cwd TEXT`)
 	require.NoError(t, err)
 
 	require.NoError(t, runner.Run(ctx, All()[2:]))
 
-	assertColumnExists(t, database.DB, "conversation_summaries", "provider")
-	assertColumnExists(t, database.DB, "conversations", "background_processes")
-	assertColumnExists(t, database.DB, "conversation_summaries", "metadata")
-	assertColumnExists(t, database.DB, "conversations", "cwd")
-	assertColumnExists(t, database.DB, "conversation_summaries", "cwd")
-	assertIndexExists(t, database.DB, "idx_summaries_provider")
-	assertIndexExists(t, database.DB, "idx_conversations_cwd_updated_at")
+	assertColumnExists(t, database.Writer.DB, "conversation_summaries", "provider")
+	assertColumnExists(t, database.Writer.DB, "conversations", "background_processes")
+	assertColumnExists(t, database.Writer.DB, "conversation_summaries", "metadata")
+	assertColumnExists(t, database.Writer.DB, "conversations", "cwd")
+	assertColumnExists(t, database.Writer.DB, "conversation_summaries", "cwd")
+	assertIndexExists(t, database.Writer.DB, "idx_summaries_provider")
+	assertIndexExists(t, database.Writer.DB, "idx_conversations_cwd_updated_at")
 }
 
 func TestCreateMigrationsAreSafeWhenSchemaAlreadyExists(t *testing.T) {
 	ctx := context.Background()
 	database := openMigrationsTestDB(t)
 
-	tx, err := database.BeginTx(ctx, nil)
+	tx, err := database.Writer.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	initial := Migration20260204163000CreateConversations()
 	require.NoError(t, initial.Up(tx))
 	require.NoError(t, initial.Up(tx))
 	require.NoError(t, tx.Commit())
-	assertTableExists(t, database.DB, "conversations")
-	assertTableExists(t, database.DB, "conversation_summaries")
+	assertTableExists(t, database.Writer.DB, "conversations")
+	assertTableExists(t, database.Writer.DB, "conversation_summaries")
 
-	tx, err = database.BeginTx(ctx, nil)
+	tx, err = database.Writer.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	acp := Migration20260204163004CreateACPSessionUpdates()
 	require.NoError(t, acp.Up(tx))
 	require.NoError(t, acp.Up(tx))
 	require.NoError(t, tx.Commit())
-	assertTableExists(t, database.DB, "acp_session_updates")
-	assertIndexExists(t, database.DB, "idx_acp_session_updates_session_id")
-	assertIndexExists(t, database.DB, "idx_acp_session_updates_created_at")
+	assertTableExists(t, database.Writer.DB, "acp_session_updates")
+	assertIndexExists(t, database.Writer.DB, "idx_acp_session_updates_session_id")
+	assertIndexExists(t, database.Writer.DB, "idx_acp_session_updates_created_at")
 
-	tx, err = database.BeginTx(ctx, nil)
+	tx, err = database.Writer.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	steering := Migration20260719170000CreateSteeringMessages()
 	require.NoError(t, steering.Up(tx))
 	require.NoError(t, steering.Up(tx))
 	require.NoError(t, tx.Commit())
-	assertTableExists(t, database.DB, "steering_messages")
-	assertIndexExists(t, database.DB, "idx_steering_messages_conversation_id")
+	assertTableExists(t, database.Writer.DB, "steering_messages")
+	assertIndexExists(t, database.Writer.DB, "idx_steering_messages_conversation_id")
 
-	tx, err = database.BeginTx(ctx, nil)
+	tx, err = database.Writer.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	runnerState := Migration20260806120000CreateRunnerState()
 	require.NoError(t, runnerState.Up(tx))
 	require.NoError(t, tx.Commit())
 
-	tx, err = database.BeginTx(ctx, nil)
+	tx, err = database.Writer.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	controlPlaneAuth := Migration20260812120000CreateControlPlaneAuth()
 	require.NoError(t, controlPlaneAuth.Up(tx))
 	require.NoError(t, controlPlaneAuth.Up(tx))
 	require.NoError(t, tx.Commit())
-	assertTableExists(t, database.DB, "web_auth_sessions")
-	assertTableExists(t, database.DB, "runner_credentials")
-	assertTableExists(t, database.DB, "runner_enrollments")
-	assertTableExists(t, database.DB, "runner_auth_challenges")
-	assertIndexExists(t, database.DB, "idx_runner_credentials_active_runner")
-	assertIndexExists(t, database.DB, "idx_runner_enrollments_status_expiry")
-	assertIndexExists(t, database.DB, "idx_runner_auth_challenges_credential_expiry")
+	assertTableExists(t, database.Writer.DB, "web_auth_sessions")
+	assertTableExists(t, database.Writer.DB, "runner_credentials")
+	assertTableExists(t, database.Writer.DB, "runner_enrollments")
+	assertTableExists(t, database.Writer.DB, "runner_auth_challenges")
+	assertIndexExists(t, database.Writer.DB, "idx_runner_credentials_active_runner")
+	assertIndexExists(t, database.Writer.DB, "idx_runner_enrollments_status_expiry")
+	assertIndexExists(t, database.Writer.DB, "idx_runner_auth_challenges_credential_expiry")
 
-	tx, err = database.BeginTx(ctx, nil)
+	tx, err = database.Writer.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	userCredentials := Migration20260813120000CreateUserAPICredentials()
 	require.NoError(t, userCredentials.Up(tx))
 	require.NoError(t, userCredentials.Up(tx))
 	require.NoError(t, tx.Commit())
-	assertTableExists(t, database.DB, "user_api_credentials")
-	assertTableExists(t, database.DB, "user_login_authorizations")
-	assertIndexExists(t, database.DB, "idx_user_api_credentials_expiry")
-	assertIndexExists(t, database.DB, "idx_user_login_authorizations_status_expiry")
+	assertTableExists(t, database.Writer.DB, "user_api_credentials")
+	assertTableExists(t, database.Writer.DB, "user_login_authorizations")
+	assertIndexExists(t, database.Writer.DB, "idx_user_api_credentials_expiry")
+	assertIndexExists(t, database.Writer.DB, "idx_user_login_authorizations_status_expiry")
 
-	tx, err = database.BeginTx(ctx, nil)
+	tx, err = database.Writer.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	runnerDPoP := Migration20260813130000CreateRunnerDPoPReplays()
 	require.NoError(t, runnerDPoP.Up(tx))
 	require.NoError(t, runnerDPoP.Up(tx))
 	require.NoError(t, tx.Commit())
-	assertTableExists(t, database.DB, "runner_dpop_replays")
-	assertTableMissing(t, database.DB, "runner_auth_challenges")
-	assertIndexExists(t, database.DB, "idx_runner_dpop_replays_expiry")
+	assertTableExists(t, database.Writer.DB, "runner_dpop_replays")
+	assertTableMissing(t, database.Writer.DB, "runner_auth_challenges")
+	assertIndexExists(t, database.Writer.DB, "idx_runner_dpop_replays_expiry")
 }
 
 func TestControlPlaneAuthMigrationConstraints(t *testing.T) {
@@ -299,7 +298,7 @@ func TestControlPlaneAuthMigrationConstraints(t *testing.T) {
 	require.NoError(t, runner.Run(ctx, All()))
 
 	now := time.Now().UTC()
-	_, err := database.ExecContext(ctx, `
+	_, err := database.Writer.ExecContext(ctx, `
 		INSERT INTO runner_registrations (
 			id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -311,23 +310,23 @@ func TestControlPlaneAuthMigrationConstraints(t *testing.T) {
 	firstFingerprint[0] = 1
 	secondFingerprint := make([]byte, 32)
 	secondFingerprint[0] = 2
-	_, err = database.ExecContext(ctx, `
+	_, err = database.Writer.ExecContext(ctx, `
 		INSERT INTO runner_credentials (
 			id, runner_id, key_algorithm, public_key, public_key_sha256, approved_by, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
 	`, "credential-1", "runner-1", "ed25519", publicKey, firstFingerprint, "admin@example.com", now)
 	require.NoError(t, err)
 
-	_, err = database.ExecContext(ctx, `
+	_, err = database.Writer.ExecContext(ctx, `
 		INSERT INTO runner_credentials (
 			id, runner_id, key_algorithm, public_key, public_key_sha256, approved_by, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
 	`, "credential-2", "runner-1", "ed25519", publicKey, secondFingerprint, "admin@example.com", now)
 	require.Error(t, err)
 
-	_, err = database.ExecContext(ctx, `UPDATE runner_credentials SET revoked_at = ? WHERE id = ?`, now, "credential-1")
+	_, err = database.Writer.ExecContext(ctx, `UPDATE runner_credentials SET revoked_at = ? WHERE id = ?`, now, "credential-1")
 	require.NoError(t, err)
-	_, err = database.ExecContext(ctx, `
+	_, err = database.Writer.ExecContext(ctx, `
 		INSERT INTO runner_credentials (
 			id, runner_id, key_algorithm, public_key, public_key_sha256, approved_by, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -336,7 +335,7 @@ func TestControlPlaneAuthMigrationConstraints(t *testing.T) {
 
 	deviceCodeHash := make([]byte, 32)
 	deviceCodeHash[0] = 3
-	_, err = database.ExecContext(ctx, `
+	_, err = database.Writer.ExecContext(ctx, `
 		INSERT INTO runner_enrollments (
 			id, device_code_sha256, user_code, owner_id, status, protocol_version,
 			key_algorithm, public_key, public_key_sha256, host_instance_id,
@@ -350,7 +349,7 @@ func TestControlPlaneAuthMigrationConstraints(t *testing.T) {
 
 	otherDeviceCodeHash := make([]byte, 32)
 	otherDeviceCodeHash[0] = 4
-	_, err = database.ExecContext(ctx, `
+	_, err = database.Writer.ExecContext(ctx, `
 		INSERT INTO runner_enrollments (
 			id, device_code_sha256, user_code, status, protocol_version, key_algorithm,
 			public_key, public_key_sha256, host_instance_id, workspace_path,
@@ -362,30 +361,30 @@ func TestControlPlaneAuthMigrationConstraints(t *testing.T) {
 
 	jtiHash := make([]byte, 32)
 	jtiHash[0] = 5
-	_, err = database.ExecContext(ctx, `
+	_, err = database.Writer.ExecContext(ctx, `
 		INSERT INTO runner_dpop_replays (
 			credential_id, jti_sha256, created_at, expires_at
 		) VALUES (?, ?, ?, ?)
 	`, "credential-2", jtiHash, now, now.Add(time.Minute))
 	require.NoError(t, err)
-	_, err = database.ExecContext(ctx, `
+	_, err = database.Writer.ExecContext(ctx, `
 		INSERT INTO runner_dpop_replays (
 			credential_id, jti_sha256, created_at, expires_at
 		) VALUES (?, ?, ?, ?)
 	`, "credential-2", jtiHash, now, now.Add(time.Minute))
 	require.Error(t, err)
 
-	_, err = database.ExecContext(ctx, `DELETE FROM runner_registrations WHERE id = ?`, "runner-1")
+	_, err = database.Writer.ExecContext(ctx, `DELETE FROM runner_registrations WHERE id = ?`, "runner-1")
 	require.NoError(t, err)
 
 	var count int
-	require.NoError(t, database.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_credentials WHERE runner_id = ?`, "runner-1").Scan(&count))
+	require.NoError(t, database.Writer.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_credentials WHERE runner_id = ?`, "runner-1").Scan(&count))
 	assert.Zero(t, count)
-	require.NoError(t, database.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_dpop_replays`).Scan(&count))
+	require.NoError(t, database.Writer.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_dpop_replays`).Scan(&count))
 	assert.Zero(t, count)
 
 	var enrollmentRunnerID, enrollmentCredentialID sql.NullString
-	require.NoError(t, database.QueryRowContext(ctx, `SELECT runner_id, credential_id FROM runner_enrollments WHERE id = ?`, "enrollment-1").Scan(&enrollmentRunnerID, &enrollmentCredentialID))
+	require.NoError(t, database.Writer.QueryRowContext(ctx, `SELECT runner_id, credential_id FROM runner_enrollments WHERE id = ?`, "enrollment-1").Scan(&enrollmentRunnerID, &enrollmentCredentialID))
 	assert.False(t, enrollmentRunnerID.Valid)
 	assert.False(t, enrollmentCredentialID.Valid)
 }
@@ -396,7 +395,7 @@ func TestMigrationFunctionsReturnTransactionErrors(t *testing.T) {
 
 	closedTx := func(t *testing.T) *sql.Tx {
 		t.Helper()
-		tx, err := database.BeginTx(ctx, nil)
+		tx, err := database.Writer.BeginTx(ctx, nil)
 		require.NoError(t, err)
 		require.NoError(t, tx.Rollback())
 		return tx
@@ -460,77 +459,77 @@ func TestMigrationsDownFunctions(t *testing.T) {
 	require.NoError(t, runner.Run(ctx, All()))
 
 	require.NoError(t, runner.Rollback(ctx, All()))
-	assertTableMissing(t, database.DB, "realtime_transcript")
-	assertColumnMissing(t, database.DB, "steering_messages", "source_id")
+	assertTableMissing(t, database.Writer.DB, "realtime_transcript")
+	assertColumnMissing(t, database.Writer.DB, "steering_messages", "source_id")
 
 	require.NoError(t, runner.Rollback(ctx, All()))
-	assertTableMissing(t, database.DB, "conversation_search")
-	assertTableMissing(t, database.DB, "conversation_search_entries")
-	assertTableMissing(t, database.DB, "conversation_search_state")
-	assertTableExists(t, database.DB, "conversations")
+	assertTableMissing(t, database.Writer.DB, "conversation_search")
+	assertTableMissing(t, database.Writer.DB, "conversation_search_entries")
+	assertTableMissing(t, database.Writer.DB, "conversation_search_state")
+	assertTableExists(t, database.Writer.DB, "conversations")
 
 	// Refresh rollback leaves legacy families intact but removes the token tables.
 	require.NoError(t, runner.Rollback(ctx, All()))
-	assertTableMissing(t, database.DB, "user_access_tokens")
-	assertTableMissing(t, database.DB, "user_refresh_tokens")
-	assertTableExists(t, database.DB, "user_api_credentials")
-	assertColumnMissing(t, database.DB, "user_login_authorizations", "refresh_token_sha256")
+	assertTableMissing(t, database.Writer.DB, "user_access_tokens")
+	assertTableMissing(t, database.Writer.DB, "user_refresh_tokens")
+	assertTableExists(t, database.Writer.DB, "user_api_credentials")
+	assertColumnMissing(t, database.Writer.DB, "user_login_authorizations", "refresh_token_sha256")
 
 	// Removing the display archive leaves active model context and artifacts intact.
 	require.NoError(t, runner.Rollback(ctx, All()))
-	assertColumnMissing(t, database.DB, "conversations", "compaction_history")
-	assertColumnExists(t, database.DB, "conversations", "raw_messages")
-	assertTableExists(t, database.DB, "image_artifacts")
+	assertColumnMissing(t, database.Writer.DB, "conversations", "compaction_history")
+	assertColumnExists(t, database.Writer.DB, "conversations", "raw_messages")
+	assertTableExists(t, database.Writer.DB, "image_artifacts")
 
 	// Image metadata rollback leaves conversation history intact.
 	require.NoError(t, runner.Rollback(ctx, All()))
-	assertTableMissing(t, database.DB, "conversation_artifacts")
-	assertTableMissing(t, database.DB, "image_artifacts")
-	assertTableExists(t, database.DB, "conversations")
+	assertTableMissing(t, database.Writer.DB, "conversation_artifacts")
+	assertTableMissing(t, database.Writer.DB, "image_artifacts")
+	assertTableExists(t, database.Writer.DB, "conversations")
 
 	// Receipt rollback leaves ordinary conversations and runner history intact.
 	require.NoError(t, runner.Rollback(ctx, All()))
-	assertColumnMissing(t, database.DB, "steering_messages", "run_id")
+	assertColumnMissing(t, database.Writer.DB, "steering_messages", "run_id")
 	require.NoError(t, runner.Rollback(ctx, All()))
-	assertTableMissing(t, database.DB, "chat_turns")
-	assertTableExists(t, database.DB, "conversations")
+	assertTableMissing(t, database.Writer.DB, "chat_turns")
+	assertTableExists(t, database.Writer.DB, "conversations")
 
 	// DPoP rollback restores the legacy challenge table for the preceding migration.
 	require.NoError(t, runner.Rollback(ctx, All()))
-	assertTableMissing(t, database.DB, "runner_dpop_replays")
-	assertTableExists(t, database.DB, "runner_auth_challenges")
+	assertTableMissing(t, database.Writer.DB, "runner_dpop_replays")
+	assertTableExists(t, database.Writer.DB, "runner_auth_challenges")
 
 	// User-credential rollback drops non-browser login state.
 	require.NoError(t, runner.Rollback(ctx, All()))
-	assertTableMissing(t, database.DB, "user_api_credentials")
-	assertTableMissing(t, database.DB, "user_login_authorizations")
+	assertTableMissing(t, database.Writer.DB, "user_api_credentials")
+	assertTableMissing(t, database.Writer.DB, "user_login_authorizations")
 
 	// Control-plane-auth rollback drops web and runner authentication state.
 	require.NoError(t, runner.Rollback(ctx, All()))
-	assertTableMissing(t, database.DB, "web_auth_sessions")
-	assertTableMissing(t, database.DB, "oidc_login_transactions")
-	assertTableMissing(t, database.DB, "runner_credentials")
-	assertTableMissing(t, database.DB, "runner_enrollments")
-	assertTableMissing(t, database.DB, "runner_auth_challenges")
+	assertTableMissing(t, database.Writer.DB, "web_auth_sessions")
+	assertTableMissing(t, database.Writer.DB, "oidc_login_transactions")
+	assertTableMissing(t, database.Writer.DB, "runner_credentials")
+	assertTableMissing(t, database.Writer.DB, "runner_enrollments")
+	assertTableMissing(t, database.Writer.DB, "runner_auth_challenges")
 
 	// Runner-environment-profile rollback removes the affinity column.
 	require.NoError(t, runner.Rollback(ctx, All()))
-	assertColumnMissing(t, database.DB, "conversation_runner_affinity", "environment_profile")
+	assertColumnMissing(t, database.Writer.DB, "conversation_runner_affinity", "environment_profile")
 
 	// Runner-state rollback drops durable runner tables.
 	require.NoError(t, runner.Rollback(ctx, All()))
-	assertTableMissing(t, database.DB, "runner_registrations")
-	assertTableMissing(t, database.DB, "runner_runs")
-	assertTableMissing(t, database.DB, "conversation_runner_affinity")
+	assertTableMissing(t, database.Writer.DB, "runner_registrations")
+	assertTableMissing(t, database.Writer.DB, "runner_runs")
+	assertTableMissing(t, database.Writer.DB, "conversation_runner_affinity")
 
 	// Steering rollback drops its queue table.
 	require.NoError(t, runner.Rollback(ctx, All()))
-	assertTableMissing(t, database.DB, "steering_messages")
+	assertTableMissing(t, database.Writer.DB, "steering_messages")
 
 	// The last migration drops only indexes, because SQLite cannot drop columns cheaply.
 	require.NoError(t, runner.Rollback(ctx, All()))
-	assertIndexMissing(t, database.DB, "idx_conversations_cwd_updated_at")
-	assertIndexMissing(t, database.DB, "idx_summaries_cwd_updated_at")
+	assertIndexMissing(t, database.Writer.DB, "idx_conversations_cwd_updated_at")
+	assertIndexMissing(t, database.Writer.DB, "idx_summaries_cwd_updated_at")
 
 	// Metadata migration intentionally has no rollback work, but should remove the migration record.
 	require.NoError(t, runner.Rollback(ctx, All()))
@@ -540,7 +539,7 @@ func TestMigrationsDownFunctions(t *testing.T) {
 
 	// ACPSession rollback drops its table.
 	require.NoError(t, runner.Rollback(ctx, All()))
-	assertTableMissing(t, database.DB, "acp_session_updates")
+	assertTableMissing(t, database.Writer.DB, "acp_session_updates")
 
 	// Background process and provider migrations leave columns in place but still roll back cleanly.
 	require.NoError(t, runner.Rollback(ctx, All()))
@@ -548,12 +547,12 @@ func TestMigrationsDownFunctions(t *testing.T) {
 
 	// Performance index rollback removes its indexes.
 	require.NoError(t, runner.Rollback(ctx, All()))
-	assertIndexMissing(t, database.DB, "idx_conversations_created_at")
+	assertIndexMissing(t, database.Writer.DB, "idx_conversations_created_at")
 
 	// Initial migration rollback drops the conversation tables.
 	require.NoError(t, runner.Rollback(ctx, All()))
-	assertTableMissing(t, database.DB, "conversations")
-	assertTableMissing(t, database.DB, "conversation_summaries")
+	assertTableMissing(t, database.Writer.DB, "conversations")
+	assertTableMissing(t, database.Writer.DB, "conversation_summaries")
 }
 
 func TestUserRefreshTokenMigrationPreservesLegacyCredentials(t *testing.T) {
@@ -573,7 +572,7 @@ func TestUserRefreshTokenMigrationPreservesLegacyCredentials(t *testing.T) {
 		if state == "revoked" {
 			revokedAt = now
 		}
-		_, err := database.ExecContext(t.Context(), `
+		_, err := database.Writer.ExecContext(t.Context(), `
 			INSERT INTO user_api_credentials (id, token_sha256, issuer, subject, created_at, expires_at, revoked_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)
 		`, state, hash, "issuer", "subject", now.Add(-time.Hour), expiry, revokedAt)
@@ -581,14 +580,14 @@ func TestUserRefreshTokenMigrationPreservesLegacyCredentials(t *testing.T) {
 	}
 	require.NoError(t, runner.Run(t.Context(), migrationsThrough(t, migrations, 20260924120000)))
 	var copied, unchangedRevocations, refreshTokens int
-	require.NoError(t, database.GetContext(t.Context(), &copied, `
+	require.NoError(t, database.Writer.GetContext(t.Context(), &copied, `
 		SELECT COUNT(*) FROM user_access_tokens a JOIN user_api_credentials c ON c.id = a.credential_id
 		WHERE a.token_sha256 = c.token_sha256 AND a.created_at = c.created_at AND a.expires_at = c.expires_at
 	`))
 	assert.Equal(t, 3, copied)
-	require.NoError(t, database.GetContext(t.Context(), &unchangedRevocations, `SELECT COUNT(*) FROM user_api_credentials WHERE revoked_at IS NOT NULL`))
+	require.NoError(t, database.Writer.GetContext(t.Context(), &unchangedRevocations, `SELECT COUNT(*) FROM user_api_credentials WHERE revoked_at IS NOT NULL`))
 	assert.Equal(t, 1, unchangedRevocations)
-	require.NoError(t, database.GetContext(t.Context(), &refreshTokens, `SELECT COUNT(*) FROM user_refresh_tokens`))
+	require.NoError(t, database.Writer.GetContext(t.Context(), &refreshTokens, `SELECT COUNT(*) FROM user_refresh_tokens`))
 	assert.Zero(t, refreshTokens)
 
 	for index, name := range []string{"legacy-pending", "refresh-pending"} {
@@ -598,7 +597,7 @@ func TestUserRefreshTokenMigrationPreservesLegacyCredentials(t *testing.T) {
 		if name == "refresh-pending" {
 			refreshHash = hash
 		}
-		_, err := database.ExecContext(t.Context(), `
+		_, err := database.Writer.ExecContext(t.Context(), `
 			INSERT INTO user_login_authorizations (
 				id, device_code_sha256, user_code, token_sha256, refresh_token_sha256, status,
 				client_name, client_os, client_arch, kodelet_version, poll_interval_seconds, created_at, expires_at
@@ -608,19 +607,19 @@ func TestUserRefreshTokenMigrationPreservesLegacyCredentials(t *testing.T) {
 	}
 
 	// Rollback must not turn an initial short access token back into a long-lived bearer.
-	_, err := database.ExecContext(t.Context(), `
+	_, err := database.Writer.ExecContext(t.Context(), `
 		INSERT INTO user_refresh_tokens (token_sha256, credential_id, created_at)
 		VALUES (?, 'active', ?)
 	`, make([]byte, 32), now)
 	require.NoError(t, err)
 	require.NoError(t, runner.Rollback(t.Context(), migrations))
 	var reason string
-	require.NoError(t, database.GetContext(t.Context(), &reason, `SELECT revoke_reason FROM user_api_credentials WHERE id = 'active' AND revoked_at IS NOT NULL`))
+	require.NoError(t, database.Writer.GetContext(t.Context(), &reason, `SELECT revoke_reason FROM user_api_credentials WHERE id = 'active' AND revoked_at IS NOT NULL`))
 	assert.Equal(t, "token schema rollback", reason)
 	var pending, expired int
-	require.NoError(t, database.GetContext(t.Context(), &pending, `SELECT COUNT(*) FROM user_login_authorizations WHERE id = 'legacy-pending' AND status = 'pending'`))
+	require.NoError(t, database.Writer.GetContext(t.Context(), &pending, `SELECT COUNT(*) FROM user_login_authorizations WHERE id = 'legacy-pending' AND status = 'pending'`))
 	assert.Equal(t, 1, pending)
-	require.NoError(t, database.GetContext(t.Context(), &expired, `SELECT COUNT(*) FROM user_login_authorizations WHERE id = 'refresh-pending' AND status = 'expired'`))
+	require.NoError(t, database.Writer.GetContext(t.Context(), &expired, `SELECT COUNT(*) FROM user_login_authorizations WHERE id = 'refresh-pending' AND status = 'expired'`))
 	assert.Equal(t, 1, expired)
 }
 
@@ -644,7 +643,7 @@ func migrationsThrough(t *testing.T, migrations []db.Migration, version int64) [
 	return migrations[:len(migrationsBefore(t, migrations, version))+1]
 }
 
-func openMigrationsTestDB(t *testing.T) *sqlx.DB {
+func openMigrationsTestDB(t *testing.T) *db.DB {
 	t.Helper()
 
 	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "migrations.db"))

@@ -19,7 +19,7 @@ func TestNewSteerStoreUsesMigratedSchema(t *testing.T) {
 	store, _ := newTestStore(t)
 
 	var tableCount int
-	err := store.db.Get(&tableCount, `
+	err := store.db.Writer.Get(&tableCount, `
 		SELECT COUNT(*) FROM sqlite_master
 		WHERE type = 'table' AND name = 'steering_messages'
 	`)
@@ -27,7 +27,7 @@ func TestNewSteerStoreUsesMigratedSchema(t *testing.T) {
 	assert.Equal(t, 1, tableCount)
 
 	var indexCount int
-	err = store.db.Get(&indexCount, `
+	err = store.db.Writer.Get(&indexCount, `
 		SELECT COUNT(*) FROM sqlite_master
 		WHERE type = 'index' AND name = 'idx_steering_messages_conversation_id'
 	`)
@@ -47,7 +47,7 @@ func TestEnqueuePeekAndConsume(t *testing.T) {
 	alreadyPending, err = store.Enqueue(ctx, conversationID, "Second message", nil)
 	require.NoError(t, err)
 	assert.True(t, alreadyPending)
-	_, err = store.db.ExecContext(ctx, "UPDATE steering_messages SET source_id=? WHERE conversation_id=? AND content=?",
+	_, err = store.db.Writer.ExecContext(ctx, "UPDATE steering_messages SET source_id=? WHERE conversation_id=? AND content=?",
 		"voice-source", conversationID, "Second message")
 	require.NoError(t, err)
 
@@ -76,7 +76,7 @@ func TestEnqueuePeekAndConsume(t *testing.T) {
 
 func TestLegacyRunScopedGuidanceDoesNotReachOrdinaryTurns(t *testing.T) {
 	store, _ := newTestStore(t)
-	_, err := store.db.ExecContext(t.Context(), `INSERT INTO steering_messages
+	_, err := store.db.Writer.ExecContext(t.Context(), `INSERT INTO steering_messages
 		(conversation_id, content, images_json, created_at, run_id) VALUES (?, ?, '[]', ?, ?)`,
 		"conversation", "old scoped guidance", time.Now().UTC(), "old-run")
 	require.NoError(t, err)
@@ -95,7 +95,7 @@ func TestLegacyRunScopedGuidanceDoesNotReachOrdinaryTurns(t *testing.T) {
 	require.Len(t, consumed, 1)
 	assert.Equal(t, "ordinary guidance", consumed[0].Content)
 	var remaining int
-	require.NoError(t, store.db.Get(&remaining, `SELECT COUNT(*) FROM steering_messages WHERE run_id='old-run'`))
+	require.NoError(t, store.db.Writer.Get(&remaining, `SELECT COUNT(*) FROM steering_messages WHERE run_id='old-run'`))
 	assert.Equal(t, 1, remaining, "historical data is preserved without replay")
 }
 

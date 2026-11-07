@@ -3,10 +3,13 @@ package db
 
 import (
 	"context"
+	stderrors "errors"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
@@ -15,14 +18,59 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// The driver runs busy_timeout first, then the rest alphabetically.
-var sqlitePragmas = []string{
+// Both pools apply these. The driver runs busy_timeout first, then the rest
+// alphabetically.
+var sharedPragmas = []string{
 	"busy_timeout=5000",
 	"cache_size=1000",
+	"temp_store=memory",
+}
+
+// writerPragmas configure durability and integrity for writes. Journal mode is
+// persistent, so the writer enables WAL for the readers too.
+var writerPragmas = []string{
 	"foreign_keys=ON",
 	"journal_mode=WAL",
 	"synchronous=NORMAL",
-	"temp_store=memory",
+}
+
+// readerPragmas make a misrouted write fail instead of contending for the lock.
+var readerPragmas = []string{
+	"query_only=ON",
+}
+
+const (
+	// readerConnections bounds concurrent reads. WAL readers do not block one
+	// another or the writer, but each connection holds its own page cache.
+	readerConnections = 4
+	// readerIdleTimeout releases read connections of short-lived stores.
+	readerIdleTimeout = time.Minute
+)
+
+// DB is a SQLite database opened as one writer connection and a pool of
+// read-only connections. SQLite admits one writer at a time, so writes queue
+// for the writer connection instead of polling SQLite's busy handler, while
+// WAL lets reads run alongside the writer and each other.
+//
+// Use Writer for writes and for transactions that read before writing: its
+// transactions begin IMMEDIATE, reserving the write lock before reading, so a
+// concurrent commit cannot make the snapshot unwritable (SQLITE_BUSY_SNAPSHOT).
+// Use Reader for reads that need no write in the same transaction, including
+// read-only transactions; it sees every write committed before the read began.
+type DB struct {
+	Writer *sqlx.DB
+	Reader *sqlx.DB
+}
+
+// Close closes both pools.
+func (d *DB) Close() error {
+	if d == nil {
+		return nil
+	}
+	return stderrors.Join(
+		errors.Wrap(d.Reader.Close(), "failed to close database readers"),
+		errors.Wrap(d.Writer.Close(), "failed to close database writer"),
+	)
 }
 
 // DefaultDBPath returns the default path for the shared storage database.
@@ -38,7 +86,7 @@ func DefaultDBPath() (string, error) {
 }
 
 // Open opens or creates a SQLite database at the given path with optimal configuration.
-func Open(ctx context.Context, dbPath string) (*sqlx.DB, error) {
+func Open(ctx context.Context, dbPath string) (*DB, error) {
 	dir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, errors.Wrap(err, "failed to create database directory")
@@ -48,37 +96,59 @@ func Open(ctx context.Context, dbPath string) (*sqlx.DB, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to resolve database path")
 	}
-	// DSN pragmas also apply to replacement connections opened by the pool.
-	dsn := url.URL{
-		Scheme:   "file",
-		Path:     absolutePath,
-		RawQuery: url.Values{"_pragma": sqlitePragmas}.Encode(),
-	}
-	db, err := sqlx.Open("sqlite", dsn.String())
+
+	// The writer opens first: it creates the file and enables WAL.
+	writer, err := openPool(ctx, absolutePath, url.Values{
+		"_pragma": append(slices.Clone(sharedPragmas), writerPragmas...),
+		"_txlock": {"immediate"},
+	})
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to open database")
+		return nil, errors.Wrap(err, "failed to open database writer")
 	}
-
-	if err := db.Ping(); err != nil {
-		db.Close()
-		return nil, errors.Wrap(err, "failed to ping database")
-	}
-
-	if err := configurePool(ctx, db); err != nil {
-		db.Close()
+	writer.SetMaxIdleConns(1)
+	writer.SetMaxOpenConns(1)
+	if err := verifyWAL(ctx, writer); err != nil {
+		writer.Close()
 		return nil, errors.Wrap(err, "failed to configure database")
 	}
 
-	return db, nil
+	reader, err := openPool(ctx, absolutePath, url.Values{
+		"_pragma": append(slices.Clone(sharedPragmas), readerPragmas...),
+	})
+	if err != nil {
+		writer.Close()
+		return nil, errors.Wrap(err, "failed to open database readers")
+	}
+	reader.SetMaxIdleConns(readerConnections)
+	reader.SetMaxOpenConns(readerConnections)
+	reader.SetConnMaxIdleTime(readerIdleTimeout)
+
+	return &DB{Writer: writer, Reader: reader}, nil
 }
 
-// configurePool limits the pool to one connection and verifies WAL mode.
-func configurePool(ctx context.Context, db *sqlx.DB) error {
-	db.SetMaxIdleConns(1)
-	db.SetMaxOpenConns(1)
+// openPool opens and pings a pool whose connections all apply query.
+func openPool(ctx context.Context, absolutePath string, query url.Values) (*sqlx.DB, error) {
+	// DSN parameters also apply to replacement connections opened by the pool.
+	dsn := url.URL{
+		Scheme:   "file",
+		Path:     absolutePath,
+		RawQuery: query.Encode(),
+	}
+	pool, err := sqlx.Open("sqlite", dsn.String())
+	if err != nil {
+		return nil, err
+	}
+	if err := pool.PingContext(ctx); err != nil {
+		pool.Close()
+		return nil, errors.Wrap(err, "failed to ping database")
+	}
+	return pool, nil
+}
 
+// verifyWAL checks that the writer enabled WAL, which concurrent readers need.
+func verifyWAL(ctx context.Context, writer *sqlx.DB) error {
 	var journalMode string
-	if err := db.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&journalMode); err != nil {
+	if err := writer.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&journalMode); err != nil {
 		return errors.Wrap(err, "failed to query journal mode")
 	}
 
@@ -140,10 +210,11 @@ func GetMigrationStatus(ctx context.Context) ([]int64, error) {
 	return runner.GetAppliedVersions(ctx)
 }
 
-// VerifyConfiguration checks if the database is properly configured with WAL mode.
-func VerifyConfiguration(db *sqlx.DB) error {
+// VerifyConfiguration checks the writer's WAL, durability and integrity
+// settings and that the readers reject writes.
+func VerifyConfiguration(database *DB) error {
 	var journalMode string
-	if err := db.Get(&journalMode, "PRAGMA journal_mode"); err != nil {
+	if err := database.Writer.Get(&journalMode, "PRAGMA journal_mode"); err != nil {
 		return errors.Wrap(err, "failed to query journal mode")
 	}
 	if strings.ToLower(journalMode) != "wal" {
@@ -151,7 +222,7 @@ func VerifyConfiguration(db *sqlx.DB) error {
 	}
 
 	var synchronous string
-	if err := db.Get(&synchronous, "PRAGMA synchronous"); err != nil {
+	if err := database.Writer.Get(&synchronous, "PRAGMA synchronous"); err != nil {
 		return errors.Wrap(err, "failed to query synchronous mode")
 	}
 	if synchronous != "1" {
@@ -159,11 +230,19 @@ func VerifyConfiguration(db *sqlx.DB) error {
 	}
 
 	var foreignKeys string
-	if err := db.Get(&foreignKeys, "PRAGMA foreign_keys"); err != nil {
+	if err := database.Writer.Get(&foreignKeys, "PRAGMA foreign_keys"); err != nil {
 		return errors.Wrap(err, "failed to query foreign keys")
 	}
 	if foreignKeys != "1" {
 		return errors.Errorf("expected foreign keys ON, got %s", foreignKeys)
+	}
+
+	var queryOnly string
+	if err := database.Reader.Get(&queryOnly, "PRAGMA query_only"); err != nil {
+		return errors.Wrap(err, "failed to query reader query_only mode")
+	}
+	if queryOnly != "1" {
+		return errors.Errorf("expected read-only readers, got query_only %s", queryOnly)
 	}
 
 	return nil

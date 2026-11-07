@@ -196,9 +196,9 @@ func TestGetMostRecentConversationID(t *testing.T) {
 
 	database, err = convdb.Open(ctx, filepath.Join(basePath, "storage.db"))
 	require.NoError(t, err)
-	_, err = database.ExecContext(ctx, `UPDATE conversation_summaries SET updated_at = ? WHERE id = ?`, now, "older")
+	_, err = database.Writer.ExecContext(ctx, `UPDATE conversation_summaries SET updated_at = ? WHERE id = ?`, now, "older")
 	require.NoError(t, err)
-	_, err = database.ExecContext(ctx, `UPDATE conversation_summaries SET updated_at = ? WHERE id = ?`, now.Add(time.Minute), "newer")
+	_, err = database.Writer.ExecContext(ctx, `UPDATE conversation_summaries SET updated_at = ? WHERE id = ?`, now.Add(time.Minute), "newer")
 	require.NoError(t, err)
 	require.NoError(t, database.Close())
 

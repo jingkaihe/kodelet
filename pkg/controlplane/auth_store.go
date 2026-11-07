@@ -48,7 +48,7 @@ var (
 )
 
 type authStore struct {
-	db  *sqlx.DB
+	db  *db.DB
 	now func() time.Time
 }
 
@@ -175,7 +175,7 @@ func (s *authStore) CreateWebSession(ctx context.Context, issuer, subject, name,
 		return "", "", errors.Wrap(err, "failed to encode web session roles")
 	}
 	now := s.now().UTC()
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := s.db.Writer.ExecContext(ctx, `
 		INSERT INTO web_auth_sessions (
 			id, token_sha256, csrf_token_sha256, issuer, subject, name, email,
 			roles_json, created_at, expires_at
@@ -183,7 +183,7 @@ func (s *authStore) CreateWebSession(ctx context.Context, issuer, subject, name,
 	`, sessionID, tokenHash, csrfHash, issuer, subject, nullAuthString(name), nullAuthString(email), string(rolesJSON), now, now.Add(duration)); err != nil {
 		return "", "", errors.Wrap(err, "failed to create web authentication session")
 	}
-	_, _ = s.db.ExecContext(ctx, "DELETE FROM web_auth_sessions WHERE expires_at <= ?", now)
+	_, _ = s.db.Writer.ExecContext(ctx, "DELETE FROM web_auth_sessions WHERE expires_at <= ?", now)
 	return token, csrfToken, nil
 }
 
@@ -196,7 +196,7 @@ func (s *authStore) LoadWebSession(ctx context.Context, token string) (storedWeb
 		return storedWebSession{}, false, nil
 	}
 	var row webSessionRow
-	err := s.db.GetContext(ctx, &row, `
+	err := s.db.Reader.GetContext(ctx, &row, `
 		SELECT id, issuer, subject, COALESCE(name, '') AS name, COALESCE(email, '') AS email,
 			roles_json, expires_at
 		FROM web_auth_sessions
@@ -231,7 +231,7 @@ func (s *authStore) WebSessionCSRFValid(ctx context.Context, sessionID, csrfToke
 		return false, nil
 	}
 	var count int
-	if err := s.db.GetContext(ctx, &count, `
+	if err := s.db.Reader.GetContext(ctx, &count, `
 		SELECT COUNT(*) FROM web_auth_sessions
 		WHERE id = ? AND csrf_token_sha256 = ? AND expires_at > ?
 	`, sessionID, authHash(csrfToken), s.now().UTC()); err != nil {
@@ -244,7 +244,7 @@ func (s *authStore) DeleteWebSession(ctx context.Context, token string) error {
 	if s == nil || s.db == nil || strings.TrimSpace(token) == "" {
 		return nil
 	}
-	_, err := s.db.ExecContext(ctx, "DELETE FROM web_auth_sessions WHERE token_sha256 = ?", authHash(strings.TrimSpace(token)))
+	_, err := s.db.Writer.ExecContext(ctx, "DELETE FROM web_auth_sessions WHERE token_sha256 = ?", authHash(strings.TrimSpace(token)))
 	return errors.Wrap(err, "failed to delete web authentication session")
 }
 
@@ -263,7 +263,7 @@ func (s *authStore) CreateOIDCTransaction(ctx context.Context, state, nonce, ver
 		return err
 	}
 	now := s.now().UTC()
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to begin OIDC login transaction")
 	}
@@ -302,12 +302,12 @@ func (s *authStore) ConsumeOIDCTransaction(ctx context.Context, state string) (o
 		ReturnTo     string `db:"return_to"`
 	}
 	now := s.now().UTC()
-	if err := s.db.GetContext(ctx, &row, `
+	if err := s.db.Writer.GetContext(ctx, &row, `
 		DELETE FROM oidc_login_transactions
 		WHERE state_sha256 = ? AND expires_at > ?
 		RETURNING nonce, pkce_verifier, return_to
 	`, authHash(state), now); errors.Is(err, sql.ErrNoRows) {
-		_, _ = s.db.ExecContext(ctx, "DELETE FROM oidc_login_transactions WHERE state_sha256 = ? AND expires_at <= ?", authHash(state), now)
+		_, _ = s.db.Writer.ExecContext(ctx, "DELETE FROM oidc_login_transactions WHERE state_sha256 = ? AND expires_at <= ?", authHash(state), now)
 		return oidcLoginTransaction{}, errOIDCTransactionNotFound
 	} else if err != nil {
 		return oidcLoginTransaction{}, errors.Wrap(err, "failed to consume OIDC login transaction")
@@ -344,7 +344,7 @@ func (s *authStore) StartRunnerEnrollment(ctx context.Context, request protocol.
 	}
 	fingerprintHash := sha256.Sum256(publicKey)
 	now := s.now().UTC()
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return protocol.EnrollmentStartResponse{}, errors.Wrap(err, "failed to begin runner enrollment")
 	}
@@ -415,20 +415,20 @@ func (s *authStore) RunnerEnrollmentByUserCode(ctx context.Context, userCode str
 		return runnerEnrollment{}, err
 	}
 	now := s.now().UTC()
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := s.db.Writer.ExecContext(ctx, `
 		UPDATE runner_enrollments SET status = ?
 		WHERE user_code = ? AND status = ? AND expires_at <= ?
 	`, protocol.EnrollmentStatusExpired, normalized, protocol.EnrollmentStatusPending, now); err != nil {
 		return runnerEnrollment{}, errors.Wrap(err, "failed to expire runner enrollment")
 	}
 	var row runnerEnrollmentRow
-	if err := s.db.GetContext(ctx, &row, runnerEnrollmentSelect+" WHERE e.user_code = ?", normalized); errors.Is(err, sql.ErrNoRows) {
+	if err := s.db.Reader.GetContext(ctx, &row, runnerEnrollmentSelect+" WHERE e.user_code = ?", normalized); errors.Is(err, sql.ErrNoRows) {
 		return runnerEnrollment{}, errEnrollmentNotFound
 	} else if err != nil {
 		return runnerEnrollment{}, errors.Wrap(err, "failed to load runner enrollment")
 	}
 	var activeCount int
-	if err := s.db.GetContext(ctx, &activeCount, `
+	if err := s.db.Reader.GetContext(ctx, &activeCount, `
 		SELECT COUNT(*)
 		FROM runner_credentials c
 		JOIN runner_registrations r ON r.id = c.runner_id
@@ -456,7 +456,7 @@ func (s *authStore) ApproveRunnerEnrollment(ctx context.Context, userCode, appro
 	if runner.ID == "" {
 		return runnerEnrollment{}, errors.New("runner registration id is required")
 	}
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return runnerEnrollment{}, errors.Wrap(err, "failed to begin runner enrollment approval")
 	}
@@ -611,7 +611,7 @@ func (s *authStore) DenyRunnerEnrollment(ctx context.Context, userCode, deniedBy
 	if deniedBy == "" {
 		return errors.New("runner enrollment denier is required")
 	}
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to begin runner enrollment denial")
 	}
@@ -666,7 +666,7 @@ func (s *authStore) PollRunnerEnrollment(ctx context.Context, request protocol.E
 	if err := request.Validate(); err != nil {
 		return protocol.EnrollmentPollResponse{}, err
 	}
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return protocol.EnrollmentPollResponse{}, errors.Wrap(err, "failed to begin runner enrollment poll")
 	}
@@ -747,7 +747,7 @@ func (s *authStore) VerifyRunnerDPoP(ctx context.Context, accessToken, proof, me
 		HostInstanceID string `db:"host_instance_id"`
 		WorkspacePath  string `db:"workspace_path"`
 	}
-	if err := s.db.GetContext(ctx, &row, `
+	if err := s.db.Reader.GetContext(ctx, &row, `
 		SELECT c.public_key, c.id AS credential_id, c.runner_id,
 			r.host_instance_id, r.workspace_path
 		FROM runner_enrollments e
@@ -773,7 +773,7 @@ func (s *authStore) VerifyRunnerDPoP(ctx context.Context, accessToken, proof, me
 	if err != nil {
 		return runnerCredentialIdentity{}, errRunnerDPoPInvalid
 	}
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return runnerCredentialIdentity{}, errors.Wrap(err, "failed to begin runner DPoP verification")
 	}
@@ -843,7 +843,7 @@ func (s *authStore) RunnerCredentialActive(ctx context.Context, credentialID, ru
 		return false, errors.New("authentication store is closed")
 	}
 	var count int
-	if err := s.db.GetContext(ctx, &count, `
+	if err := s.db.Reader.GetContext(ctx, &count, `
 		SELECT COUNT(*)
 		FROM runner_credentials c
 		JOIN runner_registrations r ON r.id = c.runner_id

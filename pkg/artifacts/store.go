@@ -18,7 +18,6 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/db"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
 	_ "golang.org/x/image/webp"
 )
@@ -36,7 +35,7 @@ var ErrNotFound = errors.New("image artifact not found")
 
 // Store owns immutable files beside the shared SQLite database.
 type Store struct {
-	db  *sqlx.DB
+	db  *db.DB
 	dir string
 	// Serialize image decoding to keep concurrent uploads from multiplying memory use.
 	putMu sync.Mutex
@@ -152,7 +151,7 @@ func (s *Store) Put(
 	if syncErr != nil {
 		return tooltypes.ToolAttachment{}, errors.Wrap(syncErr, "failed to sync artifact directory")
 	}
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return tooltypes.ToolAttachment{}, errors.Wrap(err, "failed to begin image artifact transaction")
 	}
@@ -201,7 +200,7 @@ func (s *Store) GetByShortCode(ctx context.Context, code string) (tooltypes.Tool
 
 func (s *Store) get(ctx context.Context, predicate string, args ...any) (tooltypes.ToolAttachment, string, error) {
 	attachment := tooltypes.ToolAttachment{Type: "image"}
-	err := s.db.QueryRowContext(ctx,
+	err := s.db.Reader.QueryRowContext(ctx,
 		`SELECT a.id, a.short_code, a.filename, a.mime_type, a.width, a.height, a.size FROM image_artifacts a WHERE `+predicate,
 		args...,
 	).Scan(

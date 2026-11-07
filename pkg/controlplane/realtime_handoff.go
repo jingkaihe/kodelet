@@ -28,7 +28,7 @@ func (s *Server) finishVoiceSteersLocked(conversationID string, run *activeChatR
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	for sourceID, outcome := range run.voiceSteers {
-		result, err := s.turns.db.ExecContext(ctx,
+		result, err := s.turns.db.Writer.ExecContext(ctx,
 			"DELETE FROM steering_messages WHERE conversation_id=? AND source_id=?", conversationID, sourceID)
 		if err == nil {
 			var rows int64
@@ -115,7 +115,7 @@ func (c *realtimeCall) dispatch(ctx context.Context, event llmtypes.RealtimeEven
 				return chat.TurnReceipt{}, errors.New("conversation is busy with an interactive operation")
 			}
 			outcome := &voiceSteerOutcome{done: make(chan struct{})}
-			_, err := s.turns.db.ExecContext(ctx, `INSERT INTO steering_messages
+			_, err := s.turns.db.Writer.ExecContext(ctx, `INSERT INTO steering_messages
 				(conversation_id,content,images_json,created_at,source_id) VALUES (?,?,'[]',?,?)`,
 				req.ConversationID, req.Message, time.Now().UTC(), sourceID)
 			if err == nil {

@@ -783,7 +783,7 @@ func TestBrowserOIDCExpiryCannotBeExtendedByRevalidation(t *testing.T) {
 	socket := f.dial(t, handle, headers)
 	// The next successful revalidation sees a longer lifetime, but an existing
 	// attachment must remain bounded to the lifetime with which it was admitted.
-	_, err := f.server.authStore.db.ExecContext(t.Context(), `UPDATE web_auth_sessions SET expires_at = ? WHERE token_sha256 = ?`, time.Now().Add(time.Hour), authHash(token))
+	_, err := f.server.authStore.db.Writer.ExecContext(t.Context(), `UPDATE web_auth_sessions SET expires_at = ? WHERE token_sha256 = ?`, time.Now().Add(time.Hour), authHash(token))
 	require.NoError(t, err)
 	socket.assertClosed(t, browserAuthCheckInterval+2*time.Second)
 	assert.Zero(t, f.stops.Load())
@@ -796,8 +796,8 @@ func TestBrowserOIDCExpiryClosesSocketDuringBlockedAuthCheck(t *testing.T) {
 	socket := f.dial(t, handle, headers)
 	// Block the revalidation query past expiry. The independent expiry timer
 	// must disconnect both sockets without waiting for the store timeout.
-	f.server.authStore.db.SetMaxOpenConns(1)
-	connection, err := f.server.authStore.db.Conn(t.Context())
+	f.server.authStore.db.Reader.SetMaxOpenConns(1)
+	connection, err := f.server.authStore.db.Reader.Conn(t.Context())
 	require.NoError(t, err)
 	defer connection.Close()
 	socket.assertClosed(t, browserAuthCheckInterval+2*time.Second)
@@ -815,7 +815,7 @@ func TestBrowserOIDCRevocationAndRoleChangesCloseWebsocket(t *testing.T) {
 			case "revoked":
 				require.NoError(t, f.server.authStore.DeleteWebSession(t.Context(), token))
 			case "role removed":
-				_, err := f.server.authStore.db.ExecContext(t.Context(), `UPDATE web_auth_sessions SET roles_json = '["user"]' WHERE token_sha256 = ?`, authHash(token))
+				_, err := f.server.authStore.db.Writer.ExecContext(t.Context(), `UPDATE web_auth_sessions SET roles_json = '["user"]' WHERE token_sha256 = ?`, authHash(token))
 				require.NoError(t, err)
 			case "store unavailable":
 				require.NoError(t, f.server.authStore.Close())

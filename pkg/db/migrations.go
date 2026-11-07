@@ -23,9 +23,10 @@ type MigrationRunner struct {
 	db *sqlx.DB
 }
 
-// NewMigrationRunner creates a new migration runner
-func NewMigrationRunner(db *sqlx.DB) *MigrationRunner {
-	return &MigrationRunner{db: db}
+// NewMigrationRunner creates a migration runner that applies and records
+// migrations through the database writer.
+func NewMigrationRunner(database *DB) *MigrationRunner {
+	return &MigrationRunner{db: database.Writer}
 }
 
 // Run executes all pending migrations in timestamp order

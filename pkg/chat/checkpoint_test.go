@@ -177,7 +177,7 @@ func TestResumeLoadFailurePreservesDurableTranscript(t *testing.T) {
 				}
 				history, err := json.Marshal(record.CompactionHistory)
 				require.NoError(t, err)
-				_, err = sqlDB.ExecContext(t.Context(),
+				_, err = sqlDB.Writer.ExecContext(t.Context(),
 					`UPDATE conversations SET raw_messages = ?, compaction_history = ? WHERE id = ?`,
 					raw, string(history), record.ID,
 				)
@@ -201,7 +201,7 @@ func TestResumeLoadFailurePreservesDurableTranscript(t *testing.T) {
 				require.ErrorContains(t, err, "failed to load conversation")
 				assert.NotContains(t, runner.sessions, record.ID)
 				var storedRaw, storedHistory string
-				require.NoError(t, sqlDB.QueryRowContext(t.Context(),
+				require.NoError(t, sqlDB.Writer.QueryRowContext(t.Context(),
 					`SELECT raw_messages, compaction_history FROM conversations WHERE id = ?`, record.ID,
 				).Scan(&storedRaw, &storedHistory))
 				assert.Equal(t, raw, storedRaw)

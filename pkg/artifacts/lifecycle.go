@@ -80,7 +80,7 @@ func RemoveFiles(dbPath string, artifactIDs []string) error {
 
 func (s *Store) sweep(ctx context.Context) error {
 	cutoff := time.Now().UTC().Add(-cleanupGrace)
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to begin artifact cleanup")
 	}
@@ -130,7 +130,7 @@ func (s *Store) sweep(ctx context.Context) error {
 				continue
 			}
 			var exists bool
-			if err := s.db.GetContext(ctx, &exists,
+			if err := s.db.Reader.GetContext(ctx, &exists,
 				`SELECT EXISTS (SELECT 1 FROM image_artifacts WHERE id = ?)`,
 				entry.Name(),
 			); err != nil {

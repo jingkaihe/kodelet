@@ -20,22 +20,22 @@ func TestAdmissionCheckpointAtomicallyFencesHistoryAndAffinity(t *testing.T) {
 			require.NoError(t, err)
 			defer store.Close()
 			now := time.Now().UTC()
-			_, err = store.db.Exec(`INSERT INTO runner_registrations
+			_, err = store.db.Writer.Exec(`INSERT INTO runner_registrations
 				(id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at)
 				VALUES ('runner', 'local', 'host', '/work/project', 'project', 'busy', ?, ?)`, now, now)
 			require.NoError(t, err)
-			_, err = store.db.Exec(`INSERT INTO runner_runs (id, conversation_id, runner_id, status, created_at, updated_at)
+			_, err = store.db.Writer.Exec(`INSERT INTO runner_runs (id, conversation_id, runner_id, status, created_at, updated_at)
 				VALUES ('run', 'conversation', 'runner', 'opening', ?, ?)`, now, now)
 			require.NoError(t, err)
-			_, err = store.db.Exec(`INSERT INTO chat_turns (conversation_id, turn_id, run_id, status, created_at, updated_at)
+			_, err = store.db.Writer.Exec(`INSERT INTO chat_turns (conversation_id, turn_id, run_id, status, created_at, updated_at)
 				VALUES ('conversation', 'turn', 'run', 'running', ?, ?)`, now, now)
 			require.NoError(t, err)
 			admission := convtypes.TurnAdmission{ConversationID: "conversation", RunID: "run", RunnerID: "runner", EnvironmentProfile: "restricted"}
 			switch name {
 			case "cancelled":
-				_, err = store.db.Exec(`UPDATE chat_turns SET cancel_requested = true`)
+				_, err = store.db.Writer.Exec(`UPDATE chat_turns SET cancel_requested = true`)
 			case "completed":
-				_, err = store.db.Exec(`UPDATE chat_turns SET status = 'succeeded'`)
+				_, err = store.db.Writer.Exec(`UPDATE chat_turns SET status = 'succeeded'`)
 			case "wrong run":
 				admission.RunID = "other"
 			case "wrong conversation":
@@ -43,12 +43,12 @@ func TestAdmissionCheckpointAtomicallyFencesHistoryAndAffinity(t *testing.T) {
 			case "wrong runner":
 				admission.RunnerID = "other"
 			case "closed run":
-				_, err = store.db.Exec(`UPDATE runner_runs SET status = 'cancelled'`)
+				_, err = store.db.Writer.Exec(`UPDATE runner_runs SET status = 'cancelled'`)
 			case "existing affinity":
-				_, err = store.db.Exec(`INSERT INTO conversation_runner_affinity (conversation_id, runner_id, environment_profile, created_at, updated_at)
+				_, err = store.db.Writer.Exec(`INSERT INTO conversation_runner_affinity (conversation_id, runner_id, environment_profile, created_at, updated_at)
 					VALUES ('conversation', 'runner', 'different', ?, ?)`, now, now)
 			case "summary failure":
-				_, err = store.db.Exec(`CREATE TRIGGER fail_summary BEFORE INSERT ON conversation_summaries BEGIN SELECT RAISE(ABORT, 'injected failure'); END`)
+				_, err = store.db.Writer.Exec(`CREATE TRIGGER fail_summary BEFORE INSERT ON conversation_summaries BEGIN SELECT RAISE(ABORT, 'injected failure'); END`)
 			}
 			require.NoError(t, err)
 			record := convtypes.NewConversationRecord("conversation")
@@ -73,7 +73,7 @@ func TestAdmissionCheckpointAtomicallyFencesHistoryAndAffinity(t *testing.T) {
 				require.Error(t, err)
 				for _, table := range []string{"conversations", "conversation_summaries", "conversation_runner_affinity"} {
 					var count int
-					require.NoError(t, store.db.Get(&count, "SELECT COUNT(*) FROM "+table))
+					require.NoError(t, store.db.Writer.Get(&count, "SELECT COUNT(*) FROM "+table))
 					if name == "existing affinity" && table == "conversation_runner_affinity" {
 						assert.Equal(t, 1, count)
 					} else {

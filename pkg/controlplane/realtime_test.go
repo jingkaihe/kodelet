@@ -72,7 +72,7 @@ func (p *testRealtimeProvider) Open(_ context.Context, offer llmtypes.RealtimeOf
 func realtimeTestServer(t *testing.T) (*Server, *testRealtimeSession) {
 	t.Helper()
 	store := openTurnTestStore(t, filepath.Join(t.TempDir(), "voice.db"))
-	_, err := store.db.Exec(`INSERT INTO conversations (id,raw_messages,provider,usage,created_at,updated_at)
+	_, err := store.db.Writer.Exec(`INSERT INTO conversations (id,raw_messages,provider,usage,created_at,updated_at)
 		VALUES ('saved','[]','openai','{}',?,?)`, time.Now(), time.Now())
 	require.NoError(t, err)
 	session := &testRealtimeSession{events: make(chan llmtypes.RealtimeEvent, 16), results: make(chan string, 16)}
@@ -212,7 +212,7 @@ func TestRealtimeCreatesConversationWithoutCodingTurn(t *testing.T) {
 			assert.Equal(t, registration.RunnerID, affinity.RunnerID)
 			assert.Equal(t, "review", affinity.EnvironmentProfile)
 			var turns int
-			require.NoError(t, s.turns.db.Get(&turns, "SELECT COUNT(*) FROM chat_turns"))
+			require.NoError(t, s.turns.db.Writer.Get(&turns, "SELECT COUNT(*) FROM chat_turns"))
 			assert.Zero(t, turns)
 			_, saved, err := s.saveRealtimeTranscript(t.Context(), record.ID,
 				realtimeEvent{ID: "voice:first", Role: "user", Text: "Hello from a new chat"})
@@ -286,7 +286,7 @@ func TestRealtimeSteerReconcilesFinishingTurn(t *testing.T) {
 			}()
 			require.Eventually(t, func() bool { s.activeChatsMu.Lock(); defer s.activeChatsMu.Unlock(); return len(run.voiceSteers) == 1 }, time.Second, time.Millisecond)
 			if consumed {
-				_, err = s.turns.db.Exec("DELETE FROM steering_messages WHERE source_id='voice:late'")
+				_, err = s.turns.db.Writer.Exec("DELETE FROM steering_messages WHERE source_id='voice:late'")
 				require.NoError(t, err)
 			}
 			require.NoError(t, s.turns.finish(t.Context(), "saved", "old", "interrupted", nil, nil))
@@ -305,7 +305,7 @@ func TestRealtimeSteerReconcilesFinishingTurn(t *testing.T) {
 
 func TestRealtimeProjectionIdentityAndCompaction(t *testing.T) {
 	s, _ := realtimeTestServer(t)
-	_, err := s.turns.db.Exec(`INSERT INTO realtime_transcript(conversation_id,id,anchor,role,text) VALUES
+	_, err := s.turns.db.Writer.Exec(`INSERT INTO realtime_transcript(conversation_id,id,anchor,role,text) VALUES
 		('saved','voice:user',0,'user','same words'),('saved','voice:assistant',2,'assistant','spoken answer')`)
 	require.NoError(t, err)
 	record := &conversations.GetConversationResponse{
@@ -554,7 +554,7 @@ func TestRealtimeCaptionsPersistOffTheReadLoop(t *testing.T) {
 		ID   string `db:"id"`
 		Text string `db:"text"`
 	}
-	require.NoError(t, s.turns.db.Select(&rows, "SELECT id,text FROM realtime_transcript WHERE conversation_id='saved' ORDER BY sequence"))
+	require.NoError(t, s.turns.db.Writer.Select(&rows, "SELECT id,text FROM realtime_transcript WHERE conversation_id='saved' ORDER BY sequence"))
 	require.Len(t, rows, 2)
 	assert.Equal(t, "voice:u1", rows[0].ID, "first arrival fixes the transcript sequence")
 	assert.Empty(t, rows[0].Text)

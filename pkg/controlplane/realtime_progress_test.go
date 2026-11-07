@@ -269,7 +269,7 @@ func TestRealtimeProgressObservesTypedTurnSteeredByVoice(t *testing.T) {
 		assert.NoError(t, sink.Send(agentDelta("The tests have not ")))
 		close(started)
 		<-proceed
-		_, err := s.turns.db.Exec("DELETE FROM steering_messages WHERE conversation_id='saved'")
+		_, err := s.turns.db.Writer.Exec("DELETE FROM steering_messages WHERE conversation_id='saved'")
 		assert.NoError(t, err)
 		assert.NoError(t, sink.Send(agentDelta("passed.")))
 		assert.NoError(t, sink.Send(agentBlockEnd()))

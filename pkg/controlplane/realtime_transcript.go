@@ -108,7 +108,7 @@ func (s *Server) realtimeMessages(ctx context.Context, conversationID string) ([
 func (s *Server) saveRealtimeTranscript(ctx context.Context, conversationID string, event realtimeEvent) (anchor int, saved bool, err error) {
 	// Caption deltas normally update an existing identity. Do not parse the
 	// entire coding history on each token merely to recover its fixed anchor.
-	err = s.turns.db.GetContext(ctx, &anchor,
+	err = s.turns.db.Writer.GetContext(ctx, &anchor,
 		"UPDATE realtime_transcript SET text=? WHERE conversation_id=? AND id=? AND role=? RETURNING anchor",
 		event.Text, conversationID, event.ID, event.Role)
 	if err == nil {
@@ -129,7 +129,7 @@ func (s *Server) saveRealtimeTranscript(ctx context.Context, conversationID stri
 	}
 	// First occurrence fixes position. Cumulative deltas and the final update
 	// replace the same entry even if coding history has advanced in the meantime.
-	err = s.turns.db.GetContext(ctx, &anchor, `
+	err = s.turns.db.Writer.GetContext(ctx, &anchor, `
 		INSERT INTO realtime_transcript (conversation_id,id,anchor,role,text) VALUES (?,?,?,?,?)
 		ON CONFLICT(conversation_id,id) DO UPDATE SET text=excluded.text
 		WHERE realtime_transcript.role=excluded.role
@@ -152,7 +152,7 @@ func (s *Server) projectRealtimeTranscript(ctx context.Context, conversationID s
 		Text   string `db:"text"`
 	}
 	if s.turns != nil {
-		if err := s.turns.db.SelectContext(ctx, &entries,
+		if err := s.turns.db.Reader.SelectContext(ctx, &entries,
 			"SELECT id,anchor,role,text FROM realtime_transcript WHERE conversation_id=? ORDER BY anchor,sequence", conversationID); err != nil {
 			return nil, errors.Wrap(err, "failed to read live voice transcript")
 		}

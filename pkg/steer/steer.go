@@ -44,7 +44,7 @@ type Message struct {
 
 // Store manages the steering queue in Kodelet's shared SQLite database.
 type Store struct {
-	db *sqlx.DB
+	db *db.DB
 }
 
 type storeConfig struct {
@@ -108,7 +108,7 @@ func (s *Store) Enqueue(ctx context.Context, conversationID, content string, ima
 		return false, errors.Wrap(err, "failed to marshal steering images")
 	}
 
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to begin steering enqueue transaction")
 	}
@@ -137,7 +137,7 @@ func (s *Store) Enqueue(ctx context.Context, conversationID, content string, ima
 
 // Peek returns pending steering messages without consuming them.
 func (s *Store) Peek(ctx context.Context, conversationID string) ([]Message, error) {
-	rows, err := s.db.QueryxContext(ctx, `
+	rows, err := s.db.Reader.QueryxContext(ctx, `
 		SELECT id, content, images_json, created_at, source_id
 		FROM steering_messages
 		WHERE conversation_id = ? AND run_id=''
@@ -158,7 +158,7 @@ func (s *Store) Peek(ctx context.Context, conversationID string) ([]Message, err
 // Consume atomically removes and returns pending ordinary steering messages.
 // Legacy run-scoped rows remain stored but must never reach an unrelated turn.
 func (s *Store) Consume(ctx context.Context, conversationID string) ([]Message, error) {
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to begin steering consume transaction")
 	}
@@ -192,7 +192,7 @@ func (s *Store) Consume(ctx context.Context, conversationID string) ([]Message, 
 // HasPending reports whether a conversation has queued steering messages.
 func (s *Store) HasPending(ctx context.Context, conversationID string) (bool, error) {
 	var pending bool
-	if err := s.db.GetContext(ctx, &pending, `
+	if err := s.db.Reader.GetContext(ctx, &pending, `
 		SELECT EXISTS(
 			SELECT 1 FROM steering_messages WHERE conversation_id = ? AND run_id=''
 		)

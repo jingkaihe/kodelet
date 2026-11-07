@@ -102,7 +102,7 @@ func TestStoreHierarchyMetadataSurvivesSaveAndFork(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, loaded.Metadata, conversations.ConversationForkMetadataKey)
 	// Parent validation must not fetch or decode arbitrary message/tool history.
-	_, err = store.db.ExecContext(t.Context(), "UPDATE conversations SET raw_messages = 'unreadable', tool_results = 'unreadable' WHERE id = ?", parent.ID)
+	_, err = store.db.Writer.ExecContext(t.Context(), "UPDATE conversations SET raw_messages = 'unreadable', tool_results = 'unreadable' WHERE id = ?", parent.ID)
 	require.NoError(t, err)
 	metadata, err := store.LoadMetadata(t.Context(), parent.ID)
 	require.NoError(t, err)
@@ -239,18 +239,18 @@ func TestStore_DeleteRemovesRunnerAffinity(t *testing.T) {
 		ToolResults: map[string]tools.StructuredToolResult{},
 	}
 	require.NoError(t, store.Save(ctx, record))
-	_, err = store.db.ExecContext(ctx, `
+	_, err = store.db.Writer.ExecContext(ctx, `
 		INSERT INTO runner_registrations (
 			id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`, "runner-one", "local", "host-one", "/work/project", "project", "offline", now, now)
 	require.NoError(t, err)
-	_, err = store.db.ExecContext(ctx, `
+	_, err = store.db.Writer.ExecContext(ctx, `
 		INSERT INTO conversation_runner_affinity (conversation_id, runner_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?)
 	`, record.ID, "runner-one", now, now)
 	require.NoError(t, err)
-	_, err = store.db.ExecContext(ctx, `
+	_, err = store.db.Writer.ExecContext(ctx, `
 		INSERT INTO runner_runs (id, conversation_id, runner_id, status, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, "run-one", record.ID, "runner-one", "succeeded", now, now)
@@ -259,9 +259,9 @@ func TestStore_DeleteRemovesRunnerAffinity(t *testing.T) {
 	require.NoError(t, store.Delete(ctx, record.ID))
 
 	var count int
-	require.NoError(t, store.db.GetContext(ctx, &count, "SELECT COUNT(*) FROM conversation_runner_affinity WHERE conversation_id = ?", record.ID))
+	require.NoError(t, store.db.Writer.GetContext(ctx, &count, "SELECT COUNT(*) FROM conversation_runner_affinity WHERE conversation_id = ?", record.ID))
 	assert.Zero(t, count)
-	require.NoError(t, store.db.GetContext(ctx, &count, "SELECT COUNT(*) FROM runner_runs WHERE conversation_id = ?", record.ID))
+	require.NoError(t, store.db.Writer.GetContext(ctx, &count, "SELECT COUNT(*) FROM runner_runs WHERE conversation_id = ?", record.ID))
 	assert.Zero(t, count)
 }
 
@@ -275,13 +275,13 @@ func TestStore_ConversationRunnerAffinity(t *testing.T) {
 	defer store.Close()
 
 	now := time.Now().UTC()
-	_, err = store.db.ExecContext(ctx, `
+	_, err = store.db.Writer.ExecContext(ctx, `
 		INSERT INTO runner_registrations (
 			id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`, "runner-one", "local", "host-one", "/work/project", "project", "offline", now, now)
 	require.NoError(t, err)
-	_, err = store.db.ExecContext(ctx, `
+	_, err = store.db.Writer.ExecContext(ctx, `
 		INSERT INTO runner_registrations (
 			id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -467,7 +467,7 @@ func TestStore_QueryFiltersRunnerBeforePagination(t *testing.T) {
 		require.NoError(t, store.Save(ctx, record))
 	}
 	for _, runnerID := range []string{"runner-one", "runner-two"} {
-		_, err = store.db.ExecContext(ctx, `
+		_, err = store.db.Writer.ExecContext(ctx, `
 			INSERT INTO runner_registrations (
 				id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -479,7 +479,7 @@ func TestStore_QueryFiltersRunnerBeforePagination(t *testing.T) {
 		"runner-one-older":    "runner-one",
 		"other-runner-newest": "runner-two",
 	} {
-		_, err = store.db.ExecContext(ctx, `
+		_, err = store.db.Writer.ExecContext(ctx, `
 			INSERT INTO conversation_runner_affinity (conversation_id, runner_id, created_at, updated_at)
 			VALUES (?, ?, ?, ?)
 		`, conversationID, runnerID, now, now)
@@ -490,7 +490,7 @@ func TestStore_QueryFiltersRunnerBeforePagination(t *testing.T) {
 		"runner-one-older":    now.Add(-time.Hour),
 		"other-runner-newest": now.Add(time.Hour),
 	} {
-		_, err = store.db.ExecContext(ctx, "UPDATE conversation_summaries SET updated_at = ? WHERE id = ?", updatedAt, conversationID)
+		_, err = store.db.Writer.ExecContext(ctx, "UPDATE conversation_summaries SET updated_at = ? WHERE id = ?", updatedAt, conversationID)
 		require.NoError(t, err)
 	}
 
@@ -751,7 +751,7 @@ func TestStore_Migrations(t *testing.T) {
 	tables := []string{"schema_migrations", "conversations", "conversation_summaries", "acp_session_updates"}
 	for _, table := range tables {
 		var exists bool
-		err = store.db.QueryRow(`
+		err = store.db.Writer.QueryRow(`
 			SELECT COUNT(*) > 0
 			FROM sqlite_master
 			WHERE type='table' AND name=?
@@ -776,23 +776,23 @@ func TestStore_WALMode(t *testing.T) {
 
 	// Verify WAL mode is enabled
 	var journalMode string
-	err = store.db.Get(&journalMode, "PRAGMA journal_mode")
+	err = store.db.Writer.Get(&journalMode, "PRAGMA journal_mode")
 	require.NoError(t, err)
 	assert.Equal(t, "wal", strings.ToLower(journalMode))
 
 	// Verify other pragmas are set correctly
 	var synchronous string
-	err = store.db.Get(&synchronous, "PRAGMA synchronous")
+	err = store.db.Writer.Get(&synchronous, "PRAGMA synchronous")
 	require.NoError(t, err)
 	assert.Equal(t, "1", synchronous) // NORMAL = 1
 
 	var foreignKeys string
-	err = store.db.Get(&foreignKeys, "PRAGMA foreign_keys")
+	err = store.db.Writer.Get(&foreignKeys, "PRAGMA foreign_keys")
 	require.NoError(t, err)
 	assert.Equal(t, "1", foreignKeys) // ON = 1
 
 	var busyTimeout string
-	err = store.db.Get(&busyTimeout, "PRAGMA busy_timeout")
+	err = store.db.Writer.Get(&busyTimeout, "PRAGMA busy_timeout")
 	require.NoError(t, err)
 	assert.Equal(t, "5000", busyTimeout)
 
@@ -982,7 +982,7 @@ func TestStore_NullHandling(t *testing.T) {
 
 	// Verify in database using direct SQL query
 	var summary *string
-	err = store.db.Get(&summary, "SELECT summary FROM conversations WHERE id = ?", "null-test")
+	err = store.db.Writer.Get(&summary, "SELECT summary FROM conversations WHERE id = ?", "null-test")
 	require.NoError(t, err)
 	assert.Nil(t, summary) // Should be NULL in database
 
@@ -1151,7 +1151,7 @@ func TestStore_DirectDatabaseAccess(t *testing.T) {
 		)
 	`
 
-	_, err = store.db.NamedExec(query, dbRecord)
+	_, err = store.db.Writer.NamedExec(query, dbRecord)
 	require.NoError(t, err)
 
 	// Insert corresponding summary
@@ -1178,7 +1178,7 @@ func TestStore_DirectDatabaseAccess(t *testing.T) {
 		)
 	`
 
-	_, err = store.db.NamedExec(summaryQuery, dbSummary)
+	_, err = store.db.Writer.NamedExec(summaryQuery, dbSummary)
 	require.NoError(t, err)
 
 	// Verify using store methods
@@ -1190,7 +1190,7 @@ func TestStore_DirectDatabaseAccess(t *testing.T) {
 
 	// Test direct query using sqlx
 	var records []dbConversationRecord
-	err = store.db.Select(&records, `SELECT id, raw_messages, provider, usage,
+	err = store.db.Writer.Select(&records, `SELECT id, raw_messages, provider, usage,
 		summary, created_at, updated_at, metadata, tool_results
 		FROM conversations WHERE provider = ?`, "anthropic")
 	require.NoError(t, err)

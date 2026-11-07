@@ -48,7 +48,7 @@ func TestAuthStoreWebSessionLifecycle(t *testing.T) {
 	assert.NotEqual(t, sessionToken, csrfToken)
 
 	var storedTokenHash, storedCSRFHash []byte
-	require.NoError(t, store.db.QueryRowxContext(t.Context(), `SELECT token_sha256, csrf_token_sha256 FROM web_auth_sessions`).Scan(&storedTokenHash, &storedCSRFHash))
+	require.NoError(t, store.db.Writer.QueryRowxContext(t.Context(), `SELECT token_sha256, csrf_token_sha256 FROM web_auth_sessions`).Scan(&storedTokenHash, &storedCSRFHash))
 	assert.Equal(t, authHash(sessionToken), storedTokenHash)
 	assert.Equal(t, authHash(csrfToken), storedCSRFHash)
 	assert.NotEqual(t, []byte(sessionToken), storedTokenHash)
@@ -93,7 +93,7 @@ func TestAuthStoreOIDCTransactionIsSingleUseAndExpiryBound(t *testing.T) {
 	require.NoError(t, store.CreateOIDCTransaction(t.Context(), "state-one", "nonce-one", "verifier-one", "/chat?id=1", time.Minute))
 
 	var storedHash []byte
-	require.NoError(t, store.db.QueryRowxContext(t.Context(), `SELECT state_sha256 FROM oidc_login_transactions`).Scan(&storedHash))
+	require.NoError(t, store.db.Writer.QueryRowxContext(t.Context(), `SELECT state_sha256 FROM oidc_login_transactions`).Scan(&storedHash))
 	assert.Equal(t, authHash("state-one"), storedHash)
 	assert.NotEqual(t, []byte("state-one"), storedHash)
 
@@ -139,7 +139,7 @@ func TestAuthStoreOIDCTransactionIsSingleUseAndExpiryBound(t *testing.T) {
 	_, err := store.ConsumeOIDCTransaction(t.Context(), "state-expired")
 	require.ErrorIs(t, err, errOIDCTransactionNotFound)
 	var count int
-	require.NoError(t, store.db.GetContext(t.Context(), &count, `SELECT COUNT(*) FROM oidc_login_transactions WHERE state_sha256 = ?`, authHash("state-expired")))
+	require.NoError(t, store.db.Writer.GetContext(t.Context(), &count, `SELECT COUNT(*) FROM oidc_login_transactions WHERE state_sha256 = ?`, authHash("state-expired")))
 	assert.Zero(t, count)
 
 	for i := range maxPendingOIDCTransactions {
@@ -200,7 +200,7 @@ func TestAuthStoreRunnerEnrollmentApprovalPollingAndReplacement(t *testing.T) {
 	assert.True(t, active)
 
 	var approvedBy string
-	require.NoError(t, store.db.GetContext(t.Context(), &approvedBy, `SELECT approved_by FROM runner_credentials WHERE id = ?`, firstCredentialID))
+	require.NoError(t, store.db.Writer.GetContext(t.Context(), &approvedBy, `SELECT approved_by FROM runner_credentials WHERE id = ?`, firstCredentialID))
 	assert.Equal(t, "issuer|admin", approvedBy)
 
 	replacementRequest := testEnrollmentRequest(t, "host-one", "/work/project", "project", 0x32)
@@ -218,11 +218,11 @@ func TestAuthStoreRunnerEnrollmentApprovalPollingAndReplacement(t *testing.T) {
 
 	var revokedAt time.Time
 	var reason string
-	require.NoError(t, store.db.QueryRowxContext(t.Context(), `SELECT revoked_at, revoke_reason FROM runner_credentials WHERE id = ?`, firstCredentialID).Scan(&revokedAt, &reason))
+	require.NoError(t, store.db.Writer.QueryRowxContext(t.Context(), `SELECT revoked_at, revoke_reason FROM runner_credentials WHERE id = ?`, firstCredentialID).Scan(&revokedAt, &reason))
 	assert.Equal(t, clock.current, revokedAt.UTC())
 	assert.Equal(t, "replaced by approved enrollment", reason)
 	var count int
-	require.NoError(t, store.db.GetContext(t.Context(), &count, `SELECT COUNT(*) FROM runner_credentials WHERE runner_id = ? AND revoked_at IS NULL`, "runner-one"))
+	require.NoError(t, store.db.Writer.GetContext(t.Context(), &count, `SELECT COUNT(*) FROM runner_credentials WHERE runner_id = ? AND revoked_at IS NULL`, "runner-one"))
 	assert.Equal(t, 1, count)
 	active, err = store.RunnerCredentialActive(t.Context(), firstCredentialID, "runner-one", "host-one", "/work/project")
 	require.NoError(t, err)
@@ -253,7 +253,7 @@ func TestAuthStorePersistsRunnerOnlyWithSuccessfulEnrollmentApproval(t *testing.
 	require.NoError(t, err)
 	assert.Equal(t, "runner-transactional", approved.RunnerID)
 	var count int
-	require.NoError(t, store.db.GetContext(t.Context(), &count, `SELECT COUNT(*) FROM runner_registrations WHERE id = ?`, "runner-transactional"))
+	require.NoError(t, store.db.Writer.GetContext(t.Context(), &count, `SELECT COUNT(*) FROM runner_registrations WHERE id = ?`, "runner-transactional"))
 	assert.Equal(t, 1, count)
 
 	expiredStart, err := store.StartRunnerEnrollment(t.Context(), testEnrollmentRequest(t, "host-expired-transaction", "/work/expired-transaction", "expired-transaction", 0x35), "https://kodelet.example/runner/enroll")
@@ -261,7 +261,7 @@ func TestAuthStorePersistsRunnerOnlyWithSuccessfulEnrollmentApproval(t *testing.
 	clock.current = expiredStart.ExpiresAt
 	_, err = store.ApproveRunnerEnrollment(t.Context(), expiredStart.UserCode, "issuer|admin", newCandidate("runner-expired-transaction", "host-expired-transaction", "/work/expired-transaction", "expired-transaction"), false)
 	require.ErrorIs(t, err, errEnrollmentExpired)
-	require.NoError(t, store.db.GetContext(t.Context(), &count, `SELECT COUNT(*) FROM runner_registrations WHERE id = ?`, "runner-expired-transaction"))
+	require.NoError(t, store.db.Writer.GetContext(t.Context(), &count, `SELECT COUNT(*) FROM runner_registrations WHERE id = ?`, "runner-expired-transaction"))
 	assert.Zero(t, count)
 }
 
@@ -271,7 +271,7 @@ func TestAuthStoreApproveRunnerEnrollmentReturnsCommittedResultWithoutReread(t *
 	started, err := store.StartRunnerEnrollment(t.Context(), request, "https://kodelet.example/runner/enroll")
 	require.NoError(t, err)
 	runner := insertAuthStoreTestRunner(t, store, "runner-no-reread", "host-no-reread", "/work/no-reread", "no-reread")
-	_, err = store.db.Exec(`
+	_, err = store.db.Writer.Exec(`
 		CREATE TRIGGER mutate_approved_enrollment_user_code
 		AFTER UPDATE OF status ON runner_enrollments
 		WHEN NEW.status = 'approved'
@@ -290,7 +290,7 @@ func TestAuthStoreApproveRunnerEnrollmentReturnsCommittedResultWithoutReread(t *
 	assert.NotEmpty(t, approved.CredentialID)
 
 	var storedStatus, storedUserCode string
-	require.NoError(t, store.db.QueryRowxContext(t.Context(), `SELECT status, user_code FROM runner_enrollments WHERE id = ?`, started.EnrollmentID).Scan(&storedStatus, &storedUserCode))
+	require.NoError(t, store.db.Writer.QueryRowxContext(t.Context(), `SELECT status, user_code FROM runner_enrollments WHERE id = ?`, started.EnrollmentID).Scan(&storedStatus, &storedUserCode))
 	assert.Equal(t, string(protocol.EnrollmentStatusApproved), storedStatus)
 	assert.Equal(t, "ZZZZ-ZZZZ", storedUserCode)
 }
@@ -347,7 +347,7 @@ func TestAuthStoreRunnerDPoPProofIsBoundOneUseAndRevocable(t *testing.T) {
 		WorkspacePath:  "/work/proof",
 	}, identity)
 	var storedHash []byte
-	require.NoError(t, store.db.GetContext(t.Context(), &storedHash, `SELECT jti_sha256 FROM runner_dpop_replays WHERE credential_id = ?`, "credential-proof"))
+	require.NoError(t, store.db.Writer.GetContext(t.Context(), &storedHash, `SELECT jti_sha256 FROM runner_dpop_replays WHERE credential_id = ?`, "credential-proof"))
 	assert.Equal(t, authHash("proof-one"), storedHash)
 	assert.NotEqual(t, []byte("proof-one"), storedHash)
 	_, err = store.VerifyRunnerDPoP(t.Context(), accessToken, proof, http.MethodGet, targetURL)
@@ -370,7 +370,7 @@ func TestAuthStoreRunnerDPoPProofIsBoundOneUseAndRevocable(t *testing.T) {
 
 	revokedProof, err := protocol.SignDPoPProof(privateKey, protocol.DPoPProofOptions{Method: http.MethodGet, TargetURL: targetURL, AccessToken: accessToken, JTI: "revoked", IssuedAt: clock.current})
 	require.NoError(t, err)
-	_, err = store.db.ExecContext(t.Context(), `UPDATE runner_credentials SET revoked_at = ?, revoke_reason = ? WHERE id = ?`, clock.current, "test revocation", "credential-proof")
+	_, err = store.db.Writer.ExecContext(t.Context(), `UPDATE runner_credentials SET revoked_at = ?, revoke_reason = ? WHERE id = ?`, clock.current, "test revocation", "credential-proof")
 	require.NoError(t, err)
 	_, err = store.VerifyRunnerDPoP(t.Context(), accessToken, revokedProof, http.MethodGet, targetURL)
 	require.ErrorIs(t, err, errRunnerCredentialInvalid)
@@ -381,7 +381,7 @@ func TestAuthStoreLimitsActiveRunnerDPoPProofs(t *testing.T) {
 	publicKey, privateKey := testEd25519KeyPair(0x53)
 	insertAuthStoreTestRunner(t, store, "runner-dpop-limit", "host-limit", "/work/limit", "limit")
 	accessToken := insertAuthStoreTestCredential(t, store, "credential-dpop-limit", "runner-dpop-limit", publicKey, clock.current)
-	_, err := store.db.ExecContext(t.Context(), `
+	_, err := store.db.Writer.ExecContext(t.Context(), `
 		WITH RECURSIVE proof_count(value) AS (
 			VALUES(1)
 			UNION ALL
@@ -436,7 +436,7 @@ func testEd25519KeyPair(discriminator byte) (ed25519.PublicKey, ed25519.PrivateK
 func insertAuthStoreTestRunner(t *testing.T, store *authStore, runnerID, hostInstanceID, workspacePath, workspaceName string) runnerregistry.Runner {
 	t.Helper()
 	now := store.now().UTC()
-	_, err := store.db.ExecContext(t.Context(), `
+	_, err := store.db.Writer.ExecContext(t.Context(), `
 		INSERT INTO runner_registrations (
 			id, owner_id, host_instance_id, workspace_path, workspace_name,
 			status, created_at, updated_at
@@ -458,14 +458,14 @@ func insertAuthStoreTestCredential(t *testing.T, store *authStore, credentialID,
 	accessToken, err := protocol.NewRunnerAccessToken()
 	require.NoError(t, err)
 	fingerprintHash := sha256.Sum256(publicKey)
-	_, err = store.db.ExecContext(t.Context(), `
+	_, err = store.db.Writer.ExecContext(t.Context(), `
 		INSERT INTO runner_credentials (
 			id, runner_id, key_algorithm, public_key, public_key_sha256,
 			approved_by, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
 	`, credentialID, runnerID, runnerCredentialKeyAlgorithm, []byte(publicKey), fingerprintHash[:], "issuer|admin", createdAt)
 	require.NoError(t, err)
-	_, err = store.db.ExecContext(t.Context(), `
+	_, err = store.db.Writer.ExecContext(t.Context(), `
 		INSERT INTO runner_enrollments (
 			id, device_code_sha256, user_code, owner_id, status, protocol_version,
 			key_algorithm, public_key, public_key_sha256, host_instance_id,

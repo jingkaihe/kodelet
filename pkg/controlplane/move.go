@@ -46,7 +46,7 @@ func (s *Server) handleMoveConversation(w http.ResponseWriter, r *http.Request) 
 	}
 	if s.turns != nil {
 		var active bool
-		if err := s.turns.db.GetContext(ctx, &active, `SELECT EXISTS(SELECT 1 FROM chat_turns WHERE conversation_id = ? AND status IN ('accepted','running'))`, id); err != nil {
+		if err := s.turns.db.Reader.GetContext(ctx, &active, `SELECT EXISTS(SELECT 1 FROM chat_turns WHERE conversation_id = ? AND status IN ('accepted','running'))`, id); err != nil {
 			s.writeErrorResponse(w, http.StatusServiceUnavailable, "could not check whether the conversation is running", err)
 			return
 		}

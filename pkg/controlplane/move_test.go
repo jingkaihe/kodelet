@@ -122,7 +122,7 @@ func (f *conversationMoveFixture) assertDestination(t *testing.T, original convt
 	// could look correct while leaving the stored metadata null or stale.
 	for _, table := range []string{"conversations", "conversation_summaries"} {
 		var raw string
-		require.NoError(t, f.server.turns.db.GetContext(t.Context(), &raw, `SELECT metadata FROM `+table+` WHERE id = ?`, original.ID))
+		require.NoError(t, f.server.turns.db.Writer.GetContext(t.Context(), &raw, `SELECT metadata FROM `+table+` WHERE id = ?`, original.ID))
 		var metadata map[string]any
 		require.NoError(t, json.Unmarshal([]byte(raw), &metadata))
 		assert.Equal(t, expected.Metadata, metadata, table)
@@ -279,7 +279,7 @@ func TestMoveRejectsStaleConfirmationAndRollsBack(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, target.RunnerID, registered.RunnerID)
 			case "source affinity":
-				_, err := f.server.turns.db.Exec(`UPDATE conversation_runner_affinity SET runner_id = ? WHERE conversation_id = ?`, other.RunnerID, record.ID)
+				_, err := f.server.turns.db.Writer.Exec(`UPDATE conversation_runner_affinity SET runner_id = ? WHERE conversation_id = ?`, other.RunnerID, record.ID)
 				require.NoError(t, err)
 				expectedRunner = other.RunnerID
 				require.ErrorIs(t, f.server.runnerRegistry.MoveConversation(t.Context(), record, affinity, target.RunnerID, params.CWD), registry.ErrMoveConflict)
@@ -288,14 +288,14 @@ func TestMoveRejectsStaleConfirmationAndRollsBack(t *testing.T) {
 				record.RawMessages = json.RawMessage(`[{"role":"user","content":"newer history"}]`)
 				record = f.save(t, record)
 			case "summary rollback":
-				_, err := f.server.turns.db.Exec(`CREATE TRIGGER reject_move_summary BEFORE UPDATE ON conversation_summaries BEGIN SELECT RAISE(ABORT, 'summary unavailable'); END`)
+				_, err := f.server.turns.db.Writer.Exec(`CREATE TRIGGER reject_move_summary BEFORE UPDATE ON conversation_summaries BEGIN SELECT RAISE(ABORT, 'summary unavailable'); END`)
 				require.NoError(t, err)
 			case "accepted turn", "running turn":
 				status := "accepted"
 				if scenario == "running turn" {
 					status = "running"
 				}
-				_, err := f.server.turns.db.Exec(`INSERT INTO chat_turns (conversation_id, turn_id, status, created_at, updated_at) VALUES (?, 'active', ?, ?, ?)`, record.ID, status, time.Now(), time.Now())
+				_, err := f.server.turns.db.Writer.Exec(`INSERT INTO chat_turns (conversation_id, turn_id, status, created_at, updated_at) VALUES (?, 'active', ?, ?, ?)`, record.ID, status, time.Now(), time.Now())
 				require.NoError(t, err)
 				require.ErrorIs(t, f.server.runnerRegistry.MoveConversation(t.Context(), record, affinity, target.RunnerID, params.CWD), registry.ErrMoveConflict, "the transaction must reject turns admitted after planning")
 			case "opening run", "running run":
@@ -303,7 +303,7 @@ func TestMoveRejectsStaleConfirmationAndRollsBack(t *testing.T) {
 				if scenario == "running run" {
 					status = "running"
 				}
-				_, err := f.server.turns.db.Exec(`INSERT INTO runner_runs (id, conversation_id, runner_id, status, created_at, updated_at) VALUES ('active', ?, ?, ?, ?, ?)`, record.ID, source.RunnerID, status, time.Now(), time.Now())
+				_, err := f.server.turns.db.Writer.Exec(`INSERT INTO runner_runs (id, conversation_id, runner_id, status, created_at, updated_at) VALUES ('active', ?, ?, ?, ?, ?)`, record.ID, source.RunnerID, status, time.Now(), time.Now())
 				require.NoError(t, err)
 				require.ErrorIs(t, f.server.runnerRegistry.MoveConversation(t.Context(), record, affinity, target.RunnerID, params.CWD), registry.ErrMoveConflict, "durable reservations must be checked even without a cached lease")
 			case "active chat":

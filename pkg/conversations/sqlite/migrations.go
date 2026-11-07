@@ -31,7 +31,7 @@ func (s *Store) validateSchema() error {
 
 	for _, table := range requiredTables {
 		var exists bool
-		err := s.db.QueryRow(`
+		err := s.db.Reader.QueryRow(`
 			SELECT COUNT(*) > 0
 			FROM sqlite_master
 			WHERE type='table' AND name=?

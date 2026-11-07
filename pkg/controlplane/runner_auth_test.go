@@ -60,7 +60,7 @@ func TestRunnerWebsocketKeyProofAuthenticationAndReplayProtection(t *testing.T) 
 	require.NoError(t, response.Body.Close())
 
 	var lastUsedAt time.Time
-	require.NoError(t, store.db.GetContext(t.Context(), &lastUsedAt, `SELECT last_used_at FROM runner_credentials WHERE id = ?`, "credential-proof"))
+	require.NoError(t, store.db.Writer.GetContext(t.Context(), &lastUsedAt, `SELECT last_used_at FROM runner_credentials WHERE id = ?`, "credential-proof"))
 	assert.Equal(t, time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC), lastUsedAt.UTC())
 }
 
@@ -298,7 +298,7 @@ func TestExpiredEnrollmentApprovalDoesNotPublishOrPersistRunner(t *testing.T) {
 	require.NoError(t, err)
 	var sequence int
 	var name, dbPath string
-	require.NoError(t, store.db.QueryRowxContext(t.Context(), `PRAGMA database_list`).Scan(&sequence, &name, &dbPath))
+	require.NoError(t, store.db.Writer.QueryRowxContext(t.Context(), `PRAGMA database_list`).Scan(&sequence, &name, &dbPath))
 	persistence, err := runnerregistry.NewSQLitePersistence(t.Context(), dbPath, controlPlaneOwnerID)
 	require.NoError(t, err)
 	registry, err := runnerregistry.New(t.Context(), runnerregistry.Options{
@@ -328,7 +328,7 @@ func TestExpiredEnrollmentApprovalDoesNotPublishOrPersistRunner(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, response.Code)
 	assert.Empty(t, registry.Runners())
 	var runnerCount int
-	require.NoError(t, store.db.GetContext(t.Context(), &runnerCount, `SELECT COUNT(*) FROM runner_registrations WHERE host_instance_id = ? AND workspace_path = ?`, "host-expired-approval", "/work/expired-approval"))
+	require.NoError(t, store.db.Writer.GetContext(t.Context(), &runnerCount, `SELECT COUNT(*) FROM runner_registrations WHERE host_instance_id = ? AND workspace_path = ?`, "host-expired-approval", "/work/expired-approval"))
 	assert.Zero(t, runnerCount)
 }
 
@@ -406,7 +406,7 @@ func newRunnerAuthIntegrationServer(t *testing.T, mode RunnerAuthMode) (*Server,
 
 	var sequence int
 	var name, dbPath string
-	require.NoError(t, store.db.QueryRowxContext(t.Context(), `PRAGMA database_list`).Scan(&sequence, &name, &dbPath))
+	require.NoError(t, store.db.Writer.QueryRowxContext(t.Context(), `PRAGMA database_list`).Scan(&sequence, &name, &dbPath))
 	persistence, err := runnerregistry.NewSQLitePersistence(context.Background(), dbPath, controlPlaneOwnerID)
 	require.NoError(t, err)
 	registry, err := runnerregistry.New(context.Background(), runnerregistry.Options{

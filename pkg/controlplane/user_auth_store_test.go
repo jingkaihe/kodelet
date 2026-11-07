@@ -33,7 +33,7 @@ func TestAuthStoreUserLoginLifecycleAndSecretStorage(t *testing.T) {
 	assert.Empty(t, started.VerificationURLComplete)
 
 	var storedDeviceHash, storedTokenHash, storedRefreshHash []byte
-	require.NoError(t, store.db.QueryRowxContext(t.Context(), `
+	require.NoError(t, store.db.Writer.QueryRowxContext(t.Context(), `
 		SELECT device_code_sha256, token_sha256, refresh_token_sha256
 		FROM user_login_authorizations WHERE id = ?
 	`, started.AuthorizationID).Scan(&storedDeviceHash, &storedTokenHash, &storedRefreshHash))
@@ -107,7 +107,7 @@ func TestAuthStoreUserLoginLifecycleAndSecretStorage(t *testing.T) {
 	var credentialTokenHash []byte
 	var issuer, subject, name, email, rolesJSON, approvedBy string
 	var deliveredAt time.Time
-	require.NoError(t, store.db.QueryRowxContext(t.Context(), `
+	require.NoError(t, store.db.Writer.QueryRowxContext(t.Context(), `
 		SELECT c.token_sha256, c.issuer, c.subject, COALESCE(c.name, ''),
 			COALESCE(c.email, ''), c.roles_json, a.approved_by, a.delivered_at
 		FROM user_api_credentials c
@@ -132,13 +132,13 @@ func TestAuthStoreUserLoginLifecycleAndSecretStorage(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, userCredentialIdentity{CredentialID: approved.CredentialID, Principal: expectedPrincipal}, identity)
 	var lastUsedAt time.Time
-	require.NoError(t, store.db.GetContext(t.Context(), &lastUsedAt, `SELECT last_used_at FROM user_api_credentials WHERE id = ?`, approved.CredentialID))
+	require.NoError(t, store.db.Writer.GetContext(t.Context(), &lastUsedAt, `SELECT last_used_at FROM user_api_credentials WHERE id = ?`, approved.CredentialID))
 	assert.Equal(t, clock.current, lastUsedAt.UTC())
 
 	require.NoError(t, store.RevokeUserCredential(t.Context(), approved.CredentialID, " test revocation "))
 	var revokedAt time.Time
 	var revokeReason string
-	require.NoError(t, store.db.QueryRowxContext(t.Context(), `SELECT revoked_at, revoke_reason FROM user_api_credentials WHERE id = ?`, approved.CredentialID).Scan(&revokedAt, &revokeReason))
+	require.NoError(t, store.db.Writer.QueryRowxContext(t.Context(), `SELECT revoked_at, revoke_reason FROM user_api_credentials WHERE id = ?`, approved.CredentialID).Scan(&revokedAt, &revokeReason))
 	assert.Equal(t, clock.current, revokedAt.UTC())
 	assert.Equal(t, "test revocation", revokeReason)
 	_, err = store.LoadUserCredential(t.Context(), started.BearerToken)
@@ -164,7 +164,7 @@ func TestAuthStoreUserLoginDenialAndExpiry(t *testing.T) {
 	_, err = store.ApproveUserLogin(t.Context(), denied.UserCode, principal, time.Hour)
 	require.ErrorIs(t, err, errUserAuthorizationNotPending)
 	var deniedBy string
-	require.NoError(t, store.db.GetContext(t.Context(), &deniedBy, `SELECT denied_by FROM user_login_authorizations WHERE id = ?`, denied.AuthorizationID))
+	require.NoError(t, store.db.Writer.GetContext(t.Context(), &deniedBy, `SELECT denied_by FROM user_login_authorizations WHERE id = ?`, denied.AuthorizationID))
 	assert.Equal(t, "issuer|admin", deniedBy)
 
 	expired, err := store.StartUserLogin(t.Context(), testUserLoginStartRequest(), "https://kodelet.example/auth/device")
@@ -180,7 +180,7 @@ func TestAuthStoreUserLoginDenialAndExpiry(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, userauth.DeviceStatusExpired, expiredPoll.Status)
 	var count int
-	require.NoError(t, store.db.GetContext(t.Context(), &count, `SELECT COUNT(*) FROM user_login_authorizations WHERE id = ?`, expired.AuthorizationID))
+	require.NoError(t, store.db.Writer.GetContext(t.Context(), &count, `SELECT COUNT(*) FROM user_login_authorizations WHERE id = ?`, expired.AuthorizationID))
 	assert.Zero(t, count)
 	_, err = store.PollUserLogin(t.Context(), userauth.DevicePollRequest{AuthorizationID: expired.AuthorizationID, DeviceCode: expired.DeviceCode})
 	require.ErrorIs(t, err, errUserAuthorizationNotFound)
@@ -202,7 +202,7 @@ func TestAuthStoreUserLoginPollSlowDown(t *testing.T) {
 	assert.Equal(t, 3*time.Second, slowDown.RetryAfter)
 
 	var lastPolledAt time.Time
-	require.NoError(t, store.db.GetContext(t.Context(), &lastPolledAt, `SELECT last_polled_at FROM user_login_authorizations WHERE id = ?`, started.AuthorizationID))
+	require.NoError(t, store.db.Writer.GetContext(t.Context(), &lastPolledAt, `SELECT last_polled_at FROM user_login_authorizations WHERE id = ?`, started.AuthorizationID))
 	assert.Equal(t, clock.current.Add(-2*time.Second), lastPolledAt.UTC())
 	clock.current = clock.current.Add(3 * time.Second)
 	polled, err := store.PollUserLogin(t.Context(), pollRequest)
@@ -213,7 +213,7 @@ func TestAuthStoreUserLoginPollSlowDown(t *testing.T) {
 
 func TestAuthStoreUserLoginPendingLimitAndCleanup(t *testing.T) {
 	store, clock := newAuthStoreTest(t)
-	tx, err := store.db.BeginTxx(t.Context(), nil)
+	tx, err := store.db.Writer.BeginTxx(t.Context(), nil)
 	require.NoError(t, err)
 	for index := range maxPendingUserLogins {
 		_, err := tx.ExecContext(t.Context(), `
@@ -231,14 +231,14 @@ func TestAuthStoreUserLoginPendingLimitAndCleanup(t *testing.T) {
 
 	_, err = store.StartUserLogin(t.Context(), testUserLoginStartRequest(), "https://kodelet.example/auth/device")
 	require.ErrorIs(t, err, errTooManyUserLogins)
-	_, err = store.db.ExecContext(t.Context(), `UPDATE user_login_authorizations SET expires_at = ? WHERE id = ?`, clock.current, "authorization-limit-0")
+	_, err = store.db.Writer.ExecContext(t.Context(), `UPDATE user_login_authorizations SET expires_at = ? WHERE id = ?`, clock.current, "authorization-limit-0")
 	require.NoError(t, err)
 	started, err := store.StartUserLogin(t.Context(), testUserLoginStartRequest(), "https://kodelet.example/auth/device")
 	require.NoError(t, err)
 	assert.NotEmpty(t, started.AuthorizationID)
 	var pendingCount, expiredSeedCount int
-	require.NoError(t, store.db.GetContext(t.Context(), &pendingCount, `SELECT COUNT(*) FROM user_login_authorizations WHERE status = ?`, userauth.DeviceStatusPending))
-	require.NoError(t, store.db.GetContext(t.Context(), &expiredSeedCount, `SELECT COUNT(*) FROM user_login_authorizations WHERE id = ?`, "authorization-limit-0"))
+	require.NoError(t, store.db.Writer.GetContext(t.Context(), &pendingCount, `SELECT COUNT(*) FROM user_login_authorizations WHERE status = ?`, userauth.DeviceStatusPending))
+	require.NoError(t, store.db.Writer.GetContext(t.Context(), &expiredSeedCount, `SELECT COUNT(*) FROM user_login_authorizations WHERE id = ?`, "authorization-limit-0"))
 	assert.Equal(t, maxPendingUserLogins, pendingCount)
 	assert.Zero(t, expiredSeedCount)
 }
@@ -284,7 +284,7 @@ func TestAuthStoreConcurrentUserLoginApprovalHasSingleWinner(t *testing.T) {
 	assert.Equal(t, 1, approved)
 	assert.Equal(t, 1, rejected)
 	var credentialCount int
-	require.NoError(t, store.db.GetContext(t.Context(), &credentialCount, `SELECT COUNT(*) FROM user_api_credentials`))
+	require.NoError(t, store.db.Writer.GetContext(t.Context(), &credentialCount, `SELECT COUNT(*) FROM user_api_credentials`))
 	assert.Equal(t, 1, credentialCount)
 }
 
@@ -313,7 +313,7 @@ func TestAuthStoreUserLoginValidationAndCredentialDefaults(t *testing.T) {
 		})
 	}
 	var authorizationCount int
-	require.NoError(t, store.db.GetContext(t.Context(), &authorizationCount, `SELECT COUNT(*) FROM user_login_authorizations`))
+	require.NoError(t, store.db.Writer.GetContext(t.Context(), &authorizationCount, `SELECT COUNT(*) FROM user_login_authorizations`))
 	assert.Zero(t, authorizationCount)
 
 	normalized, err := normalizeUserCode(" abcd - efgh ")
@@ -347,7 +347,7 @@ func TestAuthStoreUserLoginValidationAndCredentialDefaults(t *testing.T) {
 	}
 	require.Error(t, store.DenyUserLogin(t.Context(), started.UserCode, " "))
 	var credentialCount int
-	require.NoError(t, store.db.GetContext(t.Context(), &credentialCount, `SELECT COUNT(*) FROM user_api_credentials`))
+	require.NoError(t, store.db.Writer.GetContext(t.Context(), &credentialCount, `SELECT COUNT(*) FROM user_api_credentials`))
 	assert.Zero(t, credentialCount)
 
 	approved, err := store.ApproveUserLogin(t.Context(), started.UserCode, testUserLoginPrincipal(), 0)
@@ -373,7 +373,7 @@ func TestAuthStoreApproveUserLoginReturnsCommittedResultWithoutReread(t *testing
 	store, _ := newAuthStoreTest(t)
 	started, err := store.StartUserLogin(t.Context(), testUserLoginStartRequest(), "https://kodelet.example/auth/device")
 	require.NoError(t, err)
-	_, err = store.db.Exec(`
+	_, err = store.db.Writer.Exec(`
 		CREATE TRIGGER mutate_approved_user_login
 		AFTER UPDATE OF status ON user_login_authorizations
 		WHEN NEW.status = 'approved'
@@ -398,7 +398,7 @@ func TestAuthStoreApproveUserLoginReturnsCommittedResultWithoutReread(t *testing
 	assert.NotEmpty(t, approved.CredentialID)
 
 	var storedUserCode, storedClientName, storedName, storedRoles string
-	require.NoError(t, store.db.QueryRowxContext(t.Context(), `
+	require.NoError(t, store.db.Writer.QueryRowxContext(t.Context(), `
 		SELECT a.user_code, a.client_name, c.name, c.roles_json
 		FROM user_login_authorizations a
 		JOIN user_api_credentials c ON c.id = a.credential_id
@@ -456,7 +456,7 @@ func TestAuthStoreUserRefreshRotationAndReuse(t *testing.T) {
 	_, err = store.LoadUserCredential(t.Context(), unrelated.BearerToken)
 	require.NoError(t, err, "other credential families must remain valid")
 	var reason string
-	require.NoError(t, store.db.GetContext(t.Context(), &reason, `SELECT revoke_reason FROM user_api_credentials WHERE id = ?`, approved.CredentialID))
+	require.NoError(t, store.db.Writer.GetContext(t.Context(), &reason, `SELECT revoke_reason FROM user_api_credentials WHERE id = ?`, approved.CredentialID))
 	assert.Equal(t, "refresh token reuse", reason)
 }
 
@@ -529,19 +529,19 @@ func TestAuthStoreConcurrentUserRefreshRevokesFamily(t *testing.T) {
 func TestAuthStoreUserLegacyTokenMigration(t *testing.T) {
 	store, clock := newAuthStoreTest(t)
 	migration := dbmigrations.Migration20260924120000CreateUserRefreshTokens()
-	tx, err := store.db.BeginTx(t.Context(), nil)
+	tx, err := store.db.Writer.BeginTx(t.Context(), nil)
 	require.NoError(t, err)
 	require.NoError(t, migration.Down(tx))
 	require.NoError(t, tx.Commit())
 	bearer, err := userauth.GenerateBearerToken()
 	require.NoError(t, err)
 	expiresAt := clock.current.Add(time.Hour)
-	_, err = store.db.ExecContext(t.Context(), `
+	_, err = store.db.Writer.ExecContext(t.Context(), `
 		INSERT INTO user_api_credentials (id, token_sha256, issuer, subject, roles_json, created_at, expires_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`, "legacy", authHash(bearer), "issuer", "subject", `["user"]`, clock.current, expiresAt)
 	require.NoError(t, err)
-	tx, err = store.db.BeginTx(t.Context(), nil)
+	tx, err = store.db.Writer.BeginTx(t.Context(), nil)
 	require.NoError(t, err)
 	require.NoError(t, migration.Up(tx))
 	require.NoError(t, tx.Commit())
@@ -559,7 +559,7 @@ func TestAuthStoreLegacyPendingLoginKeepsOriginalLifetime(t *testing.T) {
 	started, err := store.StartUserLogin(t.Context(), testUserLoginStartRequest(), "https://kodelet.example/auth/device")
 	require.NoError(t, err)
 	// This is the state of a device flow started before the refresh-token migration.
-	_, err = store.db.ExecContext(t.Context(), `UPDATE user_login_authorizations SET refresh_token_sha256 = NULL WHERE id = ?`, started.AuthorizationID)
+	_, err = store.db.Writer.ExecContext(t.Context(), `UPDATE user_login_authorizations SET refresh_token_sha256 = NULL WHERE id = ?`, started.AuthorizationID)
 	require.NoError(t, err)
 	approved, err := store.ApproveUserLogin(t.Context(), started.UserCode, testUserLoginPrincipal(), time.Hour)
 	require.NoError(t, err)
@@ -613,7 +613,7 @@ func assertUserAuthSecretsAbsentFromDatabaseFiles(t *testing.T, store *authStore
 	t.Helper()
 	var sequence int
 	var name, databasePath string
-	require.NoError(t, store.db.QueryRowxContext(t.Context(), `PRAGMA database_list`).Scan(&sequence, &name, &databasePath))
+	require.NoError(t, store.db.Writer.QueryRowxContext(t.Context(), `PRAGMA database_list`).Scan(&sequence, &name, &databasePath))
 	for _, path := range []string{databasePath, databasePath + "-wal"} {
 		contents, err := os.ReadFile(path)
 		if stdErrors.Is(err, os.ErrNotExist) {

@@ -181,7 +181,7 @@ return {foreign: %q, keyOnly: {[reply.attachments[2].artifactId]: true},
 	_, _, err = images.Get(t.Context(), parent.ID, foreign.ArtifactID)
 	assert.ErrorIs(t, err, artifacts.ErrNotFound, "literal IDs in output cannot grant foreign ownership")
 
-	_, err = database.ExecContext(t.Context(), `UPDATE image_artifacts SET created_at = ?`, time.Now().UTC().Add(-48*time.Hour))
+	_, err = database.Writer.ExecContext(t.Context(), `UPDATE image_artifacts SET created_at = ?`, time.Now().UTC().Add(-48*time.Hour))
 	require.NoError(t, err)
 	require.NoError(t, images.Close())
 	images, err = artifacts.Open(t.Context(), path)

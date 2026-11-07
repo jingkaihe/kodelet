@@ -50,7 +50,7 @@ func (r *Registry) MoveConversation(ctx context.Context, record convtypes.Conver
 }
 
 func (s *SQLitePersistence) moveConversation(ctx context.Context, record convtypes.ConversationRecord, source ConversationAffinity, runnerID, cwd, profile string, now time.Time) error {
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to begin conversation move")
 	}

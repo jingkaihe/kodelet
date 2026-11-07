@@ -11,7 +11,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	conversationtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
-	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
 )
 
@@ -49,7 +48,7 @@ type Persistence interface {
 
 // SQLitePersistence stores runner state in Kodelet's shared SQLite database.
 type SQLitePersistence struct {
-	db      *sqlx.DB
+	db      *db.DB
 	ownerID string
 }
 
@@ -74,7 +73,7 @@ func (s *SQLitePersistence) Load(ctx context.Context) (PersistedState, error) {
 	}
 
 	var runnerRows []runnerPersistenceRow
-	if err := s.db.SelectContext(ctx, &runnerRows, `
+	if err := s.db.Reader.SelectContext(ctx, &runnerRows, `
 		SELECT id, display_name, host_instance_id, hostname, host_os, host_arch, host_pid,
 			workspace_path, workspace_name, kodelet_version, manifest_digest,
 			manifest_changed, compatibility_error, status, active_run_id, generation,
@@ -93,7 +92,7 @@ func (s *SQLitePersistence) Load(ctx context.Context) (PersistedState, error) {
 	for _, row := range runnerRows {
 		state.Runners = append(state.Runners, row.runner())
 	}
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := s.db.Writer.ExecContext(ctx, `
 		DELETE FROM runner_runs
 		WHERE runner_id IN (
 			SELECT id FROM runner_registrations WHERE owner_id = ?
@@ -104,7 +103,7 @@ func (s *SQLitePersistence) Load(ctx context.Context) (PersistedState, error) {
 		return PersistedState{}, errors.Wrap(err, "failed to prune orphaned runner runs")
 	}
 
-	if err := s.db.SelectContext(ctx, &state.Runs, `
+	if err := s.db.Reader.SelectContext(ctx, &state.Runs, `
 		SELECT rr.id, rr.conversation_id, rr.runner_id, rr.status,
 			COALESCE(rr.manifest_digest, '') AS manifest_digest,
 			COALESCE(rr.manifest_json, '') AS manifest_json,
@@ -129,7 +128,7 @@ func (s *SQLitePersistence) Load(ctx context.Context) (PersistedState, error) {
 	}
 
 	var affinities []conversationAffinityRow
-	if err := s.db.SelectContext(ctx, &affinities, `
+	if err := s.db.Reader.SelectContext(ctx, &affinities, `
 		SELECT a.conversation_id, a.runner_id, a.environment_profile
 		FROM conversation_runner_affinity a
 		JOIN runner_registrations r ON r.id = a.runner_id
@@ -150,7 +149,7 @@ func (s *SQLitePersistence) Load(ctx context.Context) (PersistedState, error) {
 // of the bounded run-history cache restored at startup.
 func (s *SQLitePersistence) SessionExtensionRequirements(ctx context.Context, conversationID string) ([]string, error) {
 	var snapshot string
-	err := s.db.GetContext(ctx, &snapshot, `
+	err := s.db.Reader.GetContext(ctx, &snapshot, `
 		SELECT rr.manifest_json FROM runner_runs rr
 		JOIN runner_registrations r ON r.id = rr.runner_id
 		WHERE r.owner_id = ? AND rr.conversation_id = ? AND COALESCE(rr.manifest_json, '') != ''
@@ -159,7 +158,7 @@ func (s *SQLitePersistence) SessionExtensionRequirements(ctx context.Context, co
 	if errors.Is(err, sql.ErrNoRows) {
 		// Runner removal preserves only callback identities in conversation-owned
 		// metadata. A newer pinned manifest always takes precedence over it.
-		err = s.db.GetContext(ctx, &snapshot, `
+		err = s.db.Reader.GetContext(ctx, &snapshot, `
 			SELECT COALESCE(json_extract(metadata, ?), '[]')
 			FROM conversations WHERE id = ?
 		`, "$."+sessionExtensionIDsMetadataKey, conversationID)
@@ -190,7 +189,7 @@ func (s *SQLitePersistence) SaveRunner(ctx context.Context, runner Runner) error
 	if s == nil || s.db == nil {
 		return errors.New("runner persistence is closed")
 	}
-	return s.saveRunner(ctx, s.db, runner)
+	return s.saveRunner(ctx, s.db.Writer, runner)
 }
 
 func (s *SQLitePersistence) saveRunner(ctx context.Context, executor sqlExecutor, runner Runner) error {
@@ -252,7 +251,7 @@ func (s *SQLitePersistence) SaveRun(ctx context.Context, run Run) error {
 	if s == nil || s.db == nil {
 		return errors.New("runner persistence is closed")
 	}
-	return s.saveRun(ctx, s.db, run)
+	return s.saveRun(ctx, s.db.Writer, run)
 }
 
 func (s *SQLitePersistence) saveRun(ctx context.Context, executor sqlExecutor, run Run) error {
@@ -282,7 +281,7 @@ func (s *SQLitePersistence) SaveRunnerAndRuns(ctx context.Context, runner Runner
 	if s == nil || s.db == nil {
 		return errors.New("runner persistence is closed")
 	}
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to begin runner state transaction")
 	}
@@ -307,7 +306,7 @@ func (s *SQLitePersistence) BindConversation(ctx context.Context, conversationID
 	if s == nil || s.db == nil {
 		return errors.New("runner persistence is closed")
 	}
-	result, err := s.db.ExecContext(ctx, `
+	result, err := s.db.Writer.ExecContext(ctx, `
 		INSERT INTO conversation_runner_affinity (conversation_id, runner_id, environment_profile, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(conversation_id) DO UPDATE SET
@@ -334,7 +333,7 @@ func (s *SQLitePersistence) ConversationAffinity(ctx context.Context, conversati
 		return ConversationAffinity{}, false, errors.New("runner persistence is closed")
 	}
 	var row conversationAffinityRow
-	err := s.db.GetContext(ctx, &row, `
+	err := s.db.Reader.GetContext(ctx, &row, `
 		SELECT a.conversation_id, a.runner_id, a.environment_profile
 		FROM conversation_runner_affinity a
 		JOIN runner_registrations r ON r.id = a.runner_id
@@ -364,7 +363,7 @@ func (s *SQLitePersistence) RemoveRunner(ctx context.Context, runnerID string, f
 		return RemovalResult{}, errors.New("runner id is required")
 	}
 
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return RemovalResult{}, errors.Wrap(err, "failed to begin runner removal")
 	}

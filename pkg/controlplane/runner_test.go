@@ -291,10 +291,10 @@ func TestEmbeddedRunnerEnrollmentReuseAndRevocation(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	var approvedBy string
-	require.NoError(t, server.authStore.db.GetContext(t.Context(), &approvedBy, "SELECT approved_by FROM runner_enrollments WHERE runner_id = ?", runnerID))
+	require.NoError(t, server.authStore.db.Writer.GetContext(t.Context(), &approvedBy, "SELECT approved_by FROM runner_enrollments WHERE runner_id = ?", runnerID))
 	assert.Equal(t, "daemon:embedded-runner", approvedBy)
 	var enrolledVersion string
-	require.NoError(t, server.authStore.db.GetContext(t.Context(), &enrolledVersion, "SELECT kodelet_version FROM runner_enrollments WHERE runner_id = ?", runnerID))
+	require.NoError(t, server.authStore.db.Writer.GetContext(t.Context(), &enrolledVersion, "SELECT kodelet_version FROM runner_enrollments WHERE runner_id = ?", runnerID))
 	assert.Equal(t, version.Get().Version, enrolledVersion)
 	stop()
 
@@ -306,9 +306,9 @@ func TestEmbeddedRunnerEnrollmentReuseAndRevocation(t *testing.T) {
 	require.True(t, found)
 	assert.Equal(t, credential, reused, "restart must reuse the approved identity and key")
 	var credentials int
-	require.NoError(t, server.authStore.db.GetContext(t.Context(), &credentials, "SELECT COUNT(*) FROM runner_credentials"))
+	require.NoError(t, server.authStore.db.Writer.GetContext(t.Context(), &credentials, "SELECT COUNT(*) FROM runner_credentials"))
 	assert.Equal(t, 1, credentials)
-	_, err = server.authStore.db.ExecContext(t.Context(), "UPDATE runner_credentials SET revoked_at = ?, revoke_reason = ? WHERE id = ?", time.Now().UTC(), "test revocation", credential.CredentialID)
+	_, err = server.authStore.db.Writer.ExecContext(t.Context(), "UPDATE runner_credentials SET revoked_at = ?, revoke_reason = ? WHERE id = ?", time.Now().UTC(), "test revocation", credential.CredentialID)
 	require.NoError(t, err)
 	stop()
 
@@ -316,7 +316,7 @@ func TestEmbeddedRunnerEnrollmentReuseAndRevocation(t *testing.T) {
 	require.Eventually(t, func() bool { return server.EmbeddedRunnerStatus().Error != "" }, 5*time.Second, 10*time.Millisecond)
 	assert.False(t, server.EmbeddedRunnerStatus().Ready)
 	assert.Contains(t, server.EmbeddedRunnerStatus().Error, "re-enroll")
-	require.NoError(t, server.authStore.db.GetContext(t.Context(), &credentials, "SELECT COUNT(*) FROM runner_credentials"))
+	require.NoError(t, server.authStore.db.Writer.GetContext(t.Context(), &credentials, "SELECT COUNT(*) FROM runner_credentials"))
 	assert.Equal(t, 1, credentials, "revocation must not trigger a replacement enrollment")
 	assert.Len(t, server.runnerRegistry.Runners(), 1)
 	held, err := store.WorkspaceLockHeld(workspace)

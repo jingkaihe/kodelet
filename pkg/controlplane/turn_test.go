@@ -177,12 +177,12 @@ func TestTurnStoreConcurrentDuplicatesAdmitExactlyOnce(t *testing.T) {
 func TestTurnStoreAdmissionWaitsForConcurrentWriter(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "storage.db")
 	store := openTurnTestStore(t, path)
-	writer, err := db.Open(t.Context(), path)
+	other, err := db.Open(t.Context(), path)
 	require.NoError(t, err)
-	defer writer.Close()
-	_, err = writer.ExecContext(t.Context(), "BEGIN IMMEDIATE")
+	defer other.Close()
+	_, err = other.Writer.ExecContext(t.Context(), "BEGIN IMMEDIATE")
 	require.NoError(t, err)
-	defer func() { _, _ = writer.ExecContext(context.Background(), "ROLLBACK") }()
+	defer func() { _, _ = other.Writer.ExecContext(context.Background(), "ROLLBACK") }()
 
 	done := make(chan error, 1)
 	go func() {
@@ -197,7 +197,7 @@ func TestTurnStoreAdmissionWaitsForConcurrentWriter(t *testing.T) {
 		require.FailNow(t, "admission must wait for the writer instead of failing or replaying", "error: %v", err)
 	case <-time.After(100 * time.Millisecond):
 	}
-	_, err = writer.ExecContext(t.Context(), "COMMIT")
+	_, err = other.Writer.ExecContext(t.Context(), "COMMIT")
 	require.NoError(t, err)
 	select {
 	case err := <-done:

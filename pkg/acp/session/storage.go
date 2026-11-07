@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
@@ -72,7 +71,7 @@ type sessionState struct {
 // Storage handles persistence of ACP session updates using SQLite.
 type Storage struct {
 	dbPath string
-	db     *sqlx.DB
+	db     *db.DB
 
 	sessionsMu sync.Mutex
 	sessions   map[acptypes.SessionID]*sessionState
@@ -197,7 +196,7 @@ func (s *Storage) writeUpdate(sessionID acptypes.SessionID, update any) error {
 		return errors.Wrap(err, "failed to marshal session update entry")
 	}
 
-	_, err = s.db.Exec(
+	_, err = s.db.Writer.Exec(
 		"INSERT INTO acp_session_updates (session_id, update_data, created_at) VALUES (?, ?, ?)",
 		string(sessionID), string(data), time.Now())
 	if err != nil {
@@ -213,7 +212,7 @@ func (s *Storage) ReadUpdates(sessionID acptypes.SessionID) ([]StoredUpdate, err
 		UpdateData string `db:"update_data"`
 	}
 
-	err := s.db.Select(&rows,
+	err := s.db.Reader.Select(&rows,
 		"SELECT update_data FROM acp_session_updates WHERE session_id = ? ORDER BY id ASC",
 		string(sessionID))
 	if err != nil {
@@ -264,7 +263,7 @@ func (s *Storage) Delete(sessionID acptypes.SessionID) error {
 		delete(s.sessions, sessionID)
 	}
 
-	_, err := s.db.Exec("DELETE FROM acp_session_updates WHERE session_id = ?", string(sessionID))
+	_, err := s.db.Writer.Exec("DELETE FROM acp_session_updates WHERE session_id = ?", string(sessionID))
 	if err != nil {
 		return errors.Wrap(err, "failed to delete session updates")
 	}
@@ -288,7 +287,7 @@ func (s *Storage) CloseSession(sessionID acptypes.SessionID) error {
 // Exists checks if a session has any stored updates.
 func (s *Storage) Exists(sessionID acptypes.SessionID) bool {
 	var exists bool
-	err := s.db.Get(&exists, "SELECT EXISTS(SELECT 1 FROM acp_session_updates WHERE session_id = ?)", string(sessionID))
+	err := s.db.Reader.Get(&exists, "SELECT EXISTS(SELECT 1 FROM acp_session_updates WHERE session_id = ?)", string(sessionID))
 	if err != nil {
 		return false
 	}

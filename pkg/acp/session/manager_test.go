@@ -63,7 +63,7 @@ func TestManagerLoadSessionRejectsInvalidCompactionHistory(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NoError(t, store.Save(t.Context(), record))
-	_, err = sqlDB.ExecContext(t.Context(),
+	_, err = sqlDB.Writer.ExecContext(t.Context(),
 		`UPDATE conversations SET compaction_history = ? WHERE id = ?`,
 		`{"activeDisplayStart":1}`, record.ID,
 	)

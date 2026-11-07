@@ -107,7 +107,7 @@ func TestPutGetAndScope(t *testing.T) {
 	defer reopened.Close()
 	_, _, err = reopened.Get(t.Context(), "conversation", attachment.ArtifactID)
 	require.NoError(t, err)
-	_, err = reopened.db.Exec(`DELETE FROM conversation_artifacts WHERE artifact_id = ?`, attachment.ArtifactID)
+	_, err = reopened.db.Writer.Exec(`DELETE FROM conversation_artifacts WHERE artifact_id = ?`, attachment.ArtifactID)
 	require.NoError(t, err)
 	_, _, err = reopened.GetByShortCode(t.Context(), attachment.ShortCode)
 	assert.ErrorIs(t, err, ErrNotFound)
@@ -177,7 +177,7 @@ func TestRejectInvalidImages(t *testing.T) {
 	_, err = store.Put(t.Context(), "conversation", "call", tooltypes.ToolAttachment{Type: "file"}, bytes.NewReader(data))
 	assert.ErrorContains(t, err, "image attachment")
 	var count int
-	require.NoError(t, store.db.Get(&count, `SELECT COUNT(*) FROM image_artifacts`))
+	require.NoError(t, store.db.Writer.Get(&count, `SELECT COUNT(*) FROM image_artifacts`))
 	assert.Zero(t, count)
 	files, err := os.ReadDir(store.dir)
 	require.NoError(t, err)
@@ -219,7 +219,7 @@ func TestStartupSweep(t *testing.T) {
 		)
 		require.NoError(t, err)
 		if age {
-			_, err = store.db.Exec(`UPDATE image_artifacts SET created_at = ? WHERE id = ?`, old, attachment.ArtifactID)
+			_, err = store.db.Writer.Exec(`UPDATE image_artifacts SET created_at = ? WHERE id = ?`, old, attachment.ArtifactID)
 			require.NoError(t, err)
 			file := filepath.Join(store.dir, attachment.ArtifactID)
 			require.NoError(t, os.Chtimes(file, old, old))
@@ -238,15 +238,15 @@ func TestStartupSweep(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	_, err = store.db.Exec(
+	_, err = store.db.Writer.Exec(
 		`INSERT INTO conversations (id, raw_messages, provider, usage, tool_results, created_at, updated_at) VALUES (?, '[]', 'openai', '{}', ?, ?, ?)`,
 		"checkpointed", string(results), old, old,
 	)
 	require.NoError(t, err)
-	_, err = store.db.Exec(`INSERT INTO runner_registrations (id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at)
+	_, err = store.db.Writer.Exec(`INSERT INTO runner_registrations (id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at)
 		VALUES ('runner', 'local', 'host', '/work', 'work', 'online', ?, ?)`, old, old)
 	require.NoError(t, err)
-	_, err = store.db.Exec(`INSERT INTO runner_runs (id, conversation_id, runner_id, status, created_at, updated_at)
+	_, err = store.db.Writer.Exec(`INSERT INTO runner_runs (id, conversation_id, runner_id, status, created_at, updated_at)
 		VALUES ('run', 'active', 'runner', 'running', ?, ?)`, old, old)
 	require.NoError(t, err)
 	for _, name := range []string{".upload-orphan", "art_orphan", ".upload-fresh"} {

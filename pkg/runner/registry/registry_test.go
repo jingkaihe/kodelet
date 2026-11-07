@@ -1756,12 +1756,12 @@ func TestSQLitePersistenceBoundsRestoredHistoryAndPrunesTerminalOrphans(t *testi
 		CreatedAt: now,
 		UpdatedAt: now,
 	}))
-	_, err = persistence.db.ExecContext(t.Context(), `
+	_, err = persistence.db.Writer.ExecContext(t.Context(), `
 		INSERT INTO conversations (id, raw_messages, provider, usage, created_at, updated_at, metadata, tool_results)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`, "conversation-one", `[]`, "openai", `{}`, now, now, `{}`, `{}`)
 	require.NoError(t, err)
-	tx, err := persistence.db.BeginTxx(t.Context(), nil)
+	tx, err := persistence.db.Writer.BeginTxx(t.Context(), nil)
 	require.NoError(t, err)
 	for i := range defaultLoadedRunHistory + 5 {
 		runID := fmt.Sprintf("run-%04d", i)
@@ -1802,7 +1802,7 @@ func TestSQLitePersistenceBoundsRestoredHistoryAndPrunesTerminalOrphans(t *testi
 	assert.NotContains(t, loaded, "run-0000")
 	// A callback requirement from a non-cached conversation must still be read
 	// from the durable manifest instead of silently disappearing after restart.
-	_, err = persistence.db.ExecContext(t.Context(), `UPDATE runner_runs SET manifest_json = ? WHERE id = ?`,
+	_, err = persistence.db.Writer.ExecContext(t.Context(), `UPDATE runner_runs SET manifest_json = ? WHERE id = ?`,
 		`{"sessionExtensionIds":["inline-1"]}`, "run-0000")
 	require.NoError(t, err)
 	registry, err := New(t.Context(), Options{Persistence: persistence})
@@ -1815,7 +1815,7 @@ func TestSQLitePersistenceBoundsRestoredHistoryAndPrunesTerminalOrphans(t *testi
 	assert.NotContains(t, loaded, "orphan-terminal")
 	assert.Contains(t, loaded, "orphan-active")
 	var orphanCount int
-	require.NoError(t, persistence.db.GetContext(t.Context(), &orphanCount, "SELECT COUNT(*) FROM runner_runs WHERE id = ?", "orphan-terminal"))
+	require.NoError(t, persistence.db.Writer.GetContext(t.Context(), &orphanCount, "SELECT COUNT(*) FROM runner_runs WHERE id = ?", "orphan-terminal"))
 	assert.Zero(t, orphanCount)
 	_, err = registry.RemoveRunner(t.Context(), "runner-one", false)
 	require.NoError(t, err)
@@ -2000,7 +2000,7 @@ func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 
 	// Failure after metadata preservation must roll back both metadata and
 	// deletion, leaving the registry and durable state safe to retry.
-	_, err = firstPersistence.db.ExecContext(t.Context(), `CREATE TRIGGER fail_runner_removal
+	_, err = firstPersistence.db.Writer.ExecContext(t.Context(), `CREATE TRIGGER fail_runner_removal
 		BEFORE DELETE ON runner_registrations BEGIN SELECT RAISE(ABORT, 'test removal failure'); END`)
 	require.NoError(t, err)
 	_, err = firstRegistry.RemoveRunner(t.Context(), registration.RunnerID, false)
@@ -2011,7 +2011,7 @@ func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 	ids, err = firstRegistry.RequiredSessionExtensions(conversation.ID)
 	require.NoError(t, err)
 	assert.Equal(t, requiredIDs, ids)
-	_, err = firstPersistence.db.ExecContext(t.Context(), `DROP TRIGGER fail_runner_removal`)
+	_, err = firstPersistence.db.Writer.ExecContext(t.Context(), `DROP TRIGGER fail_runner_removal`)
 	require.NoError(t, err)
 
 	result, err := firstRegistry.RemoveRunner(t.Context(), registration.RunnerID, false)

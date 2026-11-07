@@ -21,7 +21,7 @@ import (
 // Store implements ConversationStore using SQLite database
 type Store struct {
 	dbPath string
-	db     *sqlx.DB
+	db     *db.DB
 }
 
 // NewStore creates a new SQLite-based conversation store.
@@ -40,7 +40,7 @@ func NewStore(ctx context.Context, dbPath string) (*Store, error) {
 
 // Save persists a conversation record to the database using UPSERT to preserve created_at timestamps
 func (s *Store) Save(ctx context.Context, record conversations.ConversationRecord) error {
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to begin transaction")
 	}
@@ -78,7 +78,7 @@ func (s *Store) Save(ctx context.Context, record conversations.ConversationRecor
 
 // SaveConversationFork atomically saves a fork and copies the source runner affinity.
 func (s *Store) SaveConversationFork(ctx context.Context, sourceConversationID string, forked conversations.ConversationRecord) error {
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to begin transaction")
 	}
@@ -167,7 +167,7 @@ func saveConversationRecord(ctx context.Context, tx *sqlx.Tx, record conversatio
 // LoadMetadata retrieves only persisted metadata, without decoding message or tool history.
 func (s *Store) LoadMetadata(ctx context.Context, id string) (map[string]any, error) {
 	var metadata JSONField[map[string]any]
-	if err := s.db.GetContext(ctx, &metadata, "SELECT metadata FROM conversations WHERE id = ?", id); err != nil {
+	if err := s.db.Reader.GetContext(ctx, &metadata, "SELECT metadata FROM conversations WHERE id = ?", id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errors.Wrapf(conversations.ErrConversationNotFound, "%s", id)
 		}
@@ -183,7 +183,7 @@ func (s *Store) Load(ctx context.Context, id string) (conversations.Conversation
 	query := `SELECT id, cwd, raw_messages, provider, usage,
 		summary, created_at, updated_at, metadata, tool_results, compaction_history
 		FROM conversations WHERE id = ?`
-	err := s.db.GetContext(ctx, &dbRecord, query, id)
+	err := s.db.Reader.GetContext(ctx, &dbRecord, query, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return conversations.ConversationRecord{}, errors.Wrapf(conversations.ErrConversationNotFound, "%s", id)
@@ -196,7 +196,7 @@ func (s *Store) Load(ctx context.Context, id string) (conversations.Conversation
 		RunnerID           string `db:"runner_id"`
 		EnvironmentProfile string `db:"environment_profile"`
 	}
-	err = s.db.GetContext(ctx, &affinity, `
+	err = s.db.Reader.GetContext(ctx, &affinity, `
 		SELECT runner_id, environment_profile
 		FROM conversation_runner_affinity
 		WHERE conversation_id = ?
@@ -220,7 +220,7 @@ func (s *Store) ConversationRunnerAffinity(ctx context.Context, conversationID s
 		RunnerID           string `db:"runner_id"`
 		EnvironmentProfile string `db:"environment_profile"`
 	}
-	err := s.db.GetContext(ctx, &affinity, `
+	err := s.db.Reader.GetContext(ctx, &affinity, `
 		SELECT runner_id, environment_profile
 		FROM conversation_runner_affinity
 		WHERE conversation_id = ?
@@ -247,7 +247,7 @@ func (s *Store) BindConversationRunnerAffinity(ctx context.Context, conversation
 	}
 
 	now := time.Now().UTC()
-	result, err := s.db.ExecContext(ctx, `
+	result, err := s.db.Writer.ExecContext(ctx, `
 		INSERT INTO conversation_runner_affinity (conversation_id, runner_id, environment_profile, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(conversation_id) DO UPDATE SET
@@ -270,7 +270,7 @@ func (s *Store) BindConversationRunnerAffinity(ctx context.Context, conversation
 
 // Delete removes a conversation and its associated data
 func (s *Store) Delete(ctx context.Context, id string) error {
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to begin transaction")
 	}
@@ -326,7 +326,7 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		return conversations.QueryResult{}, errors.New("relevance sorting requires a search term")
 	}
 	if !searching && strings.TrimSpace(options.SearchTerm) != "" {
-		cwds, err := listCWDs(ctx, s.db)
+		cwds, err := listCWDs(ctx, s.db.Reader)
 		if err != nil {
 			return conversations.QueryResult{}, err
 		}
@@ -426,7 +426,7 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 
 	// Every read shares one snapshot, so match counts, totals, and snippets
 	// agree even while the indexer replaces a conversation's entries.
-	tx, err := s.db.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := s.db.Reader.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return conversations.QueryResult{}, errors.Wrap(err, "failed to begin conversation query")
 	}

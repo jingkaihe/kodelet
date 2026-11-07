@@ -252,7 +252,7 @@ func TestFirstTurnCheckpointVisibleBeforeSessionStartAcrossPlacements(t *testing
 					before := calls.Load()
 					req := chat.ChatRequest{ConversationID: "checkpoint-" + outcome, TurnID: "turn", RunnerID: runnerID, CWD: workspace, Message: "admitted checkpoint input"}
 					if outcome == "save-failure" {
-						_, err := server.turns.db.Exec(`CREATE TRIGGER fail_checkpoint BEFORE INSERT ON conversation_summaries WHEN NEW.id = 'checkpoint-save-failure' BEGIN SELECT RAISE(ABORT, 'disk failure'); END`)
+						_, err := server.turns.db.Writer.Exec(`CREATE TRIGGER fail_checkpoint BEFORE INSERT ON conversation_summaries WHEN NEW.id = 'checkpoint-save-failure' BEGIN SELECT RAISE(ABORT, 'disk failure'); END`)
 						require.NoError(t, err)
 						_, err = client.Run(t.Context(), req, &checkpointDiscardSink{})
 						require.ErrorContains(t, err, "checkpoint failed")

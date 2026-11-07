@@ -382,7 +382,7 @@ func (s *Server) browserAttachmentAuthExpiry(ctx context.Context, a *browserAtta
 	}
 	// LoadUserCredential validates revocation and roles but does not expose expiry.
 	var expires time.Time
-	err = s.authStore.db.GetContext(ctx, &expires, `
+	err = s.authStore.db.Reader.GetContext(ctx, &expires, `
 		SELECT expires_at FROM user_api_credentials
 		WHERE id = ? AND revoked_at IS NULL AND expires_at > ?
 	`, a.credentialID, s.authStore.now().UTC())

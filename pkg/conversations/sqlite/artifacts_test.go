@@ -56,7 +56,7 @@ func TestArtifactConversationLifecycle(t *testing.T) {
 	parent.RawMessages = json.RawMessage(`[{"type":"compaction","encrypted_content":"opaque"}]`)
 	require.NoError(t, store.Save(t.Context(), parent))
 	// Startup collection must still find attachments belonging to archived calls.
-	_, err = store.db.Exec(`UPDATE image_artifacts SET created_at = ?`, time.Now().Add(-48*time.Hour))
+	_, err = store.db.Writer.Exec(`UPDATE image_artifacts SET created_at = ?`, time.Now().Add(-48*time.Hour))
 	require.NoError(t, err)
 	reopened, err := artifacts.Open(t.Context(), dbPath)
 	require.NoError(t, err)
@@ -79,7 +79,7 @@ func TestArtifactConversationLifecycle(t *testing.T) {
 		assert.Equal(t, path, childPath)
 	}
 	var count int
-	require.NoError(t, store.db.Get(&count, `SELECT COUNT(*) FROM image_artifacts`))
+	require.NoError(t, store.db.Writer.Get(&count, `SELECT COUNT(*) FROM image_artifacts`))
 	assert.Equal(t, 1, count)
 
 	// The original short link and file survive deletion of their source conversation.
@@ -95,9 +95,9 @@ func TestArtifactConversationLifecycle(t *testing.T) {
 	assert.NoFileExists(t, path)
 	_, _, err = images.GetByShortCode(t.Context(), attachment.ShortCode)
 	assert.ErrorIs(t, err, artifacts.ErrNotFound)
-	require.NoError(t, store.db.Get(&count, `SELECT COUNT(*) FROM image_artifacts`))
+	require.NoError(t, store.db.Writer.Get(&count, `SELECT COUNT(*) FROM image_artifacts`))
 	assert.Zero(t, count)
-	require.NoError(t, store.db.Get(&count, `SELECT COUNT(*) FROM conversation_artifacts`))
+	require.NoError(t, store.db.Writer.Get(&count, `SELECT COUNT(*) FROM conversation_artifacts`))
 	assert.Zero(t, count)
 }
 
@@ -124,7 +124,7 @@ func TestArtifactReferencesRollbackWithConversation(t *testing.T) {
 	}
 	require.NoError(t, store.Save(t.Context(), parent))
 
-	_, err = store.db.Exec(
+	_, err = store.db.Writer.Exec(
 		`CREATE TRIGGER prevent_conversation_delete BEFORE DELETE ON conversations BEGIN SELECT RAISE(ABORT, 'forced failure'); END`,
 	)
 	require.NoError(t, err)
@@ -145,7 +145,7 @@ func TestArtifactReferencesRollbackWithConversation(t *testing.T) {
 	_, _, err = images.Get(t.Context(), child.ID, attachment.ArtifactID)
 	assert.ErrorIs(t, err, artifacts.ErrNotFound)
 
-	_, err = store.db.Exec(`DROP TRIGGER prevent_conversation_delete`)
+	_, err = store.db.Writer.Exec(`DROP TRIGGER prevent_conversation_delete`)
 	require.NoError(t, err)
 	require.NoError(t, store.Delete(t.Context(), "parent"))
 	_, err = os.Stat(path)

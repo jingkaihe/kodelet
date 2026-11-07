@@ -883,13 +883,13 @@ func TestResolveConfigRejectsRunnerBoundConversationBeforeResolvingRemoteCWD(t *
 
 	database, err = db.Open(t.Context(), dbPath)
 	require.NoError(t, err)
-	_, err = database.ExecContext(t.Context(), `
+	_, err = database.Writer.ExecContext(t.Context(), `
 		INSERT INTO runner_registrations (
 			id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`, "runner-one", "local", "host-one", "/runner/workspace", "workspace", "offline", now, now)
 	require.NoError(t, err)
-	_, err = database.ExecContext(t.Context(), `
+	_, err = database.Writer.ExecContext(t.Context(), `
 		INSERT INTO conversation_runner_affinity (conversation_id, runner_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?)
 	`, "remote-conversation", "runner-one", now, now)

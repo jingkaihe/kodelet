@@ -49,7 +49,7 @@ func searchHitsCTE(ranked bool) string {
 // Dirtiness is derived from the database, so saves by any process are found.
 func (s *Store) PendingSearchIndex(ctx context.Context, version int) ([]conversations.SearchIndexCandidate, error) {
 	var candidates []conversations.SearchIndexCandidate
-	err := s.db.SelectContext(ctx, &candidates, `
+	err := s.db.Reader.SelectContext(ctx, &candidates, `
 		SELECT s.id, s.updated_at
 		FROM conversation_summaries s
 		LEFT JOIN conversation_search_state st ON st.conversation_id = s.id
@@ -68,7 +68,7 @@ func (s *Store) PendingSearchIndex(ctx context.Context, version int) ([]conversa
 // usage and structured tool results, which dominate stored conversation size.
 func (s *Store) LoadSearchSource(ctx context.Context, id string) (conversations.ConversationRecord, error) {
 	var dbRecord dbConversationRecord
-	err := s.db.GetContext(ctx, &dbRecord, `
+	err := s.db.Reader.GetContext(ctx, &dbRecord, `
 		SELECT id, cwd, raw_messages, provider, summary, created_at, updated_at, metadata, compaction_history
 		FROM conversations WHERE id = ?
 	`, id)
@@ -86,27 +86,22 @@ func (s *Store) LoadSearchSource(ctx context.Context, id string) (conversations.
 // document was extracted, leaving it pending for the next pass. Unchanged
 // content only advances the recorded source version.
 func (s *Store) ReplaceSearchIndex(ctx context.Context, document conversations.SearchDocument) (bool, error) {
-	connection, err := s.db.Connx(ctx)
+	// Writer transactions begin IMMEDIATE, reserving the write lock before
+	// reading, so a concurrent save cannot make this snapshot unwritable.
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
-		return false, errors.Wrap(err, "failed to open search index connection")
-	}
-	defer connection.Close()
-	// Reserve the write lock before reading, so a concurrent save cannot make
-	// this transaction's snapshot unwritable (SQLITE_BUSY_SNAPSHOT).
-	if _, err := connection.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
 		return false, errors.Wrap(err, "failed to begin search index transaction")
 	}
-	defer func() { _, _ = connection.ExecContext(context.WithoutCancel(ctx), "ROLLBACK") }()
+	defer tx.Rollback()
 
 	var updatedAt sql.NullTime
-	err = connection.GetContext(ctx, &updatedAt, `SELECT updated_at FROM conversation_summaries WHERE id = ?`, document.ConversationID)
+	err = tx.GetContext(ctx, &updatedAt, `SELECT updated_at FROM conversation_summaries WHERE id = ?`, document.ConversationID)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		if err := deleteSearchIndex(ctx, connection, document.ConversationID); err != nil {
+		if err := deleteSearchIndex(ctx, tx, document.ConversationID); err != nil {
 			return false, err
 		}
-		_, err = connection.ExecContext(ctx, "COMMIT")
-		return false, errors.Wrap(err, "failed to commit search index removal")
+		return false, errors.Wrap(tx.Commit(), "failed to commit search index removal")
 	case err != nil:
 		return false, errors.Wrap(err, "failed to check conversation for search indexing")
 	case !updatedAt.Valid || !updatedAt.Time.Equal(document.SourceUpdatedAt):
@@ -117,7 +112,7 @@ func (s *Store) ReplaceSearchIndex(ctx context.Context, document conversations.S
 		Version     int    `db:"index_version"`
 		ContentHash string `db:"content_hash"`
 	}
-	err = connection.GetContext(ctx, &state, `
+	err = tx.GetContext(ctx, &state, `
 		SELECT index_version, content_hash FROM conversation_search_state WHERE conversation_id = ?
 	`, document.ConversationID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -125,16 +120,16 @@ func (s *Store) ReplaceSearchIndex(ctx context.Context, document conversations.S
 	}
 	unchanged := err == nil && state.Version == document.Version && state.ContentHash == document.ContentHash
 	if !unchanged {
-		if err := deleteSearchIndex(ctx, connection, document.ConversationID); err != nil {
+		if err := deleteSearchIndex(ctx, tx, document.ConversationID); err != nil {
 			return false, err
 		}
-		if err := insertSearchEntries(ctx, connection, document); err != nil {
+		if err := insertSearchEntries(ctx, tx, document); err != nil {
 			return false, err
 		}
 	}
 	// Copy updated_at through SQL so the stored value compares exactly with
 	// conversation_summaries.updated_at in PendingSearchIndex.
-	_, err = connection.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO conversation_search_state (conversation_id, source_updated_at, index_version, content_hash)
 		SELECT id, updated_at, ?, ? FROM conversation_summaries WHERE id = ?
 		ON CONFLICT(conversation_id) DO UPDATE SET
@@ -145,7 +140,7 @@ func (s *Store) ReplaceSearchIndex(ctx context.Context, document conversations.S
 	if err != nil {
 		return false, errors.Wrap(err, "failed to save search index state")
 	}
-	if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
+	if err := tx.Commit(); err != nil {
 		return false, errors.Wrap(err, "failed to commit search index")
 	}
 	return true, nil
@@ -154,7 +149,7 @@ func (s *Store) ReplaceSearchIndex(ctx context.Context, document conversations.S
 // PruneSearchIndex removes search entries of conversations deleted without
 // going through Store.Delete, such as by another process or an older binary.
 func (s *Store) PruneSearchIndex(ctx context.Context) (int, error) {
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
 	if err != nil {
 		return 0, errors.Wrap(err, "failed to begin search index pruning")
 	}
@@ -195,11 +190,11 @@ func deleteSearchIndex(ctx context.Context, execer sqlx.ExecerContext, conversat
 	return nil
 }
 
-func insertSearchEntries(ctx context.Context, connection *sqlx.Conn, document conversations.SearchDocument) error {
+func insertSearchEntries(ctx context.Context, tx *sqlx.Tx, document conversations.SearchDocument) error {
 	if len(document.Entries) == 0 {
 		return nil
 	}
-	statement, err := connection.PreparexContext(ctx, `
+	statement, err := tx.PreparexContext(ctx, `
 		INSERT INTO conversation_search_entries (conversation_id, entry_index, role, kind, payload)
 		VALUES (?, ?, ?, ?, ?)
 	`)

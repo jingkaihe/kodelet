@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,13 +24,91 @@ func TestOpen(t *testing.T) {
 	defer db.Close()
 
 	require.NoError(t, VerifyConfiguration(db))
+	assert.Equal(t, 1, db.Writer.Stats().MaxOpenConnections)
+	assert.Equal(t, readerConnections, db.Reader.Stats().MaxOpenConnections)
+	assert.NoError(t, (*DB)(nil).Close())
 }
 
-func TestOpenConfiguresReplacementConnection(t *testing.T) {
+func TestOpenReaderRejectsWrites(t *testing.T) {
+	database, err := Open(t.Context(), filepath.Join(t.TempDir(), "readonly.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, database.Close()) })
+	_, err = database.Writer.ExecContext(t.Context(), `CREATE TABLE probe (value INTEGER)`)
+	require.NoError(t, err)
+
+	_, err = database.Reader.ExecContext(t.Context(), `INSERT INTO probe VALUES (1)`)
+	require.ErrorContains(t, err, "readonly")
+	tx, err := database.Reader.BeginTxx(t.Context(), nil)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(t.Context(), `INSERT INTO probe VALUES (1)`)
+	require.ErrorContains(t, err, "readonly")
+	require.NoError(t, tx.Rollback())
+}
+
+func TestOpenReadersRunAlongsideWriterTransaction(t *testing.T) {
+	database, err := Open(t.Context(), filepath.Join(t.TempDir(), "concurrent.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, database.Close()) })
+	_, err = database.Writer.ExecContext(t.Context(), `CREATE TABLE probe (value INTEGER)`)
+	require.NoError(t, err)
+
+	tx, err := database.Writer.BeginTxx(t.Context(), nil)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	_, err = tx.ExecContext(t.Context(), `INSERT INTO probe VALUES (1)`)
+	require.NoError(t, err)
+
+	// Neither the open write transaction nor another reader may block a read.
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	first, err := database.Reader.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true})
+	require.NoError(t, err)
+	defer first.Rollback()
+	var count int
+	require.NoError(t, first.GetContext(ctx, &count, `SELECT COUNT(*) FROM probe`))
+	assert.Zero(t, count, "readers must not see uncommitted writes")
+	second, err := database.Reader.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true})
+	require.NoError(t, err)
+	defer second.Rollback()
+	require.NoError(t, second.GetContext(ctx, &count, `SELECT COUNT(*) FROM probe`))
+	assert.Zero(t, count)
+	assert.Equal(t, 2, database.Reader.Stats().InUse)
+
+	require.NoError(t, tx.Commit())
+	require.NoError(t, database.Reader.GetContext(ctx, &count, `SELECT COUNT(*) FROM probe`))
+	assert.Equal(t, 1, count, "reads that begin after a commit must see it")
+}
+
+func TestOpenWriterTransactionsBeginImmediate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "immediate.db")
+	database, err := Open(t.Context(), path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, database.Close()) })
+	_, err = database.Writer.ExecContext(t.Context(), `CREATE TABLE probe (value INTEGER)`)
+	require.NoError(t, err)
+	other, err := Open(t.Context(), path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, other.Close()) })
+	// The writer pool keeps its only connection, so this applies to later writes.
+	_, err = other.Writer.ExecContext(t.Context(), `PRAGMA busy_timeout = 0`)
+	require.NoError(t, err)
+
+	// A deferred transaction takes no lock until it first touches the database.
+	tx, err := database.Writer.BeginTxx(t.Context(), nil)
+	require.NoError(t, err)
+	_, err = other.Writer.ExecContext(t.Context(), `INSERT INTO probe VALUES (1)`)
+	require.ErrorContains(t, err, "database is locked", "writer transactions must reserve the write lock when they begin")
+	require.NoError(t, tx.Rollback())
+
+	_, err = other.Writer.ExecContext(t.Context(), `INSERT INTO probe VALUES (1)`)
+	require.NoError(t, err)
+}
+
+func TestOpenConfiguresReplacementConnections(t *testing.T) {
 	database, err := Open(t.Context(), filepath.Join(t.TempDir(), "replacement.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, database.Close()) })
-	_, err = database.ExecContext(t.Context(), `
+	_, err = database.Writer.ExecContext(t.Context(), `
 		CREATE TABLE parents (id INTEGER PRIMARY KEY);
 		CREATE TABLE children (parent_id INTEGER REFERENCES parents(id) ON DELETE CASCADE);
 		INSERT INTO parents VALUES (1);
@@ -37,31 +116,45 @@ func TestOpenConfiguresReplacementConnection(t *testing.T) {
 	`)
 	require.NoError(t, err)
 
-	// Discard the pooled connection so the next query opens a replacement.
-	connection, err := database.Conn(t.Context())
-	require.NoError(t, err)
-	require.ErrorIs(t, connection.Raw(func(any) error { return driver.ErrBadConn }), driver.ErrBadConn)
-	require.Zero(t, database.Stats().OpenConnections)
-
-	for pragma, expected := range map[string]string{
-		"journal_mode": "wal",
-		"synchronous":  "1",
-		"cache_size":   "1000",
-		"temp_store":   "2",
-		"busy_timeout": "5000",
-		"foreign_keys": "1",
-	} {
-		var actual string
-		require.NoError(t, database.GetContext(t.Context(), &actual, "PRAGMA "+pragma))
-		assert.Equal(t, expected, actual, pragma)
+	// Discard each pool's connection so the next query opens a replacement.
+	for _, pool := range []*sqlx.DB{database.Writer, database.Reader} {
+		connection, err := pool.Conn(t.Context())
+		require.NoError(t, err)
+		require.ErrorIs(t, connection.Raw(func(any) error { return driver.ErrBadConn }), driver.ErrBadConn)
+		require.Zero(t, pool.Stats().OpenConnections)
 	}
 
-	_, err = database.ExecContext(t.Context(), "INSERT INTO children VALUES (2)")
+	for pool, pragmas := range map[*sqlx.DB]map[string]string{
+		database.Writer: {
+			"journal_mode": "wal",
+			"synchronous":  "1",
+			"cache_size":   "1000",
+			"temp_store":   "2",
+			"busy_timeout": "5000",
+			"foreign_keys": "1",
+			"query_only":   "0",
+		},
+		database.Reader: {
+			"journal_mode": "wal",
+			"cache_size":   "1000",
+			"temp_store":   "2",
+			"busy_timeout": "5000",
+			"query_only":   "1",
+		},
+	} {
+		for pragma, expected := range pragmas {
+			var actual string
+			require.NoError(t, pool.GetContext(t.Context(), &actual, "PRAGMA "+pragma))
+			assert.Equal(t, expected, actual, pragma)
+		}
+	}
+
+	_, err = database.Writer.ExecContext(t.Context(), "INSERT INTO children VALUES (2)")
 	require.ErrorContains(t, err, "FOREIGN KEY constraint failed")
-	_, err = database.ExecContext(t.Context(), "DELETE FROM parents WHERE id = 1")
+	_, err = database.Writer.ExecContext(t.Context(), "DELETE FROM parents WHERE id = 1")
 	require.NoError(t, err)
 	var remaining int
-	require.NoError(t, database.GetContext(t.Context(), &remaining, "SELECT COUNT(*) FROM children"))
+	require.NoError(t, database.Reader.GetContext(t.Context(), &remaining, "SELECT COUNT(*) FROM children"))
 	assert.Zero(t, remaining, "foreign-key cascades must survive connection replacement")
 }
 
@@ -97,51 +190,67 @@ func TestOpenEscapesDatabasePath(t *testing.T) {
 }
 
 func TestOpenCanceledQueryReleasesWALSnapshot(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "snapshot.db")
-	reader, err := Open(t.Context(), path)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, reader.Close()) })
-	_, err = reader.ExecContext(t.Context(), `
-		CREATE TABLE snapshot_probe (value INTEGER);
-		INSERT INTO snapshot_probe VALUES (1);
-	`)
-	require.NoError(t, err)
-	writer, err := Open(t.Context(), path)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, writer.Close()) })
+	// A leaked read transaction pins its connection to an old WAL snapshot:
+	// later writes fail with SQLITE_BUSY_SNAPSHOT and later reads are stale.
+	for _, name := range []string{"writer", "reader"} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "snapshot.db")
+			database, err := Open(t.Context(), path)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, database.Close()) })
+			_, err = database.Writer.ExecContext(t.Context(), `
+				CREATE TABLE snapshot_probe (value INTEGER);
+				INSERT INTO snapshot_probe VALUES (1);
+			`)
+			require.NoError(t, err)
+			other, err := Open(t.Context(), path)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, other.Close()) })
 
-	// A large argument widens the window for cancelling mid-query.
-	argument := strings.Repeat("x", 32<<20)
-	canceled := 0
-	for range 5 {
-		// sql.Conn skips database/sql's context check, so cancellation reaches the driver.
-		connection, err := reader.Connx(t.Context())
-		require.NoError(t, err)
-		ctx, cancel := context.WithCancel(t.Context())
-		finished := make(chan struct{})
-		time.AfterFunc(100*time.Microsecond, func() {
-			cancel()
-			close(finished)
+			pool := database.Writer
+			if name == "reader" {
+				// One connection makes the check below reuse the canceled one.
+				pool = database.Reader
+				pool.SetMaxOpenConns(1)
+			}
+			// A large argument widens the window for cancelling mid-query.
+			argument := strings.Repeat("x", 32<<20)
+			canceled := 0
+			for range 5 {
+				// sql.Conn skips database/sql's context check, so cancellation reaches the driver.
+				connection, err := pool.Connx(t.Context())
+				require.NoError(t, err)
+				ctx, cancel := context.WithCancel(t.Context())
+				finished := make(chan struct{})
+				time.AfterFunc(100*time.Microsecond, func() {
+					cancel()
+					close(finished)
+				})
+				var value int
+				err = connection.GetContext(ctx, &value, "SELECT value FROM snapshot_probe WHERE length(?) > 0", argument)
+				<-finished
+				if err != nil {
+					require.ErrorIs(t, err, context.Canceled)
+					canceled++
+				}
+				require.NoError(t, connection.Close())
+
+				var latest int
+				require.NoError(t, other.Writer.GetContext(t.Context(), &latest, "UPDATE snapshot_probe SET value = value + 1 RETURNING value"))
+				if name == "reader" {
+					require.NoError(t, pool.GetContext(t.Context(), &value, "SELECT value FROM snapshot_probe"))
+					assert.Equal(t, latest, value, "cancellation must not pin the pooled reader to a stale snapshot")
+					continue
+				}
+				tx, err := pool.BeginTxx(t.Context(), nil)
+				require.NoError(t, err, "cancellation must not leave a transaction open")
+				_, err = tx.ExecContext(t.Context(), "DELETE FROM snapshot_probe WHERE value < 0")
+				assert.NoError(t, err, "cancellation must not poison the pooled connection")
+				require.NoError(t, tx.Rollback())
+			}
+			require.Positive(t, canceled, "exercise cancellation during a query")
 		})
-		var value int
-		err = connection.GetContext(ctx, &value, "SELECT value FROM snapshot_probe WHERE length(?) > 0", argument)
-		<-finished
-		if err != nil {
-			require.ErrorIs(t, err, context.Canceled)
-			canceled++
-		}
-		require.NoError(t, connection.Close())
-
-		// After the WAL advances, a leaked read makes this write fail with SQLITE_BUSY_SNAPSHOT.
-		_, err = writer.ExecContext(t.Context(), "UPDATE snapshot_probe SET value = value + 1")
-		require.NoError(t, err)
-		tx, err := reader.BeginTxx(t.Context(), nil)
-		require.NoError(t, err)
-		_, err = tx.ExecContext(t.Context(), "DELETE FROM snapshot_probe WHERE value < 0")
-		assert.NoError(t, err, "cancellation must not poison the pooled connection")
-		require.NoError(t, tx.Rollback())
 	}
-	require.Positive(t, canceled, "exercise cancellation during a query")
 }
 
 func TestOpen_CreatesDirectory(t *testing.T) {
@@ -231,7 +340,7 @@ func TestMigrationRunner(t *testing.T) {
 	require.NoError(t, err)
 
 	var tableExists bool
-	err = db.QueryRow(`
+	err = db.Writer.QueryRow(`
 		SELECT COUNT(*) > 0 FROM sqlite_master
 		WHERE type='table' AND name='test_table'
 	`).Scan(&tableExists)
@@ -271,7 +380,7 @@ func TestMigrationRunner_Idempotent(t *testing.T) {
 	require.NoError(t, err)
 
 	var count int
-	err = db.Get(&count, "SELECT COUNT(*) FROM schema_migrations")
+	err = db.Writer.Get(&count, "SELECT COUNT(*) FROM schema_migrations")
 	require.NoError(t, err)
 	assert.Equal(t, 1, count)
 }
@@ -342,7 +451,7 @@ func TestMigrationRunner_Rollback(t *testing.T) {
 
 	// Verify table exists
 	var tableExists bool
-	err = db.QueryRow(`
+	err = db.Writer.QueryRow(`
 		SELECT COUNT(*) > 0 FROM sqlite_master
 		WHERE type='table' AND name='test_table'
 	`).Scan(&tableExists)
@@ -354,7 +463,7 @@ func TestMigrationRunner_Rollback(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify table is gone
-	err = db.QueryRow(`
+	err = db.Writer.QueryRow(`
 		SELECT COUNT(*) > 0 FROM sqlite_master
 		WHERE type='table' AND name='test_table'
 	`).Scan(&tableExists)
@@ -451,11 +560,11 @@ func TestMigrationRunnerReplacesLegacyComponentMigrationsTable(t *testing.T) {
 	require.NoError(t, err)
 	defer database.Close()
 
-	_, err = database.ExecContext(ctx, `DROP TABLE IF EXISTS schema_migrations`)
+	_, err = database.Writer.ExecContext(ctx, `DROP TABLE IF EXISTS schema_migrations`)
 	require.NoError(t, err)
-	_, err = database.ExecContext(ctx, `CREATE TABLE schema_migrations (component TEXT NOT NULL, version INTEGER NOT NULL)`)
+	_, err = database.Writer.ExecContext(ctx, `CREATE TABLE schema_migrations (component TEXT NOT NULL, version INTEGER NOT NULL)`)
 	require.NoError(t, err)
-	_, err = database.ExecContext(ctx, `INSERT INTO schema_migrations (component, version) VALUES ('old', 1)`)
+	_, err = database.Writer.ExecContext(ctx, `INSERT INTO schema_migrations (component, version) VALUES ('old', 1)`)
 	require.NoError(t, err)
 
 	runner := NewMigrationRunner(database)
@@ -464,7 +573,7 @@ func TestMigrationRunnerReplacesLegacyComponentMigrationsTable(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, versions)
 	var hasComponent bool
-	require.NoError(t, database.QueryRowContext(ctx, `SELECT COUNT(*) > 0 FROM pragma_table_info('schema_migrations') WHERE name = 'component'`).Scan(&hasComponent))
+	require.NoError(t, database.Writer.QueryRowContext(ctx, `SELECT COUNT(*) > 0 FROM pragma_table_info('schema_migrations') WHERE name = 'component'`).Scan(&hasComponent))
 	assert.False(t, hasComponent)
 }
 
@@ -491,7 +600,7 @@ func TestMigrationRunnerRunRollsBackFailedMigration(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to apply migration")
 	var exists bool
-	require.NoError(t, database.QueryRowContext(ctx, `SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'rolled_back'`).Scan(&exists))
+	require.NoError(t, database.Writer.QueryRowContext(ctx, `SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'rolled_back'`).Scan(&exists))
 	assert.False(t, exists)
 	versions, err := runner.GetAppliedVersions(ctx)
 	require.NoError(t, err)
@@ -560,27 +669,36 @@ func TestVerifyConfigurationReportsPragmaMismatches(t *testing.T) {
 	require.NoError(t, err)
 	defer database.Close()
 
-	_, err = database.ExecContext(ctx, `PRAGMA foreign_keys=OFF`)
+	_, err = database.Writer.ExecContext(ctx, `PRAGMA foreign_keys=OFF`)
 	require.NoError(t, err)
 	err = VerifyConfiguration(database)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "expected foreign keys ON")
 
-	_, err = database.ExecContext(ctx, `PRAGMA foreign_keys=ON`)
+	_, err = database.Writer.ExecContext(ctx, `PRAGMA foreign_keys=ON`)
 	require.NoError(t, err)
-	_, err = database.ExecContext(ctx, `PRAGMA synchronous=FULL`)
+	_, err = database.Writer.ExecContext(ctx, `PRAGMA synchronous=FULL`)
 	require.NoError(t, err)
 	err = VerifyConfiguration(database)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "expected NORMAL synchronous mode")
+
+	_, err = database.Writer.ExecContext(ctx, `PRAGMA synchronous=NORMAL`)
+	require.NoError(t, err)
+	database.Reader.SetMaxOpenConns(1)
+	_, err = database.Reader.ExecContext(ctx, `PRAGMA query_only=OFF`)
+	require.NoError(t, err)
+	err = VerifyConfiguration(database)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected read-only readers")
 }
 
-func TestConfigurePoolAndVerifyConfigurationReturnClosedDatabaseErrors(t *testing.T) {
+func TestVerifyWALAndVerifyConfigurationReturnClosedDatabaseErrors(t *testing.T) {
 	database, err := Open(context.Background(), filepath.Join(t.TempDir(), "closed.db"))
 	require.NoError(t, err)
 	require.NoError(t, database.Close())
 
-	err = configurePool(context.Background(), database)
+	err = verifyWAL(context.Background(), database.Writer)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to query journal mode")
 
@@ -609,7 +727,7 @@ func TestMigrationRunnerRecordsDescriptionAndAppliedAt(t *testing.T) {
 
 	var description string
 	var appliedAt time.Time
-	require.NoError(t, database.QueryRowContext(ctx, `SELECT description, applied_at FROM schema_migrations WHERE version = ?`, 20260523000400).Scan(&description, &appliedAt))
+	require.NoError(t, database.Writer.QueryRowContext(ctx, `SELECT description, applied_at FROM schema_migrations WHERE version = ?`, 20260523000400).Scan(&description, &appliedAt))
 	assert.Equal(t, "metadata migration", description)
 	assert.False(t, appliedAt.IsZero())
 }

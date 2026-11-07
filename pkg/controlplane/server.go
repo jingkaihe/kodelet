@@ -2462,7 +2462,7 @@ func (s *Server) handleForkConversation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if s.turns != nil {
-		_, err = s.turns.db.ExecContext(ctx, `INSERT INTO realtime_transcript(conversation_id,id,anchor,role,text)
+		_, err = s.turns.db.Writer.ExecContext(ctx, `INSERT INTO realtime_transcript(conversation_id,id,anchor,role,text)
 			SELECT ?,id,anchor,role,text FROM realtime_transcript WHERE conversation_id=? ORDER BY sequence`, response.ID, conversationID)
 		if err != nil {
 			s.writeErrorResponse(w, http.StatusInternalServerError, "conversation forked, but its voice transcript could not be copied", err)

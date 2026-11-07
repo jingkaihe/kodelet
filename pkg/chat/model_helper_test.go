@@ -178,10 +178,10 @@ func TestCentralModelHelperUsesFrozenToolFreeProvider(t *testing.T) {
 	require.NoError(t, err)
 	defer database.Close()
 	var conversationCount int
-	require.NoError(t, database.GetContext(t.Context(), &conversationCount, "SELECT COUNT(*) FROM conversations"))
+	require.NoError(t, database.Writer.GetContext(t.Context(), &conversationCount, "SELECT COUNT(*) FROM conversations"))
 	assert.Equal(t, 1, conversationCount, "only the parent is persisted")
 	var storedMessages string
-	require.NoError(t, database.GetContext(
+	require.NoError(t, database.Writer.GetContext(
 		t.Context(),
 		&storedMessages,
 		"SELECT raw_messages FROM conversations WHERE id = ?",

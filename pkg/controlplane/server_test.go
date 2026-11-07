@@ -564,7 +564,7 @@ func TestServerCloseLeavesDependenciesOpenWhenHTTPShutdownTimesOut(t *testing.T)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.False(t, conversationClosed.Load())
 	assert.ErrorIs(t, runCtx.Err(), context.Canceled)
-	require.NoError(t, store.db.PingContext(t.Context()))
+	require.NoError(t, store.db.Writer.PingContext(t.Context()))
 
 	close(releaseHandler)
 	require.NoError(t, <-requestDone)
