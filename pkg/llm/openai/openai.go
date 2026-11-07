@@ -312,13 +312,16 @@ func (t *Thread) SendMessage(
 		originalHistory := t.GetCompactionHistory()
 		originalResults := t.GetStructuredToolResults()
 		originalMetadata := t.GetMetadata()
-		originalBreakdown := t.GetUsage().ContextBreakdown
+		originalUsage := t.GetUsage()
 		defer func() {
 			t.messages = originalMessages
 			t.SetCompactionHistory(originalHistory)
 			t.SetStructuredToolResults(originalResults)
 			t.RestoreMessageMetadata(originalMetadata)
-			t.SetContextBreakdown(originalBreakdown)
+			t.Mu.Lock()
+			t.Usage.ContextThinkingByResponse = originalUsage.ContextThinkingByResponse
+			t.Mu.Unlock()
+			t.SetContextBreakdown(originalUsage.ContextBreakdown)
 		}()
 	}
 
@@ -585,6 +588,11 @@ func (t *Thread) processMessageExchange(
 
 	// Add the assistant response to history
 	assistantMessage := response.Choices[0].Message
+	if details := response.Usage.CompletionTokensDetails; details != nil {
+		// The SDK only exposes presence for the details object: within it, an
+		// omitted reasoning_tokens field is indistinguishable from explicit zero.
+		t.RecordContextThinking(response.ID, details.ReasoningTokens)
+	}
 	t.messages = append(t.messages, assistantMessage)
 	refreshContext()
 	if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {

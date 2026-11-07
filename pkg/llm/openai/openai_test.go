@@ -1508,12 +1508,86 @@ func TestOpenAIProcessMessageExchangeTextResponse(t *testing.T) {
 	assert.Equal(t, 1, breakdown.InputTextTokens)
 	assert.Equal(t, 2, breakdown.OutputTextTokens)
 	assert.Zero(t, breakdown.OtherTokens)
-	assert.Nil(t, breakdown.ThinkingTokens, "reasoning text is not reported token usage")
+	require.NotNil(t, breakdown.ThinkingTokens)
+	assert.Equal(t, 2, *breakdown.ThinkingTokens, "replayed reasoning text provides a fallback estimate")
+	assert.Empty(t, thread.GetUsage().ContextThinkingByResponse, "fallback is not reported token usage")
 	assert.Equal(t, "off", breakdown.CodeMode)
 	require.Len(t, handler.usage, 1)
 	assert.Equal(t, breakdown, handler.usage[0].ContextBreakdown)
 	require.Len(t, thread.messages, 2)
 	assert.Equal(t, openai.ChatMessageRoleAssistant, thread.messages[1].Role)
+}
+
+func TestOpenAIProcessMessageExchangeThinking(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		for _, test := range []struct {
+			name, details, reasoning string
+			tokens                   int
+			reported                 bool
+		}{
+			{name: "reported", details: `,"completion_tokens_details":{"reasoning_tokens":7}`, reasoning: "thinking", tokens: 7, reported: true},
+			{name: "reported zero", details: `,"completion_tokens_details":{"reasoning_tokens":0}`, reasoning: "thinking", reported: true},
+			{name: "absent details with replayed reasoning", reasoning: "thinking", tokens: 2},
+			{name: "null details with replayed reasoning", details: `,"completion_tokens_details":null`, reasoning: "thinking", tokens: 2},
+			{name: "unavailable"},
+			// The SDK cannot distinguish an empty details object from an explicit zero.
+			{name: "empty details follow SDK zero semantics", details: `,"completion_tokens_details":{}`, reasoning: "thinking", reported: true},
+		} {
+			t.Run(fmt.Sprintf("stream=%t/%s", streaming, test.name), func(t *testing.T) {
+				calls := 0
+				client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(req *http.Request) (*http.Response, error) {
+					request := decodeOpenAIChatRequest(t, req)
+					if calls > 0 {
+						assert.Equal(t, test.reasoning, request.Messages[len(request.Messages)-1].ReasoningContent, "fallback measures reasoning actually replayed")
+					}
+					calls++
+					usage := fmt.Sprintf(`{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30%s}`, test.details)
+					if streaming {
+						return sseOpenAIResponse(fmt.Sprintf(`data: {"id":"response-%d","model":"gpt-4o","choices":[{"index":0,"delta":{"content":"text","reasoning_content":%q},"finish_reason":"stop"}]}
+
+data: {"id":"response-%d","model":"gpt-4o","choices":[],"usage":%s}
+
+data: [DONE]
+
+`, calls, test.reasoning, calls, usage)), nil
+					}
+					return jsonOpenAIResponse(http.StatusOK, fmt.Sprintf(`{
+						"id":"response-%d",
+						"model":"gpt-4o",
+						"choices":[{"index":0,"message":{"role":"assistant","content":"text","reasoning_content":%q},"finish_reason":"stop"}],
+						"usage":%s
+					}`, calls, test.reasoning, usage)), nil
+				}))
+				thread := newTestOpenAIExchangeThread(client, llm.Config{Model: "gpt-4o"})
+				thread.messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "user"}}
+				var handler llm.MessageHandler = &captureOpenAIMessageHandler{}
+				if streaming {
+					handler = &captureOpenAIStreamingHandler{}
+				}
+				for turn := 1; turn <= 2; turn++ {
+					_, _, err := thread.processMessageExchange(t.Context(), handler, "gpt-4o", 64, llm.MessageOpt{DisableUsageLog: true})
+					require.NoError(t, err)
+					usage := thread.GetUsage()
+					breakdown := usage.ContextBreakdown
+					require.NotNil(t, breakdown)
+					if test.reported || test.reasoning != "" {
+						require.NotNil(t, breakdown.ThinkingTokens)
+						assert.Equal(t, turn*test.tokens, *breakdown.ThinkingTokens)
+					} else {
+						assert.Nil(t, breakdown.ThinkingTokens)
+					}
+					if test.reported {
+						assert.Len(t, usage.ContextThinkingByResponse, turn)
+						assert.Equal(t, test.tokens, usage.ContextThinkingByResponse[fmt.Sprintf("response-%d", turn)])
+					} else {
+						assert.Empty(t, usage.ContextThinkingByResponse)
+					}
+					assert.Equal(t, 1+turn+turn*test.tokens, breakdown.TotalTokens, "thinking is included once")
+					assert.Equal(t, turn*20, usage.OutputTokens, "thinking is already included in billed output")
+				}
+			})
+		}
+	}
 }
 
 func TestOpenAIProcessMessageExchangeIgnoresConfiguredTextVerbosity(t *testing.T) {
@@ -1688,7 +1762,7 @@ func TestOpenAISendMessageRestoresMessagesWhenNoSaveConversation(t *testing.T) {
 			"id":"chatcmpl-nosave",
 			"model":"gpt-4o",
 			"choices":[{"index":0,"message":{"role":"assistant","content":"temporary response"},"finish_reason":"stop"}],
-			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+			"usage":{"prompt_tokens":1,"completion_tokens":10,"total_tokens":11,"completion_tokens_details":{"reasoning_tokens":9}}
 		}`), nil
 	}))
 	thread = newTestOpenAIExchangeThread(client, llm.Config{
@@ -1700,6 +1774,9 @@ func TestOpenAISendMessageRestoresMessagesWhenNoSaveConversation(t *testing.T) {
 	thread.Persisted = true
 	originalMessages := []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "previous"}}
 	thread.messages = append([]openai.ChatCompletionMessage(nil), originalMessages...)
+	thread.SetContextBreakdown(base.EstimateContextBreakdown(nil, nil, thread.messages, "off"))
+	thread.RecordContextThinking("previous", 17)
+	originalUsage := thread.GetUsage()
 	handler := &captureOpenAIMessageHandler{}
 
 	output, err := thread.SendMessage(context.Background(), "transient", handler, llm.MessageOpt{
@@ -1714,6 +1791,12 @@ func TestOpenAISendMessageRestoresMessagesWhenNoSaveConversation(t *testing.T) {
 	assert.Equal(t, originalMessages, thread.messages)
 	assert.Empty(t, store.SavedRecords)
 	assert.False(t, thread.ConversationForkBlocked())
+	usage := thread.GetUsage()
+	assert.Equal(t, originalUsage.ContextBreakdown, usage.ContextBreakdown)
+	assert.Equal(t, originalUsage.ContextThinkingByResponse, usage.ContextThinkingByResponse)
+	assert.Equal(t, 10, usage.OutputTokens, "no-save still bills the temporary response")
+	require.NotEmpty(t, handler.usage)
+	assert.Equal(t, 26, *handler.usage[0].ContextBreakdown.ThinkingTokens, "temporary thinking is counted while running")
 }
 
 type terminationOutcomeEnvironment struct {

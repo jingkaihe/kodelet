@@ -14,6 +14,7 @@ import (
 func TestEstimateContextBreakdownProviderHistory(t *testing.T) {
 	for _, test := range []struct {
 		name, system, history string
+		thinkingTokens        int
 	}{
 		{
 			name:   "Anthropic",
@@ -30,8 +31,9 @@ func TestEstimateContextBreakdownProviderHistory(t *testing.T) {
 			]`,
 		},
 		{
-			name:   "Chat Completions",
-			system: `null`,
+			name:           "Chat Completions",
+			system:         `null`,
+			thinkingTokens: 1,
 			history: `[
 				{"role":"system","content":"system!!"},
 				{"role":"user","content":[{"type":"text","text":"user"}]},
@@ -64,10 +66,15 @@ func TestEstimateContextBreakdownProviderHistory(t *testing.T) {
 			assert.Equal(t, (len(definitions)+3)/4, breakdown.ToolDefinitionTokens)
 			assert.Equal(t, 1, breakdown.InputTextTokens)
 			assert.Equal(t, 2, breakdown.OutputTextTokens)
-			assert.Nil(t, breakdown.ThinkingTokens, "summary text does not measure generated thinking")
+			if test.thinkingTokens > 0 {
+				require.NotNil(t, breakdown.ThinkingTokens)
+				assert.Equal(t, test.thinkingTokens, *breakdown.ThinkingTokens)
+			} else {
+				assert.Nil(t, breakdown.ThinkingTokens, "summary text does not measure generated thinking")
+			}
 			assert.Zero(t, breakdown.OtherTokens)
 			assert.Equal(t, []llmtypes.ToolContextUsage{{Name: "code_execute", InputTokens: 4, OutputTokens: 1, Calls: 1}}, breakdown.Tools)
-			assert.Equal(t, 10+breakdown.ToolDefinitionTokens, breakdown.TotalTokens)
+			assert.Equal(t, 10+breakdown.ToolDefinitionTokens+test.thinkingTokens, breakdown.TotalTokens)
 		})
 	}
 }
@@ -83,7 +90,6 @@ func TestContextBreakdownMediaAndOpaqueContentExcluded(t *testing.T) {
 		]},
 		{"role":"assistant","content":[{"type":"redacted_thinking","data":"PAYLOAD"}]},
 		{"role":"assistant","content":[{"type":"thinking","thinking":"PAYLOAD","signature":"PAYLOAD"}]},
-		{"role":"assistant","reasoning_content":"PAYLOAD"},
 		{"type":"reasoning","summary":[{"type":"summary_text","text":"PAYLOAD"}],"content":[{"type":"reasoning_text","text":"PAYLOAD"}],"encrypted_content":"PAYLOAD"},
 		{"type":"compaction","encrypted_content":"PAYLOAD"}
 	]`)
@@ -96,6 +102,26 @@ func TestContextBreakdownMediaAndOpaqueContentExcluded(t *testing.T) {
 	assert.Equal(t, "off", short.CodeMode)
 	assert.NotNil(t, short.Tools)
 	assert.Empty(t, short.Tools)
+}
+
+func TestContextThinkingReportedUsageReplacesReplayedTextEstimate(t *testing.T) {
+	estimate := EstimateContextBreakdown(nil, nil, json.RawMessage(`[
+		{"role":"assistant","content":"text","reasoning_content":"thinking"}
+	]`), "")
+	thread := NewThread(llmtypes.Config{}, "thinking")
+	thread.SetContextBreakdown(estimate)
+	require.NotNil(t, thread.GetUsage().ContextBreakdown.ThinkingTokens)
+	assert.Equal(t, 2, *thread.GetUsage().ContextBreakdown.ThinkingTokens)
+	assert.Equal(t, 3, thread.GetUsage().ContextBreakdown.TotalTokens)
+	assert.Empty(t, thread.GetUsage().ContextThinkingByResponse, "text estimates are not reported usage")
+
+	for _, reported := range []int{20, 0} {
+		thread.RecordContextThinking("response", reported)
+		thread.SetContextBreakdown(estimate)
+		usage := thread.GetUsage()
+		assert.Equal(t, reported, *usage.ContextBreakdown.ThinkingTokens)
+		assert.Equal(t, 1+reported, usage.ContextBreakdown.TotalTokens, "reported thinking replaces rather than adds to replayed text")
+	}
 }
 
 func TestContextBreakdownAggregatesToolNamesAndNativeResults(t *testing.T) {

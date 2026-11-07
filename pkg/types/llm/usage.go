@@ -22,7 +22,8 @@ type Usage struct {
 // billed usage. It excludes archived history and opaque media/encrypted payloads.
 // ThinkingTokens sums provider-reported thinking generated since the last context
 // replacement. It estimates context contribution, not exact provider retention.
-// Nil means no thinking counts have been reported for this context.
+// Replayed Chat Completions reasoning text is estimated when reported counts
+// are unavailable. Nil means neither source is available for this context.
 // Its total is independent of the provider-reported context window size.
 type ContextBreakdown struct {
 	SystemPromptTokens   int                `json:"systemPromptTokens"`

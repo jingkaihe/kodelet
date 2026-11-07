@@ -15,8 +15,9 @@ import (
 // Text uses the same rough four-bytes-per-token heuristic as context compaction.
 // Media, signatures and encrypted reasoning have no useful character estimate
 // and are omitted rather than treating their base64 transport size as tokens.
-// Thinking text may only be a summary. Providers supply reported thinking usage
-// separately; neither summaries nor opaque payloads estimate the underlying work.
+// Thinking summaries and opaque payloads do not estimate the underlying work.
+// Chat Completions reasoning_content is replayed text, so it is estimated only
+// as a fallback; SetContextBreakdown prefers reported thinking when available.
 func EstimateContextBreakdown(system, definitions, messages any, codeMode string) *llmtypes.ContextBreakdown {
 	if codeMode == "" {
 		codeMode = "off"
@@ -72,6 +73,11 @@ func EstimateContextBreakdown(system, definitions, messages any, codeMode string
 		Estimated:            true,
 	}
 	b.TotalTokens = b.SystemPromptTokens + b.ToolDefinitionTokens + b.InputTextTokens + b.OutputTextTokens + b.OtherTokens
+	if c.thinking > 0 {
+		tokens := contextTokens(c.thinking)
+		b.ThinkingTokens = &tokens
+		b.TotalTokens += tokens
+	}
 	for name, tool := range c.tools {
 		usage := llmtypes.ToolContextUsage{Name: name, InputTokens: contextTokens(tool.input), OutputTokens: contextTokens(tool.output), Calls: tool.calls}
 		b.Tools = append(b.Tools, usage)
@@ -86,9 +92,9 @@ type toolContextSize struct {
 }
 
 type contextCounter struct {
-	system, definitions, input, output, other int
-	tools                                     map[string]*toolContextSize
-	names                                     map[string]string
+	system, definitions, input, output, thinking, other int
+	tools                                               map[string]*toolContextSize
+	names                                               map[string]string
 }
 
 func (c *contextCounter) tool(name string) *toolContextSize {
@@ -163,14 +169,15 @@ func (c *contextCounter) visit(value any, namesOnly bool) {
 			}
 		}
 		if !namesOnly {
-			// Tool calls/results are classified separately. Reasoning and its
-			// summaries are excluded rather than estimated from their text.
+			// Tool calls/results are classified separately. Provider summary
+			// blocks remain excluded; reasoning_content is actual replayed text.
 			size := contextTextSize(content) + len(contextString(m["refusal"]))
 			switch role {
 			case "system", "developer":
 				c.system += size
 			case "assistant":
 				c.output += size
+				c.thinking += len(contextString(m["reasoning_content"]))
 			default:
 				c.input += size
 			}
