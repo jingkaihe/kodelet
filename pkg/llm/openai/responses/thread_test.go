@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -678,7 +679,101 @@ func TestResponsesContextBreakdownUsesCodexRequestPrefixAndLiveHistory(t *testin
 	assert.Zero(t, breakdown.OtherTokens)
 	thread.codexWindowGeneration++
 	thread.refreshContextBreakdown(params, prefixCount, thread.codexWindowGeneration-1, nil)
-	assert.Nil(t, thread.GetUsage().ContextBreakdown, "stale request cannot overwrite compacted context")
+	assert.Equal(t, breakdown, thread.GetUsage().ContextBreakdown, "stale request must not clear a newer context snapshot")
+}
+
+type blockingContextDefinition struct {
+	started chan string
+	release <-chan struct{}
+}
+
+func (d blockingContextDefinition) MarshalJSON() ([]byte, error) {
+	select {
+	case d.started <- "estimating":
+	default:
+	}
+	<-d.release
+	return []byte(`{}`), nil
+}
+
+func TestResponsesContextBreakdownDiscardsStaleEstimates(t *testing.T) {
+	for _, change := range []string{"history revision", "context generation", "compaction"} {
+		t.Run(change, func(t *testing.T) {
+			thread := &Thread{Thread: base.NewThread(llmtypes.Config{}, "context-revision")}
+			thread.AddUserMessage(t.Context(), "old user")
+			windowGeneration := thread.codexWindowGeneration
+			response := openairesponses.Response{ID: "old-response"}
+			require.NoError(t, json.Unmarshal([]byte(`{"output_tokens_details":{"reasoning_tokens":7}}`), &response.Usage))
+			started := make(chan string, 1)
+			release := make(chan struct{})
+			done := make(chan struct{})
+			unblock := sync.OnceFunc(func() { close(release) })
+			t.Cleanup(func() {
+				unblock()
+				select {
+				case <-done:
+				case <-time.After(2 * time.Second):
+					t.Error("timed out waiting for context estimation")
+				}
+			})
+			params := openairesponses.ResponseNewParams{
+				Tools: []openairesponses.ToolUnionParam{
+					openairesponses.ToolParamOfFunction("test", map[string]any{
+						"schema": blockingContextDefinition{started: started, release: release},
+					}, false),
+				},
+			}
+			go func() {
+				defer close(done)
+				thread.refreshContextBreakdown(params, 0, windowGeneration, &response)
+			}()
+			require.Equal(t, "estimating", receiveTestEvent(t, started))
+			locked := thread.historyMu.TryLock()
+			if locked {
+				thread.historyMu.Unlock()
+			}
+			require.True(t, locked, "serialization must not hold the history lock")
+
+			switch change {
+			case "history revision":
+				thread.AddUserMessage(t.Context(), "new user")
+			case "context generation":
+				// Check the generation guard independently of the revision guard.
+				thread.historyMu.Lock()
+				thread.codexWindowGeneration++
+				thread.Mu.Lock()
+				thread.ResetContextStateLocked()
+				thread.Mu.Unlock()
+				thread.historyMu.Unlock()
+			case "compaction":
+				require.NoError(t, thread.SwapContext(t.Context(), "summary"))
+			}
+			newResponse := openairesponses.Response{ID: "new-response"}
+			require.NoError(t, json.Unmarshal([]byte(`{"output_tokens_details":{"reasoning_tokens":3}}`), &newResponse.Usage))
+			thread.refreshContextBreakdown(openairesponses.ResponseNewParams{Instructions: param.NewOpt("new system")}, 0, thread.codexWindowGeneration, &newResponse)
+			expected := thread.GetUsage()
+			require.NotNil(t, expected.ContextBreakdown)
+			require.NotNil(t, expected.ContextBreakdown.ThinkingTokens)
+			if change == "history revision" {
+				assert.Equal(t, 10, *expected.ContextBreakdown.ThinkingTokens, "history edits must not lose response thinking")
+			} else {
+				assert.Equal(t, 3, *expected.ContextBreakdown.ThinkingTokens, "context replacement drops old thinking")
+			}
+
+			unblock()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("timed out waiting for context estimation")
+			}
+			assert.Equal(t, expected, thread.GetUsage(), "stale estimates must leave the newer snapshot intact")
+			if change != "history revision" {
+				thread.recordContextThinking(&response, windowGeneration)
+				thread.refreshContextBreakdown(params, 0, windowGeneration, &response)
+				assert.Equal(t, expected, thread.GetUsage(), "stale response capture must not cross compaction")
+			}
+		})
+	}
 }
 
 func TestResponsesContextThinkingAccumulatesReportedUsage(t *testing.T) {

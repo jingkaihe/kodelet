@@ -954,7 +954,7 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 				span.SetAttributes(responseSpanAttributes(*response)...)
 				// Capture thinking before tools can fork this context. The deferred
 				// refresh includes tool results without adding this response twice.
-				t.refreshContextBreakdown(attemptParams, prefixCount, windowGeneration, response)
+				t.recordContextThinking(response, windowGeneration)
 			}
 			if err == nil && !streamResult.responseCompleted {
 				err = errors.New("response stream ended before response.completed event")
@@ -1024,20 +1024,37 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 // Keep Codex's request-only developer messages, but use the complete current
 // inference window rather than display history or a WebSocket continuation delta.
 func (t *Thread) refreshContextBreakdown(params responses.ResponseNewParams, prefixCount int, windowGeneration uint64, response *responses.Response) {
+	// Keep provider usage even if history changes while estimating this snapshot.
+	t.recordContextThinking(response, windowGeneration)
 	t.historyMu.Lock()
-	defer t.historyMu.Unlock()
 	if t.codexWindowGeneration != windowGeneration {
-		t.SetContextBreakdown(nil)
+		t.historyMu.Unlock()
 		return
 	}
+	revision := t.historyRevision
 	items := append(cloneResponsesInputItems(params.Input.OfInputItemList[:prefixCount]), t.inputItems...)
+	t.historyMu.Unlock()
+
 	breakdown := base.EstimateContextBreakdown(
 		params.Instructions.Value, params.Tools, items, t.Config.EffectiveCodeMode(),
 	)
-	if breakdown != nil && response != nil && response.Usage.OutputTokensDetails.JSON.ReasoningTokens.Valid() {
-		t.RecordContextThinking(response.ID, int(response.Usage.OutputTokensDetails.ReasoningTokens))
+	t.historyMu.Lock()
+	defer t.historyMu.Unlock()
+	if t.historyRevision != revision || t.codexWindowGeneration != windowGeneration {
+		return
 	}
 	t.SetContextBreakdown(breakdown)
+}
+
+func (t *Thread) recordContextThinking(response *responses.Response, windowGeneration uint64) {
+	if response == nil || !response.Usage.OutputTokensDetails.JSON.ReasoningTokens.Valid() {
+		return
+	}
+	t.historyMu.Lock()
+	defer t.historyMu.Unlock()
+	if t.codexWindowGeneration == windowGeneration {
+		t.RecordContextThinking(response.ID, int(response.Usage.OutputTokensDetails.ReasoningTokens))
+	}
 }
 
 func responseSpanAttributes(response responses.Response) []attribute.KeyValue {
