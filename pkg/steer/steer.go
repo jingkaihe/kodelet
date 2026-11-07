@@ -45,6 +45,14 @@ type Message struct {
 // Store manages the steering queue in Kodelet's shared SQLite database.
 type Store struct {
 	db *db.DB
+	// owned reports whether Close closes db. Only NewSteerStore owns its handle.
+	owned bool
+}
+
+// NewStore returns a steering queue backed by database. The caller owns
+// database; Store.Close does not close it. Migrations must have been applied.
+func NewStore(database *db.DB) *Store {
+	return &Store{db: database}
 }
 
 type storeConfig struct {
@@ -61,7 +69,8 @@ func WithDBPath(dbPath string) StoreOption {
 	}
 }
 
-// NewSteerStore opens the shared SQLite database.
+// NewSteerStore opens a steering queue with its own database handle, which
+// Close releases. Prefer NewStore with the process's shared handle.
 // Database migrations must be applied before the store is used.
 func NewSteerStore(ctx context.Context, opts ...StoreOption) (*Store, error) {
 	config := storeConfig{}
@@ -82,12 +91,12 @@ func NewSteerStore(ctx context.Context, opts ...StoreOption) (*Store, error) {
 		return nil, errors.Wrap(err, "failed to open steering database")
 	}
 
-	return &Store{db: database}, nil
+	return &Store{db: database, owned: true}, nil
 }
 
-// Close releases the store's database connection.
+// Close closes the database handle if NewSteerStore opened it.
 func (s *Store) Close() error {
-	if s == nil || s.db == nil {
+	if s == nil || s.db == nil || !s.owned {
 		return nil
 	}
 	return s.db.Close()

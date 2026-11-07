@@ -28,19 +28,16 @@ var (
 	errConversationBusy = errors.New("conversation already has an active run")
 )
 
-func newTurnStore(ctx context.Context, path string) (*turnStore, error) {
-	database, err := db.Open(ctx, path)
-	if err != nil {
-		return nil, err
-	}
+// newTurnStore returns the turn store backed by database, which the server
+// owns and closes.
+func newTurnStore(ctx context.Context, database *db.DB) (*turnStore, error) {
 	// A daemon restart never replays an admitted model/tool operation. Pending
 	// exact cancellation is durable, including before the conversation exists.
-	_, err = database.Writer.ExecContext(ctx, `UPDATE chat_turns SET
+	_, err := database.Writer.ExecContext(ctx, `UPDATE chat_turns SET
 		status = CASE WHEN cancel_requested THEN 'cancelled' ELSE 'interrupted' END,
 		error = 'server stopped before a terminal outcome was recorded', updated_at = ?
 		WHERE status IN ('accepted', 'running')`, time.Now().UTC())
 	if err != nil {
-		_ = database.Close()
 		return nil, errors.Wrap(err, "failed to restore saved turn statuses")
 	}
 	return &turnStore{db: database}, nil

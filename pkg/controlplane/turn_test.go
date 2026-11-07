@@ -16,7 +16,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/db"
-	"github.com/jingkaihe/kodelet/pkg/db/migrations"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -25,13 +25,8 @@ import (
 
 func openTurnTestStore(t *testing.T, path string) *turnStore {
 	t.Helper()
-	database, err := db.Open(t.Context(), path)
+	store, err := newTurnStore(t.Context(), dbtest.Open(t, path))
 	require.NoError(t, err)
-	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
-	require.NoError(t, database.Close())
-	store, err := newTurnStore(t.Context(), path)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.db.Close()) })
 	return store
 }
 

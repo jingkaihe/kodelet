@@ -131,19 +131,10 @@ func (e *enrollmentSlowDownError) Error() string {
 	return "runner enrollment is being polled too quickly"
 }
 
-func newAuthStore(ctx context.Context, dbPath string) (*authStore, error) {
-	sqlDB, err := db.Open(ctx, dbPath)
-	if err != nil {
-		return nil, err
-	}
-	return &authStore{db: sqlDB, now: time.Now}, nil
-}
-
-func (s *authStore) Close() error {
-	if s == nil || s.db == nil {
-		return nil
-	}
-	return s.db.Close()
+// newAuthStore returns an authentication store backed by database, which the
+// server owns and closes.
+func newAuthStore(database *db.DB) *authStore {
+	return &authStore{db: database, now: time.Now}
 }
 
 func (s *authStore) CreateWebSession(ctx context.Context, issuer, subject, name, email string, roles []string, duration time.Duration) (string, string, error) {

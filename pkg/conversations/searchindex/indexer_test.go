@@ -3,7 +3,6 @@ package searchindex
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -15,8 +14,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/conversations/sqlite"
-	"github.com/jingkaihe/kodelet/pkg/db"
-	"github.com/jingkaihe/kodelet/pkg/db/migrations"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
@@ -34,15 +32,7 @@ const anthropicTranscript = `[
 
 func newTestStore(t *testing.T) *sqlite.Store {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "storage.db")
-	database, err := db.Open(t.Context(), dbPath)
-	require.NoError(t, err)
-	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
-	require.NoError(t, database.Close())
-	store, err := sqlite.NewStore(t.Context(), dbPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
-	return store
+	return sqlite.NewStore(dbtest.OpenTemp(t))
 }
 
 func saveTranscript(t *testing.T, store *sqlite.Store, id, raw string) {

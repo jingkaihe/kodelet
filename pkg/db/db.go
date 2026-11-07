@@ -60,6 +60,13 @@ const (
 type DB struct {
 	Writer *sqlx.DB
 	Reader *sqlx.DB
+	path   string
+}
+
+// Path returns the absolute path of the database file. Files that belong to
+// the database, such as image artifacts, live beside it.
+func (d *DB) Path() string {
+	return d.path
 }
 
 // Close closes both pools.
@@ -123,7 +130,7 @@ func Open(ctx context.Context, dbPath string) (*DB, error) {
 	reader.SetMaxOpenConns(readerConnections)
 	reader.SetConnMaxIdleTime(readerIdleTimeout)
 
-	return &DB{Writer: writer, Reader: reader}, nil
+	return &DB{Writer: writer, Reader: reader, path: absolutePath}, nil
 }
 
 // openPool opens and pings a pool whose connections all apply query.

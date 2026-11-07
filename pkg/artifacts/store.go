@@ -41,31 +41,18 @@ type Store struct {
 	putMu sync.Mutex
 }
 
-// Open opens artifact storage after the shared database migrations have been applied.
+// Open opens artifact storage beside database, whose migrations must have
+// been applied. The caller owns database and closes it after the store.
 // It sweeps abandoned uploads and unreferenced files older than 24 hours.
-func Open(ctx context.Context, dbPath string) (*Store, error) {
-	database, err := db.Open(ctx, dbPath)
-	if err != nil {
-		return nil, err
-	}
-	store := &Store{db: database, dir: filepath.Join(filepath.Dir(dbPath), "artifacts")}
+func Open(ctx context.Context, database *db.DB) (*Store, error) {
+	store := &Store{db: database, dir: filepath.Join(filepath.Dir(database.Path()), "artifacts")}
 	if err := os.MkdirAll(store.dir, 0o700); err != nil {
-		_ = database.Close()
 		return nil, errors.Wrap(err, "failed to create artifact directory")
 	}
 	if err := store.sweep(ctx); err != nil {
-		_ = database.Close()
 		return nil, err
 	}
 	return store, nil
-}
-
-// Close releases the database connection.
-func (s *Store) Close() error {
-	if s == nil {
-		return nil
-	}
-	return s.db.Close()
 }
 
 // Put validates and stores an image, adding its conversation/tool reference before returning.

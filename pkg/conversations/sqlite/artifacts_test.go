@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/artifacts"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -20,13 +21,10 @@ import (
 
 func TestArtifactConversationLifecycle(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "storage.db")
-	setupTestDB(t, dbPath)
-	store, err := NewStore(t.Context(), dbPath)
+	database := dbtest.Open(t, dbPath)
+	store := NewStore(database)
+	images, err := artifacts.Open(t.Context(), database)
 	require.NoError(t, err)
-	defer store.Close()
-	images, err := artifacts.Open(t.Context(), dbPath)
-	require.NoError(t, err)
-	defer images.Close()
 	var imageData bytes.Buffer
 	require.NoError(t, png.Encode(&imageData, image.NewRGBA(image.Rect(0, 0, 2, 3))))
 	parent := convtypes.NewConversationRecord("parent")
@@ -58,11 +56,10 @@ func TestArtifactConversationLifecycle(t *testing.T) {
 	// Startup collection must still find attachments belonging to archived calls.
 	_, err = store.db.Writer.Exec(`UPDATE image_artifacts SET created_at = ?`, time.Now().Add(-48*time.Hour))
 	require.NoError(t, err)
-	reopened, err := artifacts.Open(t.Context(), dbPath)
+	reopened, err := artifacts.Open(t.Context(), database)
 	require.NoError(t, err)
 	_, _, err = reopened.Get(t.Context(), parent.ID, attachment.ArtifactID)
 	require.NoError(t, err)
-	require.NoError(t, reopened.Close())
 	loaded, err := store.Load(t.Context(), parent.ID)
 	require.NoError(t, err)
 	assert.Empty(t, loaded.ToolResults["generate"].Attachments[0].ViewURL)
@@ -103,13 +100,10 @@ func TestArtifactConversationLifecycle(t *testing.T) {
 
 func TestArtifactReferencesRollbackWithConversation(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "storage.db")
-	setupTestDB(t, dbPath)
-	store, err := NewStore(t.Context(), dbPath)
+	database := dbtest.Open(t, dbPath)
+	store := NewStore(database)
+	images, err := artifacts.Open(t.Context(), database)
 	require.NoError(t, err)
-	defer store.Close()
-	images, err := artifacts.Open(t.Context(), dbPath)
-	require.NoError(t, err)
-	defer images.Close()
 	var encoded bytes.Buffer
 	require.NoError(t, png.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, 1, 1))))
 	attachment, err := images.Put(t.Context(), "parent", "call", tooltypes.ToolAttachment{Type: "image"}, &encoded)

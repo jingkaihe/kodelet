@@ -52,18 +52,15 @@ type SQLitePersistence struct {
 	ownerID string
 }
 
-// NewSQLitePersistence opens a durable runner store at dbPath.
-// Database migrations must have run before this constructor is used.
-func NewSQLitePersistence(ctx context.Context, dbPath, ownerID string) (*SQLitePersistence, error) {
-	sqlDB, err := db.Open(ctx, dbPath)
-	if err != nil {
-		return nil, err
-	}
+// NewSQLitePersistence returns a durable runner store backed by database.
+// The caller owns database and closes it after the store; Close only detaches
+// the store. Database migrations must have run before the store is used.
+func NewSQLitePersistence(database *db.DB, ownerID string) *SQLitePersistence {
 	ownerID = strings.TrimSpace(ownerID)
 	if ownerID == "" {
 		ownerID = defaultOwnerID
 	}
-	return &SQLitePersistence{db: sqlDB, ownerID: ownerID}, nil
+	return &SQLitePersistence{db: database, ownerID: ownerID}
 }
 
 // Load restores records for this authenticated owner.
@@ -462,14 +459,14 @@ func (s *SQLitePersistence) RemoveRunner(ctx context.Context, runnerID string, f
 	return result, nil
 }
 
-// Close releases the SQLite connection.
+// Close detaches the store from its database; later calls report that the
+// store is closed. The database's owner closes the handle.
 func (s *SQLitePersistence) Close() error {
-	if s == nil || s.db == nil {
+	if s == nil {
 		return nil
 	}
-	err := s.db.Close()
 	s.db = nil
-	return err
+	return nil
 }
 
 type runnerPersistenceRow struct {

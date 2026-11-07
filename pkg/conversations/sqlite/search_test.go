@@ -9,16 +9,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	conversations "github.com/jingkaihe/kodelet/pkg/types/conversations"
 )
 
 func newSearchTestStore(t *testing.T) *Store {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "search.db")
-	setupTestDB(t, dbPath)
-	store, err := NewStore(t.Context(), dbPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	store := NewStore(dbtest.Open(t, dbPath))
 	return store
 }
 
@@ -257,14 +255,9 @@ func repeatWords(word string, count int) string {
 
 func TestQuerySearchReadsOneSnapshot(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "search.db")
-	setupTestDB(t, dbPath)
-	store, err := NewStore(t.Context(), dbPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
-	// A second store has its own connection, like another daemon or process.
-	writer, err := NewStore(t.Context(), dbPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, writer.Close()) })
+	store := NewStore(dbtest.Open(t, dbPath))
+	// A second store has its own handle, like another process.
+	writer := NewStore(dbtest.Open(t, dbPath))
 
 	saveSearchConversation(t, store, "conv", "/workspace")
 	indexSearchConversation(t, store, "conv",

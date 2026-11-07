@@ -818,7 +818,7 @@ func TestBrowserOIDCRevocationAndRoleChangesCloseWebsocket(t *testing.T) {
 				_, err := f.server.authStore.db.Writer.ExecContext(t.Context(), `UPDATE web_auth_sessions SET roles_json = '["user"]' WHERE token_sha256 = ?`, authHash(token))
 				require.NoError(t, err)
 			case "store unavailable":
-				require.NoError(t, f.server.authStore.Close())
+				require.NoError(t, f.server.authStore.db.Close())
 			}
 			socket.assertClosed(t, browserAuthCheckInterval+2*time.Second)
 			assert.Zero(t, f.stops.Load())

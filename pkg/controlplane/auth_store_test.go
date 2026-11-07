@@ -12,8 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/db"
-	dbmigrations "github.com/jingkaihe/kodelet/pkg/db/migrations"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/stretchr/testify/assert"
@@ -30,12 +29,9 @@ func (c *authStoreTestClock) now() time.Time {
 
 func newAuthStoreTest(t *testing.T) (*authStore, *authStoreTestClock) {
 	t.Helper()
-	database, err := db.Open(t.Context(), filepath.Join(t.TempDir(), "auth.db"))
-	require.NoError(t, err)
-	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), dbmigrations.All()))
+	database := dbtest.Open(t, filepath.Join(t.TempDir(), "auth.db"))
 	clock := &authStoreTestClock{current: time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)}
 	store := &authStore{db: database, now: clock.now}
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
 	return store, clock
 }
 

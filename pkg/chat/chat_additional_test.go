@@ -15,6 +15,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	conversationsqlite "github.com/jingkaihe/kodelet/pkg/conversations/sqlite"
 	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
@@ -861,14 +862,8 @@ func TestExecutorRenameCommandPersistsWithoutCallingModel(t *testing.T) {
 func TestResolveConfigRejectsRunnerBoundConversationBeforeResolvingRemoteCWD(t *testing.T) {
 	basePath := t.TempDir()
 	t.Setenv("KODELET_BASE_PATH", basePath)
-	dbPath := filepath.Join(basePath, "storage.db")
-	database, err := db.Open(t.Context(), dbPath)
-	require.NoError(t, err)
-	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
-	require.NoError(t, database.Close())
-
-	store, err := conversationsqlite.NewStore(t.Context(), dbPath)
-	require.NoError(t, err)
+	database := dbtest.Open(t, filepath.Join(basePath, "storage.db"))
+	store := conversationsqlite.NewStore(database)
 	now := time.Now().UTC()
 	require.NoError(t, store.Save(t.Context(), convtypes.ConversationRecord{
 		ID:          "remote-conversation",
@@ -879,11 +874,7 @@ func TestResolveConfigRejectsRunnerBoundConversationBeforeResolvingRemoteCWD(t *
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}))
-	require.NoError(t, store.Close())
-
-	database, err = db.Open(t.Context(), dbPath)
-	require.NoError(t, err)
-	_, err = database.Writer.ExecContext(t.Context(), `
+	_, err := database.Writer.ExecContext(t.Context(), `
 		INSERT INTO runner_registrations (
 			id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -894,7 +885,6 @@ func TestResolveConfigRejectsRunnerBoundConversationBeforeResolvingRemoteCWD(t *
 		VALUES (?, ?, ?, ?)
 	`, "remote-conversation", "runner-one", now, now)
 	require.NoError(t, err)
-	require.NoError(t, database.Close())
 
 	_, _, err = ResolveConfigWithReasoning(t.Context(), "remote-conversation", "", "", "", t.TempDir())
 	require.ErrorContains(t, err, "bound to runner runner-one")

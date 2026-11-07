@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,12 +16,9 @@ func TestAdmissionCheckpointAtomicallyFencesHistoryAndAffinity(t *testing.T) {
 	for _, name := range []string{"success", "cancelled", "completed", "wrong run", "wrong conversation", "wrong runner", "closed run", "existing affinity", "summary failure"} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "checkpoint.db")
-			setupTestDB(t, path)
-			store, err := NewStore(t.Context(), path)
-			require.NoError(t, err)
-			defer store.Close()
+			store := NewStore(dbtest.Open(t, path))
 			now := time.Now().UTC()
-			_, err = store.db.Writer.Exec(`INSERT INTO runner_registrations
+			_, err := store.db.Writer.Exec(`INSERT INTO runner_registrations
 				(id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at)
 				VALUES ('runner', 'local', 'host', '/work/project', 'project', 'busy', ?, ?)`, now, now)
 			require.NoError(t, err)
@@ -57,10 +55,8 @@ func TestAdmissionCheckpointAtomicallyFencesHistoryAndAffinity(t *testing.T) {
 			err = store.Save(convtypes.ContextWithTurnAdmission(t.Context(), admission), record)
 			if name == "success" {
 				require.NoError(t, err)
-				// Reload from a fresh connection: all three durable views agree.
-				reopened, err := NewStore(t.Context(), path)
-				require.NoError(t, err)
-				defer reopened.Close()
+				// Reload through another handle: all three durable views agree.
+				reopened := NewStore(dbtest.Open(t, path))
 				loaded, err := reopened.Load(t.Context(), record.ID)
 				require.NoError(t, err)
 				assert.Equal(t, "runner", loaded.Metadata[convtypes.RunnerIDMetadataKey])

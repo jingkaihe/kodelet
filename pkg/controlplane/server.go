@@ -74,6 +74,8 @@ func (unavailableFrontendHandler) IsPublicPath(string) bool {
 // Server represents the Kodelet control-plane server.
 type Server struct {
 	router                *mux.Router
+	database              *db.DB // shared by every store; Close closes it last
+	steer                 *steer.Store
 	conversationService   conversations.ConversationServiceInterface
 	searchIndexer         *searchindex.Indexer
 	searchIndexDone       chan struct{}
@@ -291,33 +293,34 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 		return nil, errors.Wrap(err, "invalid realtime configuration")
 	}
 
-	// Get the conversation service
-	conversationStore, err := conversations.GetConversationStore(ctx)
+	runCtx, runCancel := context.WithCancel(context.WithoutCancel(ctx))
+	dbPath, err := db.DefaultDBPath()
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create conversation service")
+		runCancel()
+		return nil, errors.Wrap(err, "failed to resolve the database path")
 	}
+	// Every store shares one handle, so the server has a single writer
+	// connection and its writes queue in Go rather than in SQLite's busy wait.
+	database, err := db.Open(runCtx, dbPath)
+	if err != nil {
+		runCancel()
+		return nil, errors.Wrap(err, "failed to open the database")
+	}
+	closeOnError := func() {
+		runCancel()
+		_ = database.Close()
+	}
+
+	conversationStore := conversations.NewConversationStore(database)
 	conversationService := conversations.NewConversationService(conversationStore)
 	var searchIndexer *searchindex.Indexer
 	if store, ok := conversationStore.(searchindex.Store); ok {
 		searchIndexer = searchindex.New(store)
 		conversationService.SetSearchIndex(searchIndexer)
 	}
-
-	runCtx, runCancel := context.WithCancel(context.WithoutCancel(ctx))
-	dbPath, err := db.DefaultDBPath()
-	if err != nil {
-		runCancel()
-		_ = conversationService.Close()
-		return nil, errors.Wrap(err, "failed to resolve runner persistence path")
-	}
 	var authenticationStore *authStore
 	if config.requiresAuthStore() {
-		authenticationStore, err = newAuthStore(runCtx, dbPath)
-		if err != nil {
-			runCancel()
-			_ = conversationService.Close()
-			return nil, errors.Wrap(err, "failed to open server authentication store")
-		}
+		authenticationStore = newAuthStore(database)
 	}
 	var oidcFlow OIDCFlow
 	if config.resolvedWebAuthMode() == WebAuthModeOIDC {
@@ -325,49 +328,36 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 		if oidcFlow == nil {
 			oidcFlow, err = newProviderOIDCFlow(runCtx, config.OIDC)
 			if err != nil {
-				runCancel()
-				_ = authenticationStore.Close()
-				_ = conversationService.Close()
+				closeOnError()
 				return nil, err
 			}
 		}
 	}
-	runnerPersistence, err := runnerregistry.NewSQLitePersistence(runCtx, dbPath, "")
-	if err != nil {
-		runCancel()
-		_ = authenticationStore.Close()
-		_ = conversationService.Close()
-		return nil, errors.Wrap(err, "failed to open runner persistence")
-	}
+	runnerPersistence := runnerregistry.NewSQLitePersistence(database, "")
 	// Registry.Close must persist interrupted runs and offline registrations
 	// after execution cancellation; its own close controls its context lifetime.
 	runnerRegistry, err := runnerregistry.New(context.WithoutCancel(runCtx), runnerregistry.Options{Persistence: runnerPersistence, Credentials: authenticationStore})
 	if err != nil {
-		runCancel()
-		_ = authenticationStore.Close()
-		_ = conversationService.Close()
+		closeOnError()
 		return nil, errors.Wrap(err, "failed to create runner registry")
 	}
 
-	turns, err := newTurnStore(runCtx, dbPath)
+	turns, err := newTurnStore(runCtx, database)
 	if err != nil {
-		runCancel()
 		_ = runnerRegistry.Close()
-		_ = authenticationStore.Close()
-		_ = conversationService.Close()
+		closeOnError()
 		return nil, err
 	}
-	artifactStore, err := artifacts.Open(runCtx, dbPath)
+	artifactStore, err := artifacts.Open(runCtx, database)
 	if err != nil {
-		runCancel()
-		_ = turns.db.Close()
 		_ = runnerRegistry.Close()
-		_ = authenticationStore.Close()
-		_ = conversationService.Close()
+		closeOnError()
 		return nil, errors.Wrap(err, "failed to open image artifact storage")
 	}
 	s := &Server{
 		router:              mux.NewRouter(),
+		database:            database,
+		steer:               steer.NewStore(database),
 		conversationService: conversationService,
 		searchIndexer:       searchIndexer,
 		chatRunner: &serverChatRunner{
@@ -1672,7 +1662,7 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pendingSteer, err := pendingSteerWebMessages(ctx, id)
+	pendingSteer, err := s.pendingSteerWebMessages(ctx, id)
 	if err != nil {
 		logger.G(ctx).WithError(err).WithField("conversation_id", id).Warn("failed to read pending steering messages")
 	}
@@ -1755,14 +1745,14 @@ func (s *Server) writeConversationHistoryResponse(w http.ResponseWriter, r *http
 	s.writeJSONResponse(w, history)
 }
 
-func pendingSteerWebMessages(ctx context.Context, conversationID string) ([]WebMessage, error) {
-	steerStore, err := steer.NewSteerStore(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer steerStore.Close()
+// errSteeringUnavailable reports a server built without the shared database.
+var errSteeringUnavailable = errors.New("the steering queue is unavailable")
 
-	messages, err := steerStore.Peek(ctx, conversationID)
+func (s *Server) pendingSteerWebMessages(ctx context.Context, conversationID string) ([]WebMessage, error) {
+	if s.steer == nil {
+		return nil, errSteeringUnavailable
+	}
+	messages, err := s.steer.Peek(ctx, conversationID)
 	if err != nil {
 		return nil, err
 	}
@@ -2266,7 +2256,7 @@ func (s *Server) handleGetPendingSteer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	messages, err := pendingSteerWebMessages(r.Context(), conversationID)
+	messages, err := s.pendingSteerWebMessages(r.Context(), conversationID)
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to read pending steering messages", err)
 		return
@@ -2326,14 +2316,11 @@ func (s *Server) handleSteerConversation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	steerStore, err := steer.NewSteerStore(ctx)
-	if err != nil {
-		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to initialize steer store", err)
+	if s.steer == nil {
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to queue steering message", errSteeringUnavailable)
 		return
 	}
-	defer steerStore.Close()
-
-	_, err = steerStore.Enqueue(ctx, conversationID, message, imageInputs)
+	_, err = s.steer.Enqueue(ctx, conversationID, message, imageInputs)
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to queue steering message", err)
 		return
@@ -2643,16 +2630,6 @@ func (s *Server) Stop() error {
 			firstErr = err
 		}
 	}
-	if s.authStore != nil {
-		if err := s.authStore.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	if s.turns != nil {
-		if err := s.turns.db.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
 	return firstErr
 }
 
@@ -2778,9 +2755,10 @@ func (s *Server) Close() error {
 			firstErr = errors.Wrap(err, "failed to close conversation service")
 		}
 	}
-	if s.artifacts != nil {
-		if err := s.artifacts.Close(); err != nil && firstErr == nil {
-			firstErr = errors.Wrap(err, "failed to close image artifact storage")
+	// Stores share the handle, so it closes after every user has stopped.
+	if s.database != nil {
+		if err := s.database.Close(); err != nil && firstErr == nil {
+			firstErr = errors.Wrap(err, "failed to close the database")
 		}
 	}
 	return firstErr

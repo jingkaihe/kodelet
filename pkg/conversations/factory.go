@@ -5,44 +5,18 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/pkg/errors"
-
 	"github.com/jingkaihe/kodelet/pkg/conversations/sqlite"
+	"github.com/jingkaihe/kodelet/pkg/db"
 )
 
-// NewConversationStore creates the appropriate ConversationStore implementation
-// based on the provided configuration
-func NewConversationStore(ctx context.Context, config *Config) (ConversationStore, error) {
-	if config == nil {
-		// Use default config if none provided
-		var err error
-		config, err = DefaultConfig()
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to create default config")
-		}
-	}
-
-	dbPath := filepath.Join(config.BasePath, "storage.db")
-
-	switch config.StoreType {
-	case "sqlite":
-		return newSQLiteConversationStore(ctx, dbPath)
-	default:
-		// Default to SQLite store
-		return newSQLiteConversationStore(ctx, dbPath)
-	}
+// NewConversationStore returns a conversation store backed by database. The
+// caller owns database; closing the store does not close it.
+func NewConversationStore(database *db.DB) ConversationStore {
+	return sqlite.NewStore(database)
 }
 
-func newSQLiteConversationStore(ctx context.Context, dbPath string) (ConversationStore, error) {
-	store, err := sqlite.NewStore(ctx, dbPath)
-	if err != nil {
-		return nil, err
-	}
-	return store, nil
-}
-
-// GetConversationStore is a convenience function that creates a store
-// with default configuration
+// GetConversationStore opens a conversation store with its own handle on the
+// default database, which closing the store releases.
 func GetConversationStore(ctx context.Context) (ConversationStore, error) {
 	config, err := DefaultConfig()
 	if err != nil {
@@ -54,5 +28,9 @@ func GetConversationStore(ctx context.Context) (ConversationStore, error) {
 		config.StoreType = storeType
 	}
 
-	return NewConversationStore(ctx, config)
+	store, err := sqlite.OpenStore(ctx, filepath.Join(config.BasePath, "storage.db"))
+	if err != nil {
+		return nil, err
+	}
+	return store, nil
 }

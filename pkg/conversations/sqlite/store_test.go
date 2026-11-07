@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	conversations "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -18,33 +19,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// setupTestDB creates a test database with migrations applied
-func setupTestDB(t *testing.T, dbPath string) {
-	t.Helper()
-	ctx := context.Background()
-	sqlDB, err := db.Open(ctx, dbPath)
-	require.NoError(t, err)
-	defer sqlDB.Close()
-
-	runner := db.NewMigrationRunner(sqlDB)
-	require.NoError(t, runner.Run(ctx, migrations.All()))
-}
-
 func TestStoreCompactionHistoryRoundTripAndFork(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "compact.db")
-	setupTestDB(t, dbPath)
-	store, err := NewStore(t.Context(), dbPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	store := NewStore(dbtest.Open(t, dbPath))
 	record := conversations.NewConversationRecord("compact")
 	record.Provider = "openai"
 	record.RawMessages = json.RawMessage(`[{"type":"compaction","encrypted_content":"opaque"}]`)
-	record.CompactionHistory, err = record.CompactionHistory.Append(
+	history, err := record.CompactionHistory.Append(
 		json.RawMessage(`[{"type":"message","role":"user","content":"original"}]`),
 		1,
 		llmtypes.CompactionMarker{ID: "marker", Method: "api", CreatedAt: time.Now().UTC()},
 	)
 	require.NoError(t, err)
+	record.CompactionHistory = history
 	record.ToolResults["archived-tool"] = tools.StructuredToolResult{ToolName: "bash", Success: true}
 	require.NoError(t, store.Save(t.Context(), record))
 	loaded, err := store.Load(t.Context(), record.ID)
@@ -73,10 +60,7 @@ func TestStoreCompactionHistoryRoundTripAndFork(t *testing.T) {
 
 func TestStoreHierarchyMetadataSurvivesSaveAndFork(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "hierarchy.db")
-	setupTestDB(t, dbPath)
-	store, err := NewStore(t.Context(), dbPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	store := NewStore(dbtest.Open(t, dbPath))
 	parent := conversations.NewConversationRecord("parent")
 	require.NoError(t, store.Save(t.Context(), parent))
 	fresh := conversations.NewConversationRecord("fresh")
@@ -119,12 +103,9 @@ func TestStore_BasicOperations(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_conversations.db")
-	setupTestDB(t, dbPath)
 
 	// Create store
-	store, err := NewStore(ctx, dbPath)
-	require.NoError(t, err)
-	defer store.Close()
+	store := NewStore(dbtest.Open(t, dbPath))
 
 	// Create test conversation record
 	now := time.Now()
@@ -174,7 +155,7 @@ func TestStore_BasicOperations(t *testing.T) {
 	}
 
 	// Test Save
-	err = store.Save(ctx, record)
+	err := store.Save(ctx, record)
 	require.NoError(t, err)
 
 	// Test Load
@@ -222,11 +203,8 @@ func TestStore_BasicOperations(t *testing.T) {
 func TestStore_DeleteRemovesRunnerAffinity(t *testing.T) {
 	ctx := t.Context()
 	dbPath := filepath.Join(t.TempDir(), "test_conversations.db")
-	setupTestDB(t, dbPath)
 
-	store, err := NewStore(ctx, dbPath)
-	require.NoError(t, err)
-	defer store.Close()
+	store := NewStore(dbtest.Open(t, dbPath))
 
 	now := time.Now().UTC()
 	record := conversations.ConversationRecord{
@@ -239,7 +217,7 @@ func TestStore_DeleteRemovesRunnerAffinity(t *testing.T) {
 		ToolResults: map[string]tools.StructuredToolResult{},
 	}
 	require.NoError(t, store.Save(ctx, record))
-	_, err = store.db.Writer.ExecContext(ctx, `
+	_, err := store.db.Writer.ExecContext(ctx, `
 		INSERT INTO runner_registrations (
 			id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -268,14 +246,11 @@ func TestStore_DeleteRemovesRunnerAffinity(t *testing.T) {
 func TestStore_ConversationRunnerAffinity(t *testing.T) {
 	ctx := t.Context()
 	dbPath := filepath.Join(t.TempDir(), "test_conversations.db")
-	setupTestDB(t, dbPath)
 
-	store, err := NewStore(ctx, dbPath)
-	require.NoError(t, err)
-	defer store.Close()
+	store := NewStore(dbtest.Open(t, dbPath))
 
 	now := time.Now().UTC()
-	_, err = store.db.Writer.ExecContext(ctx, `
+	_, err := store.db.Writer.ExecContext(ctx, `
 		INSERT INTO runner_registrations (
 			id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -329,12 +304,9 @@ func TestStore_Query(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_conversations.db")
-	setupTestDB(t, dbPath)
 
 	// Create store
-	store, err := NewStore(ctx, dbPath)
-	require.NoError(t, err)
-	defer store.Close()
+	store := NewStore(dbtest.Open(t, dbPath))
 
 	// Create test records
 	now := time.Now()
@@ -378,7 +350,7 @@ func TestStore_Query(t *testing.T) {
 	}
 
 	for _, record := range records {
-		err = store.Save(ctx, record)
+		err := store.Save(ctx, record)
 		require.NoError(t, err)
 	}
 
@@ -453,10 +425,7 @@ func TestStore_Query(t *testing.T) {
 func TestStore_QueryFiltersRunnerBeforePagination(t *testing.T) {
 	ctx := t.Context()
 	dbPath := filepath.Join(t.TempDir(), "test_runner_filter.db")
-	setupTestDB(t, dbPath)
-	store, err := NewStore(ctx, dbPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	store := NewStore(dbtest.Open(t, dbPath))
 
 	now := time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)
 	for _, record := range []conversations.ConversationRecord{
@@ -467,7 +436,7 @@ func TestStore_QueryFiltersRunnerBeforePagination(t *testing.T) {
 		require.NoError(t, store.Save(ctx, record))
 	}
 	for _, runnerID := range []string{"runner-one", "runner-two"} {
-		_, err = store.db.Writer.ExecContext(ctx, `
+		_, err := store.db.Writer.ExecContext(ctx, `
 			INSERT INTO runner_registrations (
 				id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -479,7 +448,7 @@ func TestStore_QueryFiltersRunnerBeforePagination(t *testing.T) {
 		"runner-one-older":    "runner-one",
 		"other-runner-newest": "runner-two",
 	} {
-		_, err = store.db.Writer.ExecContext(ctx, `
+		_, err := store.db.Writer.ExecContext(ctx, `
 			INSERT INTO conversation_runner_affinity (conversation_id, runner_id, created_at, updated_at)
 			VALUES (?, ?, ?, ?)
 		`, conversationID, runnerID, now, now)
@@ -490,7 +459,7 @@ func TestStore_QueryFiltersRunnerBeforePagination(t *testing.T) {
 		"runner-one-older":    now.Add(-time.Hour),
 		"other-runner-newest": now.Add(time.Hour),
 	} {
-		_, err = store.db.Writer.ExecContext(ctx, "UPDATE conversation_summaries SET updated_at = ? WHERE id = ?", updatedAt, conversationID)
+		_, err := store.db.Writer.ExecContext(ctx, "UPDATE conversation_summaries SET updated_at = ? WHERE id = ?", updatedAt, conversationID)
 		require.NoError(t, err)
 	}
 
@@ -524,12 +493,9 @@ func TestStore_DefaultSorting(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_default_sorting.db")
-	setupTestDB(t, dbPath)
 
 	// Create store
-	store, err := NewStore(ctx, dbPath)
-	require.NoError(t, err)
-	defer store.Close()
+	store := NewStore(dbtest.Open(t, dbPath))
 
 	// Create test records with different timestamps
 	now := time.Now()
@@ -571,7 +537,7 @@ func TestStore_DefaultSorting(t *testing.T) {
 
 	// Save all records
 	for _, record := range records {
-		err = store.Save(ctx, record)
+		err := store.Save(ctx, record)
 		require.NoError(t, err)
 	}
 
@@ -712,15 +678,12 @@ func TestStore_SchemaValidation(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_conversations.db")
-	setupTestDB(t, dbPath)
 
 	// Create store
-	store, err := NewStore(ctx, dbPath)
-	require.NoError(t, err)
-	defer store.Close()
+	store := NewStore(dbtest.Open(t, dbPath))
 
 	// Test schema validation
-	err = store.validateSchema()
+	err := store.validateSchema()
 	require.NoError(t, err)
 
 	// Test migration count matches expected
@@ -735,12 +698,9 @@ func TestStore_Migrations(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_conversations.db")
-	setupTestDB(t, dbPath)
 
 	// Create store - this should run migrations
-	store, err := NewStore(ctx, dbPath)
-	require.NoError(t, err)
-	defer store.Close()
+	store := NewStore(dbtest.Open(t, dbPath))
 
 	// Check that all migrations are applied
 	count, err := store.getAppliedMigrationCount(ctx)
@@ -767,16 +727,13 @@ func TestStore_WALMode(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_wal.db")
-	setupTestDB(t, dbPath)
 
 	// Create store
-	store, err := NewStore(ctx, dbPath)
-	require.NoError(t, err)
-	defer store.Close()
+	store := NewStore(dbtest.Open(t, dbPath))
 
 	// Verify WAL mode is enabled
 	var journalMode string
-	err = store.db.Writer.Get(&journalMode, "PRAGMA journal_mode")
+	err := store.db.Writer.Get(&journalMode, "PRAGMA journal_mode")
 	require.NoError(t, err)
 	assert.Equal(t, "wal", strings.ToLower(journalMode))
 
@@ -830,12 +787,9 @@ func TestStore_DatabaseIntegration(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_integration.db")
-	setupTestDB(t, dbPath)
 
 	// Create store
-	store, err := NewStore(ctx, dbPath)
-	require.NoError(t, err)
-	defer store.Close()
+	store := NewStore(dbtest.Open(t, dbPath))
 
 	// Test with complex data that exercises JSON fields
 	now := time.Now().UTC().Truncate(time.Second)
@@ -900,7 +854,7 @@ func TestStore_DatabaseIntegration(t *testing.T) {
 	}
 
 	// Save complex record
-	err = store.Save(ctx, record)
+	err := store.Save(ctx, record)
 	require.NoError(t, err)
 
 	// Load and verify all data is preserved
@@ -955,12 +909,9 @@ func TestStore_NullHandling(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_null.db")
-	setupTestDB(t, dbPath)
 
 	// Create store
-	store, err := NewStore(ctx, dbPath)
-	require.NoError(t, err)
-	defer store.Close()
+	store := NewStore(dbtest.Open(t, dbPath))
 
 	// Test record with empty/null fields
 	now := time.Now().UTC().Truncate(time.Second)
@@ -977,7 +928,7 @@ func TestStore_NullHandling(t *testing.T) {
 	}
 
 	// Save record
-	err = store.Save(ctx, record)
+	err := store.Save(ctx, record)
 	require.NoError(t, err)
 
 	// Verify in database using direct SQL query
@@ -1000,12 +951,9 @@ func TestStore_ConcurrentAccess(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_concurrent.db")
-	setupTestDB(t, dbPath)
 
 	// Create store
-	store, err := NewStore(ctx, dbPath)
-	require.NoError(t, err)
-	defer store.Close()
+	store := NewStore(dbtest.Open(t, dbPath))
 
 	// Test concurrent writes (WAL mode should handle this)
 	const numGoroutines = 3       // Further reduced for stability
@@ -1112,12 +1060,9 @@ func TestStore_DirectDatabaseAccess(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_direct.db")
-	setupTestDB(t, dbPath)
 
 	// Create store
-	store, err := NewStore(ctx, dbPath)
-	require.NoError(t, err)
-	defer store.Close()
+	store := NewStore(dbtest.Open(t, dbPath))
 
 	// Test direct database access using sqlx
 	now := time.Now().UTC().Truncate(time.Second)
@@ -1151,7 +1096,7 @@ func TestStore_DirectDatabaseAccess(t *testing.T) {
 		)
 	`
 
-	_, err = store.db.Writer.NamedExec(query, dbRecord)
+	_, err := store.db.Writer.NamedExec(query, dbRecord)
 	require.NoError(t, err)
 
 	// Insert corresponding summary
@@ -1204,12 +1149,9 @@ func TestStore_TimestampBehavior(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_timestamps.db")
-	setupTestDB(t, dbPath)
 
 	// Create store
-	store, err := NewStore(ctx, dbPath)
-	require.NoError(t, err)
-	defer store.Close()
+	store := NewStore(dbtest.Open(t, dbPath))
 
 	// Test initial save - both timestamps should be set
 	originalCreatedAt := time.Now().UTC().Add(-1 * time.Hour) // 1 hour ago
@@ -1231,7 +1173,7 @@ func TestStore_TimestampBehavior(t *testing.T) {
 	}
 
 	// Save the record for the first time
-	err = store.Save(ctx, record)
+	err := store.Save(ctx, record)
 	require.NoError(t, err)
 
 	// Load the record to check initial timestamps
@@ -1304,20 +1246,11 @@ func TestStore_TimestampBehavior(t *testing.T) {
 func TestStore_ErrorScenarios(t *testing.T) {
 	ctx := context.Background()
 
-	// Test with invalid database path
-	t.Run("invalid database path", func(t *testing.T) {
-		_, err := NewStore(ctx, "/invalid/path/db.sqlite")
-		assert.Error(t, err)
-	})
-
 	// Test with valid store for other error scenarios
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_errors.db")
-	setupTestDB(t, dbPath)
 
-	store, err := NewStore(ctx, dbPath)
-	require.NoError(t, err)
-	defer store.Close()
+	store := NewStore(dbtest.Open(t, dbPath))
 
 	// Test load non-existent record
 	t.Run("load non-existent record", func(t *testing.T) {
@@ -1328,17 +1261,16 @@ func TestStore_ErrorScenarios(t *testing.T) {
 
 	// Test with closed database
 	t.Run("operations on closed database", func(t *testing.T) {
-		tmpDir2 := t.TempDir()
-		dbPath2 := filepath.Join(tmpDir2, "test_closed.db")
+		database := dbtest.Open(t, filepath.Join(t.TempDir(), "test_closed.db"))
+		store2 := NewStore(database)
 
-		store2, err := NewStore(ctx, dbPath2)
+		// Closing the store leaves the caller's handle open.
+		require.NoError(t, store2.Close())
+		_, err := store2.Query(ctx, conversations.QueryOptions{})
 		require.NoError(t, err)
 
-		// Close the store
-		err = store2.Close()
-		require.NoError(t, err)
-
-		// Try to use after close
+		// Try to use after the owner closes the handle
+		require.NoError(t, database.Close())
 		_, err = store2.Query(ctx, conversations.QueryOptions{})
 		assert.Error(t, err)
 	})

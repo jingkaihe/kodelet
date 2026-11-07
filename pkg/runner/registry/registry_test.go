@@ -14,8 +14,7 @@ import (
 	"time"
 
 	conversationsqlite "github.com/jingkaihe/kodelet/pkg/conversations/sqlite"
-	"github.com/jingkaihe/kodelet/pkg/db"
-	"github.com/jingkaihe/kodelet/pkg/db/migrations"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
@@ -1675,13 +1674,9 @@ func TestSessionRequiresRegistrationBeforeOtherRequests(t *testing.T) {
 
 func TestRegistryRestoresStableIdentityAffinityAndLostRuns(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "storage.db")
-	database, err := db.Open(t.Context(), dbPath)
-	require.NoError(t, err)
-	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
-	require.NoError(t, database.Close())
+	database := dbtest.Open(t, dbPath)
 
-	firstPersistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
-	require.NoError(t, err)
+	firstPersistence := NewSQLitePersistence(database, "owner-one")
 	firstRegistry, err := New(t.Context(), Options{
 		HeartbeatInterval: time.Hour,
 		HeartbeatTimeout:  2 * time.Hour,
@@ -1699,8 +1694,8 @@ func TestRegistryRestoresStableIdentityAffinityAndLostRuns(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, firstRegistry.CommitConversationAffinity(t.Context(), "conversation-one"))
 
-	secondPersistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
-	require.NoError(t, err)
+	// A new handle stands in for the restarted process.
+	secondPersistence := NewSQLitePersistence(dbtest.Open(t, dbPath), "owner-one")
 	secondRegistry, err := New(t.Context(), Options{
 		HeartbeatInterval: time.Hour,
 		HeartbeatTimeout:  2 * time.Hour,
@@ -1740,12 +1735,8 @@ func TestRegistryRestoresStableIdentityAffinityAndLostRuns(t *testing.T) {
 
 func TestSQLitePersistenceBoundsRestoredHistoryAndPrunesTerminalOrphans(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "storage.db")
-	database, err := db.Open(t.Context(), dbPath)
-	require.NoError(t, err)
-	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
-	require.NoError(t, database.Close())
-	persistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
-	require.NoError(t, err)
+	database := dbtest.Open(t, dbPath)
+	persistence := NewSQLitePersistence(database, "owner-one")
 	t.Cleanup(func() { _ = persistence.Close() })
 	now := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
 	require.NoError(t, persistence.SaveRunner(t.Context(), Runner{
@@ -1756,7 +1747,7 @@ func TestSQLitePersistenceBoundsRestoredHistoryAndPrunesTerminalOrphans(t *testi
 		CreatedAt: now,
 		UpdatedAt: now,
 	}))
-	_, err = persistence.db.Writer.ExecContext(t.Context(), `
+	_, err := persistence.db.Writer.ExecContext(t.Context(), `
 		INSERT INTO conversations (id, raw_messages, provider, usage, created_at, updated_at, metadata, tool_results)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`, "conversation-one", `[]`, "openai", `{}`, now, now, `{}`, `{}`)
@@ -1862,15 +1853,9 @@ func TestRemoveRunnerRequiresOfflineAndClearsConversationAffinity(t *testing.T) 
 
 func TestRemoveRunnerPreservesMovedConversationActiveRun(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "storage.db")
-	database, err := db.Open(t.Context(), dbPath)
-	require.NoError(t, err)
-	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
-	require.NoError(t, database.Close())
-	conversationStore, err := conversationsqlite.NewStore(t.Context(), dbPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, conversationStore.Close()) })
-	persistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
-	require.NoError(t, err)
+	database := dbtest.Open(t, dbPath)
+	conversationStore := conversationsqlite.NewStore(database)
+	persistence := NewSQLitePersistence(database, "owner-one")
 	registry, err := New(t.Context(), Options{
 		HeartbeatInterval: time.Hour,
 		HeartbeatTimeout:  2 * time.Hour,
@@ -1939,13 +1924,8 @@ func TestRemoveRunnerPreservesMovedConversationActiveRun(t *testing.T) {
 
 func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "storage.db")
-	database, err := db.Open(t.Context(), dbPath)
-	require.NoError(t, err)
-	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
-	require.NoError(t, database.Close())
-	conversationStore, err := conversationsqlite.NewStore(t.Context(), dbPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, conversationStore.Close()) })
+	database := dbtest.Open(t, dbPath)
+	conversationStore := conversationsqlite.NewStore(database)
 	conversation := conversationtypes.ConversationRecord{
 		ID:          "conversation-one",
 		CWD:         "/work/project",
@@ -1963,8 +1943,7 @@ func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 	}
 	require.NoError(t, conversationStore.Save(t.Context(), conversation))
 
-	firstPersistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
-	require.NoError(t, err)
+	firstPersistence := NewSQLitePersistence(database, "owner-one")
 	firstRegistry, err := New(t.Context(), Options{
 		HeartbeatInterval: time.Hour,
 		HeartbeatTimeout:  2 * time.Hour,
@@ -2020,8 +1999,8 @@ func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 	assert.Equal(t, 1, result.RemovedConversationAffinities)
 	require.NoError(t, firstRegistry.Close())
 
-	secondPersistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
-	require.NoError(t, err)
+	// A new handle stands in for the restarted process.
+	secondPersistence := NewSQLitePersistence(dbtest.Open(t, dbPath), "owner-one")
 	secondRegistry, err := New(t.Context(), Options{
 		HeartbeatInterval: time.Hour,
 		HeartbeatTimeout:  2 * time.Hour,
@@ -2088,15 +2067,9 @@ func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 
 func TestRemoveRunnerClearsPersistedMetadataWithoutDurableAffinity(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "storage.db")
-	database, err := db.Open(t.Context(), dbPath)
-	require.NoError(t, err)
-	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
-	require.NoError(t, database.Close())
-	conversationStore, err := conversationsqlite.NewStore(t.Context(), dbPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, conversationStore.Close()) })
-	persistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
-	require.NoError(t, err)
+	database := dbtest.Open(t, dbPath)
+	conversationStore := conversationsqlite.NewStore(database)
+	persistence := NewSQLitePersistence(database, "owner-one")
 	registry, err := New(t.Context(), Options{
 		HeartbeatInterval: time.Hour,
 		HeartbeatTimeout:  2 * time.Hour,
@@ -2144,13 +2117,9 @@ func TestRemoveRunnerClearsPersistedMetadataWithoutDurableAffinity(t *testing.T)
 
 func TestRemoveRunnerClearsAffinityWithoutConversationRecord(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "storage.db")
-	database, err := db.Open(t.Context(), dbPath)
-	require.NoError(t, err)
-	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
-	require.NoError(t, database.Close())
+	database := dbtest.Open(t, dbPath)
 
-	persistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
-	require.NoError(t, err)
+	persistence := NewSQLitePersistence(database, "owner-one")
 	registry, err := New(t.Context(), Options{
 		HeartbeatInterval: time.Hour,
 		HeartbeatTimeout:  2 * time.Hour,
@@ -2646,13 +2615,9 @@ func TestConversationAffinityProfileLock(t *testing.T) {
 
 func TestSQLitePersistenceReadsConversationAffinity(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "storage.db")
-	database, err := db.Open(t.Context(), dbPath)
-	require.NoError(t, err)
-	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
-	require.NoError(t, database.Close())
+	database := dbtest.Open(t, dbPath)
 
-	persistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
-	require.NoError(t, err)
+	persistence := NewSQLitePersistence(database, "owner-one")
 	now := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
 	require.NoError(t, persistence.SaveRunner(t.Context(), Runner{
 		ID:        "runner-one",

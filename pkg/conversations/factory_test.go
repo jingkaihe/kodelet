@@ -2,7 +2,6 @@ package conversations
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -11,62 +10,12 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/conversations/sqlite"
 	convdb "github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	_ "modernc.org/sqlite"
 )
-
-func lockSQLiteDatabase(t *testing.T, dbPath string) func() {
-	t.Helper()
-
-	db, err := sql.Open("sqlite", dbPath)
-	require.NoError(t, err)
-
-	_, err = db.Exec("CREATE TABLE IF NOT EXISTS t (id INTEGER PRIMARY KEY)")
-	require.NoError(t, err)
-
-	_, err = db.Exec("BEGIN EXCLUSIVE")
-	require.NoError(t, err)
-
-	return func() {
-		_, _ = db.Exec("ROLLBACK")
-		_ = db.Close()
-	}
-}
-
-func TestDirectSQLiteReturnProducesTypedNilInterfaceOnError(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "storage.db")
-	unlock := lockSQLiteDatabase(t, dbPath)
-	defer unlock()
-
-	directReturn := func(ctx context.Context, dbPath string) (ConversationStore, error) {
-		return sqlite.NewStore(ctx, dbPath)
-	}
-
-	store, err := directReturn(context.Background(), dbPath)
-
-	require.Error(t, err)
-	assert.False(t, store == nil, "direct interface return should preserve typed-nil and reproduce the bug")
-}
-
-func TestNewConversationStore_ReturnsNilInterfaceOnError(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "storage.db")
-	unlock := lockSQLiteDatabase(t, dbPath)
-	defer unlock()
-
-	store, err := NewConversationStore(context.Background(), &Config{
-		StoreType: "sqlite",
-		BasePath:  tmpDir,
-	})
-
-	require.Error(t, err)
-	assert.True(t, store == nil, "store interface should be nil when initialization fails")
-}
 
 func TestDefaultConfigUsesKODELETBasePath(t *testing.T) {
 	basePath := filepath.Join(t.TempDir(), "kodelet-home")
@@ -89,11 +38,6 @@ func TestDefaultStoreHelpersReturnBasePathErrors(t *testing.T) {
 	assert.Nil(t, config)
 	require.Error(t, err)
 
-	store, err := NewConversationStore(context.Background(), nil)
-	assert.Nil(t, store)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to create default config")
-
 	service, err := GetDefaultConversationService(context.Background())
 	assert.Nil(t, service)
 	require.Error(t, err)
@@ -104,44 +48,17 @@ func TestDefaultStoreHelpersReturnBasePathErrors(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestNewConversationStoreCreatesSQLiteStorageForDefaultAndUnknownStoreType(t *testing.T) {
-	ctx := context.Background()
+func TestNewConversationStoreUsesCallersDatabase(t *testing.T) {
+	database := dbtest.OpenTemp(t)
+	store := NewConversationStore(database)
+	require.IsType(t, &sqlite.Store{}, store)
+	require.NoError(t, store.Save(t.Context(), convtypes.NewConversationRecord("shared")))
 
-	for _, tt := range []struct {
-		name   string
-		config *Config
-	}{
-		{
-			name:   "nil config uses defaults",
-			config: nil,
-		},
-		{
-			name: "unknown store type defaults to sqlite",
-			config: &Config{
-				StoreType: "unknown",
-				BasePath:  t.TempDir(),
-			},
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			basePath := t.TempDir()
-			config := tt.config
-			if config == nil {
-				t.Setenv("KODELET_BASE_PATH", basePath)
-			}
-
-			store, err := NewConversationStore(ctx, config)
-
-			require.NoError(t, err)
-			require.NotNil(t, store)
-			require.NoError(t, store.Close())
-			if config == nil {
-				assert.FileExists(t, filepath.Join(basePath, "storage.db"))
-			} else {
-				assert.FileExists(t, filepath.Join(config.BasePath, "storage.db"))
-			}
-		})
-	}
+	// The caller owns the handle: closing the store must leave it usable.
+	require.NoError(t, store.Close())
+	var count int
+	require.NoError(t, database.Reader.GetContext(t.Context(), &count, "SELECT COUNT(*) FROM conversations"))
+	assert.Equal(t, 1, count)
 }
 
 func TestGetConversationStoreHonorsStoreTypeOverride(t *testing.T) {
@@ -162,14 +79,8 @@ func TestGetMostRecentConversationID(t *testing.T) {
 	basePath := t.TempDir()
 	t.Setenv("KODELET_BASE_PATH", basePath)
 
-	database, err := convdb.Open(ctx, filepath.Join(basePath, "storage.db"))
-	require.NoError(t, err)
-	runner := convdb.NewMigrationRunner(database)
-	require.NoError(t, runner.Run(ctx, migrations.All()))
-	require.NoError(t, database.Close())
-
-	store, err := NewConversationStore(ctx, &Config{StoreType: "sqlite", BasePath: basePath})
-	require.NoError(t, err)
+	database := dbtest.Open(t, filepath.Join(basePath, "storage.db"))
+	store := NewConversationStore(database)
 	now := time.Now().UTC().Add(-time.Hour)
 	records := []convtypes.ConversationRecord{
 		{
@@ -192,15 +103,10 @@ func TestGetMostRecentConversationID(t *testing.T) {
 	for _, record := range records {
 		require.NoError(t, store.Save(ctx, record))
 	}
-	require.NoError(t, store.Close())
-
-	database, err = convdb.Open(ctx, filepath.Join(basePath, "storage.db"))
-	require.NoError(t, err)
-	_, err = database.Writer.ExecContext(ctx, `UPDATE conversation_summaries SET updated_at = ? WHERE id = ?`, now, "older")
+	_, err := database.Writer.ExecContext(ctx, `UPDATE conversation_summaries SET updated_at = ? WHERE id = ?`, now, "older")
 	require.NoError(t, err)
 	_, err = database.Writer.ExecContext(ctx, `UPDATE conversation_summaries SET updated_at = ? WHERE id = ?`, now.Add(time.Minute), "newer")
 	require.NoError(t, err)
-	require.NoError(t, database.Close())
 
 	conversationID, err := GetMostRecentConversationID(ctx)
 

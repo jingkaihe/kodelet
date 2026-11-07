@@ -10,7 +10,6 @@ import (
 	"image/png"
 	"io"
 	"net"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -18,8 +17,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/artifacts"
 	"github.com/jingkaihe/kodelet/pkg/codemode"
 	"github.com/jingkaihe/kodelet/pkg/conversations/sqlite"
-	"github.com/jingkaihe/kodelet/pkg/db"
-	"github.com/jingkaihe/kodelet/pkg/db/migrations"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -32,17 +30,10 @@ import (
 func TestCodeExecutionArtifactSelectionSurvivesHooksSaveAndRestart(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
-	path := filepath.Join(t.TempDir(), "storage.db")
-	database, err := db.Open(t.Context(), path)
+	database := dbtest.OpenTemp(t)
+	images, err := artifacts.Open(t.Context(), database)
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, database.Close()) })
-	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
-	images, err := artifacts.Open(t.Context(), path)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, images.Close()) })
-	store, err := sqlite.NewStore(t.Context(), path)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	store := sqlite.NewStore(database)
 	var content bytes.Buffer
 	require.NoError(t, png.Encode(&content, image.NewRGBA(image.Rect(0, 0, 1, 1))))
 	foreign, err := images.Put(t.Context(), "other-conversation", "other-call", tooltypes.ToolAttachment{Type: "image"}, bytes.NewReader(content.Bytes()))
@@ -183,8 +174,8 @@ return {foreign: %q, keyOnly: {[reply.attachments[2].artifactId]: true},
 
 	_, err = database.Writer.ExecContext(t.Context(), `UPDATE image_artifacts SET created_at = ?`, time.Now().UTC().Add(-48*time.Hour))
 	require.NoError(t, err)
-	require.NoError(t, images.Close())
-	images, err = artifacts.Open(t.Context(), path)
+	// Reopening repeats the startup sweep.
+	images, err = artifacts.Open(t.Context(), database)
 	require.NoError(t, err)
 	for _, conversationID := range []string{parent.ID, fork.ID} {
 		for _, attachment := range execution.StructuredResult.Attachments {

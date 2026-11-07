@@ -18,6 +18,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/controlplane"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
@@ -360,9 +361,7 @@ func TestDaemonConversationMoveCLI(t *testing.T) {
 	require.NoError(t, err)
 	path, err := db.DefaultDBPath()
 	require.NoError(t, err)
-	persistence, err := registry.NewSQLitePersistence(ctx, path, "")
-	require.NoError(t, err)
-	defer persistence.Close()
+	persistence := registry.NewSQLitePersistence(dbtest.Open(t, path), "")
 	for _, id := range []string{"offline-one", "offline-two"} {
 		require.NoError(t, persistence.SaveRunner(ctx, registry.Runner{
 			ID: id, DisplayName: id + " name", Status: registry.RunnerStatusOffline,

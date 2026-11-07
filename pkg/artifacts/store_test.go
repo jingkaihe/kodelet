@@ -20,25 +20,18 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/db"
-	"github.com/jingkaihe/kodelet/pkg/db/migrations"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func testStore(t *testing.T) (*Store, string) {
+func testStore(t *testing.T) (*Store, *db.DB) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "storage.db")
-	database, err := db.Open(t.Context(), path)
+	database := dbtest.OpenTemp(t)
+	store, err := Open(t.Context(), database)
 	require.NoError(t, err)
-	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
-	require.NoError(t, database.Close())
-	store, err := Open(t.Context(), path)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		require.NoError(t, store.Close())
-	})
-	return store, path
+	return store, database
 }
 
 func testPNG(t *testing.T) []byte {
@@ -49,7 +42,7 @@ func testPNG(t *testing.T) []byte {
 }
 
 func TestPutGetAndScope(t *testing.T) {
-	store, path := testStore(t)
+	store, database := testStore(t)
 	data := testPNG(t)
 	input := tooltypes.ToolAttachment{
 		Type:       "image",
@@ -81,7 +74,7 @@ func TestPutGetAndScope(t *testing.T) {
 	expected := attachment
 	expected.Alt = "" // Captions belong to the tool result, not shared image metadata.
 	assert.Equal(t, expected, got)
-	assert.Equal(t, filepath.Join(filepath.Dir(path), "artifacts", attachment.ArtifactID), localPath)
+	assert.Equal(t, filepath.Join(filepath.Dir(database.Path()), "artifacts", attachment.ArtifactID), localPath)
 	stored, err := os.ReadFile(localPath)
 	require.NoError(t, err)
 	assert.Equal(t, data, stored)
@@ -101,10 +94,9 @@ func TestPutGetAndScope(t *testing.T) {
 	second, err := store.Put(t.Context(), "conversation", "call", input, bytes.NewReader(data))
 	require.NoError(t, err)
 	assert.NotEqual(t, attachment.ArtifactID, second.ArtifactID)
-	require.NoError(t, store.Close())
-	reopened, err := Open(t.Context(), path)
+	// Reopening repeats the startup sweep.
+	reopened, err := Open(t.Context(), database)
 	require.NoError(t, err)
-	defer reopened.Close()
 	_, _, err = reopened.Get(t.Context(), "conversation", attachment.ArtifactID)
 	require.NoError(t, err)
 	_, err = reopened.db.Writer.Exec(`DELETE FROM conversation_artifacts WHERE artifact_id = ?`, attachment.ArtifactID)
@@ -210,7 +202,7 @@ func TestGIFBudgetAndCorruptLaterFrames(t *testing.T) {
 }
 
 func TestStartupSweep(t *testing.T) {
-	store, path := testStore(t)
+	store, database := testStore(t)
 	old := time.Now().UTC().Add(-48 * time.Hour)
 	data := testPNG(t)
 	put := func(conversationID string, age bool) tooltypes.ToolAttachment {
@@ -256,10 +248,9 @@ func TestStartupSweep(t *testing.T) {
 			require.NoError(t, os.Chtimes(file, old, old))
 		}
 	}
-	require.NoError(t, store.Close())
-	reopened, err := Open(t.Context(), path)
+	// Reopening repeats the startup sweep.
+	reopened, err := Open(t.Context(), database)
 	require.NoError(t, err)
-	defer reopened.Close()
 	_, _, err = reopened.Get(t.Context(), "abandoned", abandoned.ArtifactID)
 	assert.ErrorIs(t, err, ErrNotFound)
 	for _, name := range []string{abandoned.ArtifactID, ".upload-orphan", "art_orphan"} {

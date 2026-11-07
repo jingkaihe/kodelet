@@ -296,11 +296,7 @@ func TestExpiredEnrollmentApprovalDoesNotPublishOrPersistRunner(t *testing.T) {
 		"https://kodelet.example/runner/enroll",
 	)
 	require.NoError(t, err)
-	var sequence int
-	var name, dbPath string
-	require.NoError(t, store.db.Writer.QueryRowxContext(t.Context(), `PRAGMA database_list`).Scan(&sequence, &name, &dbPath))
-	persistence, err := runnerregistry.NewSQLitePersistence(t.Context(), dbPath, controlPlaneOwnerID)
-	require.NoError(t, err)
+	persistence := runnerregistry.NewSQLitePersistence(store.db, controlPlaneOwnerID)
 	registry, err := runnerregistry.New(t.Context(), runnerregistry.Options{
 		HeartbeatInterval: time.Hour,
 		HeartbeatTimeout:  2 * time.Hour,
@@ -404,11 +400,7 @@ func newRunnerAuthIntegrationServer(t *testing.T, mode RunnerAuthMode) (*Server,
 	insertAuthStoreTestRunner(t, store, "runner-proof", "host-proof", "/work/proof", "proof")
 	accessToken := insertAuthStoreTestCredential(t, store, "credential-proof", "runner-proof", publicKey, clock.current)
 
-	var sequence int
-	var name, dbPath string
-	require.NoError(t, store.db.Writer.QueryRowxContext(t.Context(), `PRAGMA database_list`).Scan(&sequence, &name, &dbPath))
-	persistence, err := runnerregistry.NewSQLitePersistence(context.Background(), dbPath, controlPlaneOwnerID)
-	require.NoError(t, err)
+	persistence := runnerregistry.NewSQLitePersistence(store.db, controlPlaneOwnerID)
 	registry, err := runnerregistry.New(context.Background(), runnerregistry.Options{
 		HeartbeatInterval: time.Hour,
 		HeartbeatTimeout:  2 * time.Hour,

@@ -20,22 +20,26 @@ import (
 
 // Store implements ConversationStore using SQLite database
 type Store struct {
-	dbPath string
-	db     *db.DB
+	db *db.DB
+	// owned reports whether Close closes db. Only OpenStore owns its handle.
+	owned bool
 }
 
-// NewStore creates a new SQLite-based conversation store.
-// Note: Migrations should be run via db.RunMigrations() at CLI startup before calling this.
-func NewStore(ctx context.Context, dbPath string) (*Store, error) {
-	sqlDB, err := db.Open(ctx, dbPath)
+// NewStore returns a conversation store backed by database. The caller owns
+// database and closes it after the store is no longer used; Store.Close does
+// not close it. Migrations must have been applied.
+func NewStore(database *db.DB) *Store {
+	return &Store{db: database}
+}
+
+// OpenStore opens a conversation store with its own database handle, which
+// Close releases. Prefer NewStore with the process's shared handle.
+func OpenStore(ctx context.Context, dbPath string) (*Store, error) {
+	database, err := db.Open(ctx, dbPath)
 	if err != nil {
 		return nil, err
 	}
-
-	return &Store{
-		dbPath: dbPath,
-		db:     sqlDB,
-	}, nil
+	return &Store{db: database, owned: true}, nil
 }
 
 // Save persists a conversation record to the database using UPSERT to preserve created_at timestamps
@@ -311,7 +315,7 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	if err := artifacts.RemoveFiles(s.dbPath, removedArtifacts); err != nil {
+	if err := artifacts.RemoveFiles(s.db.Path(), removedArtifacts); err != nil {
 		logger.G(ctx).WithError(err).Warn("conversation deleted; orphan image files will be retried at startup")
 	}
 	return nil
@@ -511,14 +515,11 @@ func listCWDs(ctx context.Context, queryer sqlx.QueryerContext) ([]string, error
 	return cwds, nil
 }
 
-// Close closes the database connection
+// Close closes the database handle if the store opened it with OpenStore.
+// A store from NewStore leaves its handle to the caller.
 func (s *Store) Close() error {
-	if s == nil || s.db == nil {
+	if s == nil || s.db == nil || !s.owned {
 		return nil
 	}
-
-	if s.db != nil {
-		return s.db.Close()
-	}
-	return nil
+	return s.db.Close()
 }

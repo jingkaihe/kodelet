@@ -22,8 +22,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/artifacts"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/db"
-	"github.com/jingkaihe/kodelet/pkg/db/migrations"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
@@ -478,14 +477,8 @@ func (c staticToolResultController) ExecuteTool(
 }
 
 func TestImageMaterializationFailurePreservesCodeExecutionResult(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "kodelet.db")
-	database, err := db.Open(t.Context(), path)
+	store, err := artifacts.Open(t.Context(), dbtest.Open(t, filepath.Join(t.TempDir(), "kodelet.db")))
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, database.Close()) })
-	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
-	store, err := artifacts.Open(t.Context(), path)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
 	var encoded bytes.Buffer
 	require.NoError(t, png.Encode(&encoded, image.NewNRGBA(image.Rect(0, 0, 8, 8))))
 	stored, err := store.Put(
