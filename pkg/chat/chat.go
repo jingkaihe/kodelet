@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -1741,7 +1742,7 @@ func (h *chatMessageHandler) HandleDone() {}
 
 func (h *chatMessageHandler) HandleUsage(usage llmtypes.Usage) {
 	h.usageMu.Lock()
-	if h.hasLastUsage && h.lastUsage == usage {
+	if h.hasLastUsage && reflect.DeepEqual(h.lastUsage, usage) {
 		h.usageMu.Unlock()
 		return
 	}

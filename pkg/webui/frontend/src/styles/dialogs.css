@@ -1413,6 +1413,148 @@
   font-size: 0.72rem;
 }
 
+.about-kodelet-tabs {
+  display: flex;
+  flex: none;
+  gap: 1.25rem;
+  margin: 1rem 1.25rem 0;
+  border-bottom: 1px solid var(--sidebar-stroke-strong);
+}
+
+.about-kodelet-tabs button {
+  border-bottom: 2px solid transparent;
+  padding: 0.5rem 0.15rem;
+  color: var(--kodelet-muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.about-kodelet-tabs button[aria-selected="true"] {
+  border-color: var(--kodelet-link);
+  color: var(--kodelet-link);
+}
+
+.about-kodelet-content:focus-visible {
+  outline: 2px solid var(--kodelet-link);
+  outline-offset: -2px;
+}
+
+.about-context-total {
+  margin: 0.5rem 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.about-context-meter {
+  display: flex;
+  width: 100%;
+  height: 0.85rem;
+  overflow: hidden;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--kodelet-muted) 14%, transparent);
+}
+
+.about-context-segment {
+  flex: none;
+  height: 100%;
+  background: var(--context-color);
+}
+
+.about-context-swatch {
+  width: 0.6rem;
+  height: 0.6rem;
+  flex: none;
+  margin-top: 0.32rem;
+  border-radius: 1px;
+  background: var(--context-color);
+}
+
+.about-context-unclassified {
+  --context-color: var(--kodelet-muted);
+}
+
+.about-context-available {
+  --context-color: transparent;
+}
+
+.about-context-estimate {
+  margin: 0.25rem 0;
+}
+
+.about-context-breakdown {
+  margin: 1rem 0 0;
+}
+
+.about-context-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.2rem 0.65rem;
+  margin-top: 0.5rem;
+}
+
+.about-context-row dt {
+  display: flex;
+  gap: 0.5rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.about-context-row dd {
+  min-width: 0;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.about-context-values {
+  display: flex;
+  gap: 0.65rem;
+  white-space: nowrap;
+}
+
+.about-context-share {
+  display: inline-block;
+  min-width: 3.75rem;
+  color: var(--kodelet-muted);
+  text-align: right;
+}
+
+.about-context-detail {
+  grid-column: 1 / -1;
+  color: var(--kodelet-muted);
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}
+
+.about-context-system {
+  --context-color: var(--kodelet-link);
+}
+.about-context-definitions {
+  --context-color: var(--kodelet-syntax-number);
+}
+.about-context-tool {
+  --context-color: var(--kodelet-orange);
+}
+.about-context-input {
+  --context-color: var(--kodelet-blue);
+}
+.about-context-output {
+  --context-color: var(--kodelet-success);
+}
+.about-context-other {
+  --context-color: var(--kodelet-warning);
+}
+
+@media (max-width: 420px) {
+  .about-context-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .about-context-values {
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+}
+
 .keyboard-shortcuts-list {
   margin: 0.65rem 0 0;
 }

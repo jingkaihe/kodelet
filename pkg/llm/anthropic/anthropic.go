@@ -196,6 +196,7 @@ func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 
 // AddUserMessage adds a user message with optional images to the thread
 func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
+	t.SetContextBreakdown(nil)
 	contentBlocks := t.userImageContentBlocks(ctx, imagePaths)
 	contentBlocks = append(contentBlocks, anthropic.NewTextBlock(message))
 
@@ -205,6 +206,7 @@ func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths 
 
 // AddAssistantMessage appends a provider-native assistant message without calling the model.
 func (t *Thread) AddAssistantMessage(_ context.Context, message string) {
+	t.SetContextBreakdown(nil)
 	t.messages = append(t.messages, anthropic.NewAssistantMessage(anthropic.NewTextBlock(message)))
 }
 
@@ -354,11 +356,13 @@ func (t *Thread) SendMessage(
 		originalHistory := t.GetCompactionHistory()
 		originalResults := t.GetStructuredToolResults()
 		originalMetadata := t.GetMetadata()
+		originalBreakdown := t.GetUsage().ContextBreakdown
 		defer func() {
 			t.messages = originalMessages
 			t.SetCompactionHistory(originalHistory)
 			t.SetStructuredToolResults(originalResults)
 			t.RestoreMessageMetadata(originalMetadata)
+			t.SetContextBreakdown(originalBreakdown)
 		}()
 	}
 
@@ -715,6 +719,12 @@ func (t *Thread) processMessageExchange(
 			t.PublishCompaction(ctx, t, handler, previousMarkerID, false)
 		}
 	}
+	refreshContext := func() {
+		t.SetContextBreakdown(base.EstimateContextBreakdown(
+			messageParams.System, messageParams.Tools, t.messages, t.Config.EffectiveCodeMode(),
+		))
+	}
+	refreshContext()
 
 	// Add a tracing event for API call start
 	telemetry.AddEvent(ctx, "api_call_start",
@@ -740,6 +750,7 @@ func (t *Thread) processMessageExchange(
 		}
 		t.messages = append(t.messages, response.ToParam())
 		t.updateUsage(response, model)
+		refreshContext()
 		if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
 			usageHandler.HandleUsage(t.GetUsage())
 		}
@@ -812,6 +823,10 @@ func (t *Thread) processMessageExchange(
 	// Add all tool results as a single user message (required by Anthropic API)
 	if len(toolResultBlocks) > 0 {
 		t.messages = append(t.messages, anthropic.NewUserMessage(toolResultBlocks...))
+		refreshContext()
+		if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
+			usageHandler.HandleUsage(t.GetUsage())
+		}
 	}
 
 	toolUseCount := len(toolResults)

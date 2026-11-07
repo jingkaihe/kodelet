@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useRef } from 'react';
 
-// Focus management for informational dialogs whose interactive elements are buttons.
+// Focus management for informational dialogs with buttons and focusable tab panels.
 export const useDialogFocus = (
   onClose: (() => void) | undefined,
   returnFocus: string | (() => void)
@@ -38,10 +38,12 @@ export const useDialogFocus = (
       if (event.key !== 'Tab') return;
 
       const dialog = dialogRef.current;
-      const buttons = dialog?.querySelectorAll<HTMLButtonElement>('button:not([disabled])');
-      if (!dialog || !buttons?.length) return;
-      const first = buttons[0];
-      const last = buttons[buttons.length - 1];
+      const focusable = dialog?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]):not([tabindex="-1"]), [tabindex="0"]:not([disabled])'
+      );
+      if (!dialog || !focusable?.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
       if (document.activeElement === dialog || !dialog.contains(document.activeElement)) {
         event.preventDefault();
         (event.shiftKey ? last : first).focus();

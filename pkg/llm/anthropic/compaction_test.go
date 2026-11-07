@@ -193,8 +193,10 @@ func TestNativeCompactionLifecycle(t *testing.T) {
 	thread.SetEnvironment(environment)
 	original, err := json.Marshal(thread.messages)
 	require.NoError(t, err)
+	thread.SetContextBreakdown(&llmtypes.ContextBreakdown{TotalTokens: 100})
 
 	require.NoError(t, thread.CompactContext(t.Context()))
+	assert.Nil(t, thread.GetUsage().ContextBreakdown)
 	require.Len(t, requests, 2)
 	discovery := <-requests
 	assert.Equal(t, "/v1/models/claude-sonnet-4-6", discovery.path)

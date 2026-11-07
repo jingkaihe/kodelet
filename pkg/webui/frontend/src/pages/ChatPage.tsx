@@ -2430,6 +2430,7 @@ const ChatPage: React.FC = () => {
           onClose={() => setInfoDialog(null)}
           runner={runners.find((runner) => runner.id === currentRunnerID)}
           terminalAuthorized={terminalAuthorized}
+          usage={conversation?.id === selectedConversationId ? conversation?.usage : undefined}
         />
       ) : null}
 

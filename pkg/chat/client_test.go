@@ -687,7 +687,19 @@ func TestClientListsAndLoadsRunnerConversations(t *testing.T) {
 				"runnerId":           "runner-1",
 				"environmentProfile": "workspace",
 				"summary":            "Bound conversation",
-				"usage":              map[string]any{"currentContextWindow": 42, "maxContextWindow": 100},
+				"usage": llmtypes.Usage{
+					CurrentContextWindow: 42,
+					MaxContextWindow:     100,
+					ContextBreakdown: &llmtypes.ContextBreakdown{
+						Estimated:          true,
+						CodeMode:           "only",
+						SystemPromptTokens: 12,
+						TotalTokens:        42,
+						Tools: []llmtypes.ToolContextUsage{
+							{Name: "code_execute", Calls: 1, InputTokens: 10, OutputTokens: 20},
+						},
+					},
+				},
 				"entries": []conversations.StreamableMessage{
 					{Kind: "text", Role: "user", Content: "how many cores?"},
 					{Kind: "thinking", Role: "assistant", Content: "Inspecting the host"},
@@ -738,6 +750,12 @@ func TestClientListsAndLoadsRunnerConversations(t *testing.T) {
 	assert.Equal(t, "runner-1", history.RunnerID)
 	assert.Equal(t, "workspace", history.EnvironmentProfile)
 	assert.Equal(t, 42, history.Usage.CurrentContextWindow)
+	require.NotNil(t, history.Usage.ContextBreakdown)
+	assert.Equal(t, 12, history.Usage.ContextBreakdown.SystemPromptTokens)
+	assert.Equal(t, "only", history.Usage.ContextBreakdown.CodeMode)
+	assert.Equal(t, []llmtypes.ToolContextUsage{
+		{Name: "code_execute", Calls: 1, InputTokens: 10, OutputTokens: 20},
+	}, history.Usage.ContextBreakdown.Tools)
 	require.Len(t, history.Messages, 5)
 	assert.Equal(t, "text", history.Messages[0].Kind)
 	assert.Equal(t, "thinking", history.Messages[1].Kind)

@@ -2,14 +2,17 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/version"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -240,9 +243,9 @@ func TestAboutDialogScrollsOnShortTerminals(t *testing.T) {
 		msg    tea.Msg
 		offset int
 	}{
-		{name: "page down", msg: keyPress(tea.KeyPgDown), offset: 2},
-		{name: "down at bottom", msg: keyPress(tea.KeyDown), offset: 2},
-		{name: "wheel up", msg: tea.MouseWheelMsg{Button: tea.MouseWheelUp}, offset: 1},
+		{name: "page down", msg: keyPress(tea.KeyPgDown), offset: 3},
+		{name: "down at bottom", msg: keyPress(tea.KeyDown), offset: 3},
+		{name: "wheel up", msg: tea.MouseWheelMsg{Button: tea.MouseWheelUp}, offset: 2},
 		{name: "home", msg: keyPress(tea.KeyHome), offset: 0},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -255,7 +258,7 @@ func TestAboutDialogScrollsOnShortTerminals(t *testing.T) {
 			assert.Contains(t, view, footer)
 			assert.Contains(t, view, "╰")
 			assert.LessOrEqual(t, len(strings.Split(m.renderAboutDialog(), "\n")), m.height)
-			if test.offset == 2 {
+			if test.offset == 3 {
 				assert.Contains(t, view, "Sep 20, 2026")
 			}
 		})
@@ -463,4 +466,310 @@ func TestAboutBuildMetadataFormatting(t *testing.T) {
 	assert.Equal(t, "e9f7b", formatAboutCommit("e9f7b"))
 	assert.Equal(t, "Unknown", formatAboutCommit("unknown"))
 	assert.Equal(t, "Unknown", aboutValue(""))
+}
+
+func TestAboutDialogTabNavigationResetsScroll(t *testing.T) {
+	m := newThemeTestModel(t, Config{})
+	m.height = 8
+	m.openAboutDialog()
+	for _, key := range []tea.KeyPressMsg{
+		keyPress(tea.KeyTab),
+		keyPressWithMod(tea.KeyTab, tea.ModShift),
+		keyPress(tea.KeyRight),
+		keyPress(tea.KeyLeft),
+	} {
+		wasContext := m.aboutDialog.contextTab
+		m.updateAboutDialogKey("end")
+		require.Positive(t, m.aboutDialog.scrollOffset)
+		updated, cmd := m.Update(key)
+		*m = updated.(model)
+		assert.Nil(t, cmd)
+		assert.Equal(t, !wasContext, m.aboutDialog.contextTab)
+		assert.Zero(t, m.aboutDialog.scrollOffset)
+		view := xansi.Strip(m.renderAboutDialog())
+		assert.Contains(t, view, "Tab/←/→")
+		if m.aboutDialog.contextTab {
+			assert.Contains(t, view, "[Context]")
+			assert.Contains(t, view, "Context window")
+		} else {
+			assert.Contains(t, view, "[About]")
+			assert.Contains(t, view, "Client")
+		}
+	}
+	m.updateAboutDialogKey("tab")
+	m.dismissInfoDialogs()
+	m.openAboutDialog()
+	assert.False(t, m.aboutDialog.contextTab, "reopening starts on About")
+}
+
+func TestAboutDialogRetryPreservesContextTab(t *testing.T) {
+	runner := &serverStatusRunner{err: errors.New("connection refused")}
+	m := newThemeTestModel(t, Config{Runner: runner})
+	m.height = 8
+	m.applyServerStatus(serverStatusMsgFromCmd(t, m.openAboutDialog()))
+	m.updateAboutDialogKey("tab")
+	m.updateAboutDialogKey("end")
+	assert.Contains(t, xansi.Strip(m.renderAboutDialog()), "r retry")
+	runner.err = nil
+	runner.status = chat.ServerStatus{Version: "retried-version"}
+	cmd := m.updateAboutDialogKey("r")
+	require.NotNil(t, cmd)
+	assert.True(t, m.aboutDialog.contextTab)
+	assert.Zero(t, m.aboutDialog.scrollOffset)
+	m.applyServerStatus(serverStatusMsgFromCmd(t, cmd))
+	assert.True(t, m.aboutDialog.contextTab)
+	m.updateAboutDialogKey("tab")
+	lines, _ := m.aboutDialogContent()
+	assert.Contains(t, xansi.Strip(strings.Join(lines, "\n")), "retried-version")
+}
+
+func TestAboutContextShowsSeparateUsageAndEstimates(t *testing.T) {
+	m := newThemeTestModel(t, Config{})
+	m.usage = llmtypes.Usage{
+		CurrentContextWindow: 1500,
+		MaxContextWindow:     3000,
+		ContextBreakdown: &llmtypes.ContextBreakdown{
+			SystemPromptTokens:   100,
+			ToolDefinitionTokens: 200,
+			InputTextTokens:      100,
+			OutputTextTokens:     100,
+			OtherTokens:          50,
+			TotalTokens:          1000,
+			CodeMode:             "only",
+			Estimated:            true,
+			Tools: []llmtypes.ToolContextUsage{
+				{Name: "code_execute", InputTokens: 100, OutputTokens: 250, Calls: 3},
+				{Name: "skill", InputTokens: 20, OutputTokens: 80, Calls: 1},
+			},
+		},
+	}
+	m.openAboutDialog()
+	m.updateAboutDialogKey("tab")
+	lines, _ := m.aboutDialogContent()
+	view := xansi.Strip(strings.Join(lines, "\n"))
+	for _, expected := range []string{
+		"1.5K / 3.0K tokens (50.0%)",
+		"Composition",
+		"~1.0K tokens",
+		"Code mode: only",
+		"Used split estimated · remainder available",
+		"System prompt",
+		"Tool definitions",
+		"Input text",
+		"Output text",
+		"Other / reasoning",
+		"Tool usage",
+		"code_execute",
+		"450 tokens · 45.0%",
+		"~450 tokens",
+		"350 tokens · 77.8%",
+		"3 calls · 100 input · 250 output tokens",
+		"skill",
+		"1 call · 20 input · 80 output tokens",
+		"█", "░",
+	} {
+		assert.Contains(t, view, expected)
+	}
+	var rows, bars []string
+	for _, line := range lines {
+		plain := xansi.Strip(line)
+		if strings.HasPrefix(plain, "■ ") {
+			rows = append(rows, strings.Join(strings.Fields(plain), " "))
+		}
+		if strings.ContainsAny(plain, "█░") {
+			bars = append(bars, plain)
+		}
+	}
+	assert.Equal(t, []string{
+		"■ System prompt 100 tokens · 10.0%",
+		"■ Tool definitions 200 tokens · 20.0%",
+		"■ Input text 100 tokens · 10.0%",
+		"■ Output text 100 tokens · 10.0%",
+		"■ Other / reasoning 50 tokens · 5.0%",
+		"■ Tool usage 450 tokens · 45.0%",
+		"■ code_execute 350 tokens · 77.8%",
+		"■ skill 100 tokens · 22.2%",
+	}, rows)
+	require.Len(t, bars, 2, "no per-row bars")
+	width := m.uiDialogWidth() - 4
+	assert.Equal(t, width, lipgloss.Width(bars[0]))
+	assert.Equal(t, width/2, strings.Count(bars[0], "░"))
+	assert.Equal(t, strings.Repeat("█", width), bars[1], "tool bar is independent of capacity")
+
+	// The open tab reflects newer usage snapshots, not a cached UI-event estimate.
+	m.usage.CurrentContextWindow = 1800
+	m.usage.ContextBreakdown = nil
+	lines, _ = m.aboutDialogContent()
+	view = xansi.Strip(strings.Join(lines, "\n"))
+	assert.Contains(t, view, "1.8K / 3.0K tokens (60.0%)")
+	assert.Contains(t, view, "Breakdown unavailable")
+	assert.NotContains(t, view, "code_execute")
+}
+
+func TestAboutContextHandlesUnavailableAndEmptyUsage(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		usage    llmtypes.Usage
+		expected string
+	}{
+		{name: "new conversation", expected: "Context usage unavailable until a model turn."},
+		{name: "unknown capacity", usage: llmtypes.Usage{CurrentContextWindow: 500}, expected: "500 tokens · Capacity unavailable."},
+		{name: "old conversation", usage: llmtypes.Usage{CurrentContextWindow: 500, MaxContextWindow: 1000}, expected: "500 / 1.0K tokens (50.0%)"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			m := newThemeTestModel(t, Config{})
+			m.usage = test.usage
+			view := xansi.Strip(strings.Join(m.contextDialogContent(), "\n"))
+			assert.Contains(t, view, test.expected)
+			assert.Contains(t, view, "Breakdown unavailable until a model turn.")
+			assert.NotContains(t, view, "Composition")
+		})
+	}
+	for _, mode := range []string{"off", "on", "only"} {
+		t.Run(mode, func(t *testing.T) {
+			m := newThemeTestModel(t, Config{})
+			m.usage.ContextBreakdown = &llmtypes.ContextBreakdown{Estimated: true, CodeMode: mode}
+			view := xansi.Strip(strings.Join(m.contextDialogContent(), "\n"))
+			assert.Contains(t, view, "Code mode: "+mode)
+			assert.Contains(t, view, "~0 tokens")
+			assert.Contains(t, view, "0 tokens · 0.0%")
+			assert.Contains(t, view, "No tool usage in this context.")
+			assert.NotContains(t, view, "NaN")
+			assert.NotContains(t, view, "Inf")
+		})
+	}
+}
+
+func TestAboutContextStaysBoundedOnSmallTerminals(t *testing.T) {
+	m := newThemeTestModel(t, Config{})
+	m.usage.ContextBreakdown = &llmtypes.ContextBreakdown{
+		Estimated: true, CodeMode: "only", TotalTokens: 1000,
+		Tools: []llmtypes.ToolContextUsage{{Name: strings.Repeat("tool", 30), InputTokens: 500, OutputTokens: 500, Calls: 2}},
+	}
+	m.openAboutDialog()
+	for _, width := range []int{24, 42, 80} {
+		for height := 1; height <= 12; height++ {
+			t.Run(fmt.Sprintf("%dx%d", width, height), func(t *testing.T) {
+				m.width, m.height = width, height
+				m.resize()
+				for _, contextTab := range []bool{false, true} {
+					m.aboutDialog.contextTab = contextTab
+					for _, key := range []string{"home", "end"} {
+						m.updateAboutDialogKey(key)
+						view := m.renderAboutDialog()
+						lines := strings.Split(view, "\n")
+						assert.LessOrEqual(t, len(lines), height)
+						for _, line := range lines {
+							assert.LessOrEqual(t, lipgloss.Width(line), m.uiDialogWidth())
+						}
+						assert.Contains(t, xansi.Strip(view), "Esc close")
+						if height >= 4 {
+							assert.Contains(t, xansi.Strip(view), "Tab")
+						}
+						if height >= 5 {
+							assert.Contains(t, xansi.Strip(view), "About Kodelet")
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestContextStackedBar(t *testing.T) {
+	newThemeTestModel(t, Config{})
+	categories := []contextCategory{
+		{"System prompt", 100, toolHeaderStyle},
+		{"Tool definitions", 200, steeringStyle.Italic(false)},
+		{"Input text", 100, composerFlowStyle},
+		{"Output text", 100, diffAddedStyle},
+		{"Other / reasoning", 50, thoughtHeaderStyle},
+		{"Tool usage", 450, uiDialogCancelStyle},
+	}
+	// Shared UI snapshot: used is 50%; category shares within it are
+	// 10/20/10/10/5/45%, giving 2/4/2/2/1/9 cells of a 40-cell bar.
+	bar := contextStackedBar(categories, 1000, 0.5, 40)
+	want := ""
+	for i, cells := range []int{2, 4, 2, 2, 1, 9} {
+		want += renderPersistentStyle(categories[i].style, strings.Repeat("█", cells))
+	}
+	want += renderPersistentStyle(uiDialogMutedStyle, strings.Repeat("░", 20))
+	assert.Equal(t, want, bar)
+	assert.Equal(t, 40, lipgloss.Width(bar))
+
+	for _, test := range []struct {
+		name  string
+		used  float64
+		total int
+		width int
+		want  string
+	}{
+		{name: "unknown capacity", width: 10, want: "░░░░░░░░░░"},
+		{name: "half", used: 0.5, total: 1000, width: 10, want: "█████░░░░░"},
+		{name: "over capacity", used: 1.5, total: 1000, width: 10, want: "██████████"},
+		{name: "negative usage", used: -0.1, total: 1000, width: 10, want: "░░░░░░░░░░"},
+		{name: "empty estimate", used: 0.5, width: 10, want: "█████░░░░░"},
+		{name: "fractional cell", used: 0.16, total: 1000, width: 10, want: "██░░░░░░░░"},
+		{name: "sub-cell categories", used: 0.1, total: 1000, width: 10, want: "█░░░░░░░░░"},
+		{name: "one column", used: 0.5, total: 1000, width: 1, want: "█"},
+		{name: "no columns", used: 0.5, total: 1000},
+		{name: "negative width", used: 0.5, total: 1000, width: -1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			bar := contextStackedBar(categories, test.total, test.used, test.width)
+			assert.Equal(t, test.want, xansi.Strip(bar))
+			assert.Equal(t, max(0, test.width), lipgloss.Width(bar))
+		})
+	}
+}
+
+func TestAboutContextBarAndLegendUseThemeColours(t *testing.T) {
+	for _, themeName := range []string{DefaultThemeName, LightThemeName} {
+		t.Run(themeName, func(t *testing.T) {
+			m := newThemeTestModel(t, Config{Theme: themeName})
+			m.usage = llmtypes.Usage{
+				CurrentContextWindow: 12, MaxContextWindow: 12,
+				ContextBreakdown: &llmtypes.ContextBreakdown{
+					TotalTokens: 12, SystemPromptTokens: 2, ToolDefinitionTokens: 2,
+					InputTextTokens: 2, OutputTextTokens: 2, OtherTokens: 2,
+					Tools: []llmtypes.ToolContextUsage{
+						{Name: "code_execute", InputTokens: 1},
+						{Name: "skill", OutputTokens: 1},
+					},
+				},
+			}
+			lines := m.contextDialogContent()
+			colours := []string{m.theme.ToolHeader, m.theme.Steering, m.theme.ComposerFlow, m.theme.DiffAdded, m.theme.ThoughtHeader, m.theme.UI.DialogCancel}
+			for i, colour := range colours {
+				style := lipgloss.NewStyle().Foreground(themeColor(colour))
+				start, _ := styleSequences(style)
+				assert.Contains(t, lines[2], start+"█", "bar colour %d", i)
+				assert.Contains(t, lines[9+i], renderPersistentStyle(style, "■"), "legend colour %d", i)
+			}
+			// The tool palette starts orange, then teal, without inheriting a
+			// category's italic text styling or making free space look used.
+			assert.Contains(t, lines[19], renderPersistentStyle(uiDialogCancelStyle, "■"))
+			assert.Contains(t, lines[21], renderPersistentStyle(toolHeaderStyle, "■"))
+			assert.NotContains(t, strings.Join(lines, "\n"), "\x1b[3m")
+		})
+	}
+}
+
+func TestAboutContextUnknownCapacityAndZeroToolTokens(t *testing.T) {
+	m := newThemeTestModel(t, Config{})
+	m.usage.ContextBreakdown = &llmtypes.ContextBreakdown{
+		TotalTokens: 1_000_000, SystemPromptTokens: 1_000_000,
+		Tools: []llmtypes.ToolContextUsage{{Name: "empty_tool", Calls: 1}},
+	}
+	lines := m.contextDialogContent()
+	view := xansi.Strip(strings.Join(lines, "\n"))
+	assert.Contains(t, view, "Estimated composition · capacity unavailable")
+	assert.Contains(t, view, "~1.0M tokens")
+	assert.Contains(t, view, "~0 tokens")
+	assert.Contains(t, view, "1 call · 0 input · 0 output tokens")
+	assert.NotContains(t, view, "NaN")
+	assert.NotContains(t, view, "Inf")
+	assert.NotContains(t, view, "░", "unknown capacity cannot imply available space")
+	assert.Equal(t, strings.Repeat("█", m.uiDialogWidth()-4), xansi.Strip(lines[2]))
+	assert.Equal(t, 1, strings.Count(view, strings.Repeat("█", m.uiDialogWidth()-4)), "zero-token tools have no second bar")
 }

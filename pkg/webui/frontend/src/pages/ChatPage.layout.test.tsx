@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ChatStreamEvent } from '../types';
 import {
   ChatPage,
   flushAsyncUpdates,
@@ -13,6 +14,7 @@ import {
   mockGetCopilotProviderStatus,
   mockGetRunners,
   mockGetServerStatus,
+  mockStreamConversation,
   renderChatWithRunner,
   setRouteParams,
   setupChatPageTests,
@@ -341,6 +343,66 @@ describe('ChatPage layout and accessibility', () => {
     expect(await screen.findByText('1.2.3')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Close about Kodelet' }));
     await waitFor(() => expect(about).toHaveFocus());
+  });
+
+  it('shows saved and live context usage for the selected conversation in About', async () => {
+    const user = userEvent.setup();
+    setRouteParams({ id: 'context-chat' });
+    mockGetConversation.mockImplementation(async (id: string) => ({
+      id,
+      createdAt: '',
+      updatedAt: '',
+      messageCount: 0,
+      messages: [],
+      usage:
+        id === 'context-chat' ? { currentContextWindow: 1000, maxContextWindow: 10000 } : undefined,
+    }));
+    const listeners: Array<(event: ChatStreamEvent) => void> = [];
+    mockStreamConversation.mockImplementation(async (_id, options) => {
+      listeners.push(options.onEvent);
+      return new Promise(() => undefined);
+    });
+    const { rerender } = render(<ChatPage />);
+    await waitFor(() => expect(listeners).toHaveLength(1));
+    await user.click(screen.getByRole('button', { name: 'About Kodelet' }));
+    await user.click(screen.getByRole('tab', { name: 'Context' }));
+    expect(screen.getByRole('meter')).toHaveAttribute('aria-valuenow', '1000');
+    expect(screen.getByText('Breakdown unavailable until a model turn.')).toBeInTheDocument();
+
+    await act(async () =>
+      listeners[0]({
+        kind: 'usage',
+        conversation_id: 'context-chat',
+        usage: {
+          currentContextWindow: 2500,
+          maxContextWindow: 10000,
+          contextBreakdown: {
+            systemPromptTokens: 500,
+            toolDefinitionTokens: 100,
+            inputTextTokens: 200,
+            outputTextTokens: 300,
+            otherTokens: 0,
+            tools: [{ name: 'code_execute', calls: 1, inputTokens: 100, outputTokens: 800 }],
+            totalTokens: 2000,
+            codeMode: 'only',
+            estimated: true,
+          },
+        },
+      })
+    );
+    expect(screen.getByRole('meter')).toHaveAttribute('aria-valuenow', '2500');
+    expect(screen.getByText('~2.0K tokens')).toBeInTheDocument();
+    expect(screen.getByText('1 call · 100 input · 800 output tokens')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Tool usage breakdown' })).toBeInTheDocument();
+    expect(mockGetServerStatus).toHaveBeenCalledOnce();
+
+    setRouteParams({ id: 'other-chat' });
+    rerender(<ChatPage />);
+    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('other-chat'));
+    expect(screen.queryByRole('meter')).not.toBeInTheDocument();
+    expect(screen.queryByText('~2.0K tokens')).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'Tool usage breakdown' })).not.toBeInTheDocument();
+    expect(screen.getByText('Context usage unavailable until a model turn.')).toBeInTheDocument();
   });
 
   it.each(['user', 'anonymous'])('opens keyboard shortcuts from the %s sidebar', async (role) => {

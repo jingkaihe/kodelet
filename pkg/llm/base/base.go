@@ -312,6 +312,9 @@ func (t *Thread) SetExtensions(runtime any) {
 func (t *Thread) ResetContextStateLocked() {
 	// Structured results belong to the complete transcript. Keep them available
 	// for archived tool calls, attachment references, and conversation forks.
+	if t.Usage != nil {
+		t.Usage.ContextBreakdown = nil
+	}
 }
 
 // FinalizeSwapContextLocked resets shared state after provider-specific context replacement.
@@ -331,7 +334,9 @@ func (t *Thread) GetUsage() llmtypes.Usage {
 	if t.Usage == nil {
 		return llmtypes.Usage{}
 	}
-	return *t.Usage
+	usage := *t.Usage
+	usage.ContextBreakdown = cloneContextBreakdown(usage.ContextBreakdown)
+	return usage
 }
 
 // AggregateSubagentUsage aggregates usage from a subagent into this thread's usage.

@@ -434,6 +434,8 @@ func TestSendMessageNoSaveRestoresCodexWindowAndWebSocketIdentity(t *testing.T) 
 	thread.Usage.CacheReadInputTokens = 3
 	thread.Usage.CurrentContextWindow = 90
 	thread.Usage.MaxContextWindow = 100
+	originalBreakdown := &llmtypes.ContextBreakdown{TotalTokens: 90, Estimated: true, Tools: []llmtypes.ToolContextUsage{}}
+	thread.SetContextBreakdown(originalBreakdown)
 	thread.newStreamingFunc = func(context.Context, openairesponses.ResponseNewParams, ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
 		return remoteCompactionV2Stream(t, "temporary-encrypted-summary")
 	}
@@ -482,6 +484,7 @@ func TestSendMessageNoSaveRestoresCodexWindowAndWebSocketIdentity(t *testing.T) 
 	assert.Equal(t, 23, thread.Usage.CacheReadInputTokens)
 	assert.Equal(t, 90, thread.Usage.CurrentContextWindow)
 	assert.Equal(t, 100, thread.Usage.MaxContextWindow)
+	assert.Equal(t, originalBreakdown, thread.GetUsage().ContextBreakdown)
 	assert.Contains(t, thread.GetStructuredToolResults(), "old-call")
 	assert.Equal(t, 2, fakeWebSocket.resets, "compaction install and no-save rollback must each reset websocket identity")
 	assert.Empty(t, store.savedRecords)
@@ -625,8 +628,10 @@ func TestIsRetryableResponsesStreamErrorClassifiesSDKStreamErrors(t *testing.T) 
 }
 
 func TestAddAssistantMessageAppendsInputAndStoredItems(t *testing.T) {
-	thread := &Thread{}
+	thread := &Thread{Thread: base.NewThread(llmtypes.Config{}, "test")}
+	thread.SetContextBreakdown(&llmtypes.ContextBreakdown{OutputTextTokens: 10})
 	thread.AddAssistantMessage(t.Context(), "Direct response")
+	assert.Nil(t, thread.GetUsage().ContextBreakdown)
 
 	require.Len(t, thread.inputItems, 1)
 	require.NotNil(t, thread.inputItems[0].OfMessage)
@@ -634,6 +639,40 @@ func TestAddAssistantMessageAppendsInputAndStoredItems(t *testing.T) {
 	require.Len(t, thread.storedItems, 1)
 	assert.Equal(t, "assistant", thread.storedItems[0].Role)
 	assert.Equal(t, "Direct response", thread.storedItems[0].Content)
+}
+
+func TestResponsesContextBreakdownUsesCodexRequestPrefixAndLiveHistory(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(llmtypes.Config{
+			Model: "gpt-5.5", OpenAI: &llmtypes.OpenAIConfig{Platform: "codex"},
+		}, "context-breakdown"),
+		isCodex: true,
+	}
+	thread.SetState(tools.NewBasicState(t.Context()))
+	thread.AddUserMessage(t.Context(), "user")
+	// Display-only reasoning must never enter the inference estimate.
+	thread.storedItems = append(thread.storedItems, StoredInputItem{Type: "reasoning", Content: "display-only reasoning"})
+	params := openairesponses.ResponseNewParams{
+		Instructions: param.NewOpt("system!!"),
+		Input:        openairesponses.ResponseNewParamsInputUnion{OfInputItemList: thread.inputItemsSnapshot()},
+	}
+	thread.applyCodexRestrictions(&params)
+	prefixCount := len(params.Input.OfInputItemList) - len(thread.inputItems)
+	require.Positive(t, prefixCount)
+	expected := base.EstimateContextBreakdown(params.Instructions.Value, params.Tools, params.Input.OfInputItemList, "")
+	thread.AddAssistantMessage(t.Context(), "last")
+	thread.refreshContextBreakdown(params, prefixCount, thread.codexWindowGeneration)
+	breakdown := thread.GetUsage().ContextBreakdown
+	require.NotNil(t, breakdown)
+	assert.Equal(t, expected.SystemPromptTokens, breakdown.SystemPromptTokens)
+	assert.Greater(t, breakdown.SystemPromptTokens, 2, "include request-only developer sections exactly once")
+	assert.Equal(t, 1, breakdown.InputTextTokens)
+	assert.Equal(t, 1, breakdown.OutputTextTokens)
+	assert.Zero(t, breakdown.ToolDefinitionTokens, "disabled tools have no definitions")
+	assert.Zero(t, breakdown.OtherTokens)
+	thread.codexWindowGeneration++
+	thread.refreshContextBreakdown(params, prefixCount, thread.codexWindowGeneration-1)
+	assert.Nil(t, thread.GetUsage().ContextBreakdown, "stale request cannot overwrite compacted context")
 }
 
 func TestProcessMessageExchangeInjectsPendingSteer(t *testing.T) {
@@ -1245,6 +1284,16 @@ func TestProcessMessageExchangeRetriesFromToolResultAfterLocalToolExecution(t *t
 	assert.Equal(t, "message", thread.storedItems[3].Type)
 	assert.Equal(t, "done", thread.storedItems[3].Content)
 	assert.Contains(t, thread.GetStructuredToolResults(), "call_1")
+	breakdown := thread.GetUsage().ContextBreakdown
+	require.NotNil(t, breakdown)
+	assert.Equal(t, 2, breakdown.SystemPromptTokens)
+	assert.Equal(t, 2, breakdown.InputTextTokens)
+	assert.Equal(t, 1, breakdown.OutputTextTokens)
+	assert.Greater(t, breakdown.ToolDefinitionTokens, 0)
+	require.Len(t, breakdown.Tools, 1)
+	assert.Equal(t, "ok_tool", breakdown.Tools[0].Name)
+	assert.Equal(t, 1, breakdown.Tools[0].Calls)
+	assert.Greater(t, breakdown.Tools[0].OutputTokens, 0)
 }
 
 func TestProcessMessageExchangeDoesNotRetryHTTPSUnrecoverableStreamError(t *testing.T) {

@@ -135,6 +135,18 @@ func TestStore_BasicOperations(t *testing.T) {
 		Usage: llmtypes.Usage{
 			InputTokens:  100,
 			OutputTokens: 50,
+			ContextBreakdown: &llmtypes.ContextBreakdown{
+				Estimated:            true,
+				CodeMode:             "only",
+				SystemPromptTokens:   20,
+				ToolDefinitionTokens: 30,
+				InputTextTokens:      10,
+				OutputTextTokens:     10,
+				TotalTokens:          100,
+				Tools: []llmtypes.ToolContextUsage{
+					{Name: "code_execute", Calls: 1, InputTokens: 10, OutputTokens: 20},
+				},
+			},
 		},
 		Summary:   "Test conversation",
 		CreatedAt: now,
@@ -171,6 +183,7 @@ func TestStore_BasicOperations(t *testing.T) {
 	assert.Equal(t, record.Usage.InputTokens, loaded.Usage.InputTokens)
 	assert.Equal(t, record.Metadata, loaded.Metadata)
 	assert.Equal(t, record.Usage.OutputTokens, loaded.Usage.OutputTokens)
+	assert.Equal(t, record.Usage.ContextBreakdown, loaded.Usage.ContextBreakdown)
 	assert.Equal(t, string(record.RawMessages), string(loaded.RawMessages))
 
 	// Test Load non-existent

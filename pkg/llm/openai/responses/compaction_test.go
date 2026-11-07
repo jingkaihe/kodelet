@@ -41,8 +41,10 @@ func TestThreadSwapContextArchivesHistoryAndPreservesToolResults(t *testing.T) {
 	}
 	thread.SetState(state)
 	thread.SetStructuredToolResult("call-1", tooltypes.StructuredToolResult{ToolName: "bash", Success: true})
+	thread.SetContextBreakdown(&llmtypes.ContextBreakdown{TotalTokens: 100})
 
 	require.NoError(t, thread.SwapContext(context.Background(), "summary of prior context"))
+	assert.Nil(t, thread.GetUsage().ContextBreakdown)
 
 	require.Len(t, thread.inputItems, 1)
 	assert.Equal(t, "summary of prior context", extractInputItemText(thread.inputItems[0]))

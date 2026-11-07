@@ -472,10 +472,6 @@ streamLoop:
 				llmtypes.OpenAIServiceTier(finalResponse.ServiceTier),
 				localInputTokens,
 			)
-			if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
-				usageHandler.HandleUsage(t.GetUsage())
-			}
-
 			if !opt.DisableUsageLog {
 				usage.LogLLMUsage(ctx, t.GetUsage(), model, apiStartTime, int(finalResponse.Usage.OutputTokens))
 			}

@@ -224,6 +224,7 @@ func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 
 // AddUserMessage adds a user message with optional images to the thread
 func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
+	t.SetContextBreakdown(nil)
 	contentParts := t.userImageParts(ctx, imagePaths)
 	contentParts = append(contentParts, openai.ChatMessagePart{
 		Type: openai.ChatMessagePartTypeText,
@@ -239,6 +240,7 @@ func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths 
 
 // AddAssistantMessage appends a provider-native assistant message without calling the model.
 func (t *Thread) AddAssistantMessage(_ context.Context, message string) {
+	t.SetContextBreakdown(nil)
 	t.messages = append(t.messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleAssistant, Content: message})
 }
 
@@ -310,11 +312,13 @@ func (t *Thread) SendMessage(
 		originalHistory := t.GetCompactionHistory()
 		originalResults := t.GetStructuredToolResults()
 		originalMetadata := t.GetMetadata()
+		originalBreakdown := t.GetUsage().ContextBreakdown
 		defer func() {
 			t.messages = originalMessages
 			t.SetCompactionHistory(originalHistory)
 			t.SetStructuredToolResults(originalResults)
 			t.RestoreMessageMetadata(originalMetadata)
+			t.SetContextBreakdown(originalBreakdown)
 		}()
 	}
 
@@ -417,6 +421,7 @@ OUTER:
 					// Remove the last tool message from the messages if it exists
 					if len(t.messages) > 0 && isToolResultMessage(t.messages[len(t.messages)-1]) {
 						t.messages = t.messages[:len(t.messages)-1]
+						t.SetContextBreakdown(nil)
 					}
 					break OUTER
 				}
@@ -534,6 +539,12 @@ func (t *Thread) processMessageExchange(
 	if err := t.processPendingSteer(ctx, &requestParams, handler); err != nil {
 		return "", false, errors.Wrap(err, "failed to process pending steer")
 	}
+	refreshContext := func() {
+		t.SetContextBreakdown(base.EstimateContextBreakdown(
+			nil, requestParams.Tools, t.messages, t.Config.EffectiveCodeMode(),
+		))
+	}
+	refreshContext()
 
 	extraHeaders := t.getExtraHeaders(opt)
 
@@ -563,18 +574,22 @@ func (t *Thread) processMessageExchange(
 
 	// Update usage tracking
 	t.updateUsage(response.Usage, model)
-	if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
-		usageHandler.HandleUsage(t.GetUsage())
-	}
 
 	// Process the response
 	if len(response.Choices) == 0 {
+		if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
+			usageHandler.HandleUsage(t.GetUsage())
+		}
 		return "", false, errors.New("no response choices returned from OpenAI")
 	}
 
 	// Add the assistant response to history
 	assistantMessage := response.Choices[0].Message
 	t.messages = append(t.messages, assistantMessage)
+	refreshContext()
+	if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
+		usageHandler.HandleUsage(t.GetUsage())
+	}
 
 	// Extract text content (skip if streaming handler already processed it)
 	content := assistantMessage.Content
@@ -656,6 +671,10 @@ func (t *Thread) processMessageExchange(
 		toolResultMessages = append(toolResultMessages, message)
 	}
 	t.messages = append(t.messages, openAIChatToolResultMessages(toolResultMessages, followupImageParts)...)
+	refreshContext()
+	if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
+		usageHandler.HandleUsage(t.GetUsage())
+	}
 
 	// Log structured LLM usage after all content processing is complete
 	if !opt.DisableUsageLog {

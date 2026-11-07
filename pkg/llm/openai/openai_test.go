@@ -739,8 +739,10 @@ func TestAddUserMessageWithImages(t *testing.T) {
 }
 
 func TestAddAssistantMessage(t *testing.T) {
-	thread := &Thread{}
+	thread := &Thread{Thread: base.NewThread(llm.Config{}, "test")}
+	thread.SetContextBreakdown(&llm.ContextBreakdown{OutputTextTokens: 10})
 	thread.AddAssistantMessage(t.Context(), "Direct response")
+	assert.Nil(t, thread.GetUsage().ContextBreakdown)
 
 	require.Len(t, thread.messages, 1)
 	assert.Equal(t, openai.ChatMessageRoleAssistant, thread.messages[0].Role)
@@ -1501,6 +1503,14 @@ func TestOpenAIProcessMessageExchangeTextResponse(t *testing.T) {
 	assert.Equal(t, "hi", capturedRequest.Messages[0].Content)
 	assert.Equal(t, 7, thread.GetUsage().InputTokens)
 	assert.Equal(t, 3, thread.GetUsage().OutputTokens)
+	breakdown := thread.GetUsage().ContextBreakdown
+	require.NotNil(t, breakdown)
+	assert.Equal(t, 1, breakdown.InputTextTokens)
+	assert.Equal(t, 2, breakdown.OutputTextTokens)
+	assert.Equal(t, 2, breakdown.OtherTokens)
+	assert.Equal(t, "off", breakdown.CodeMode)
+	require.Len(t, handler.usage, 1)
+	assert.Equal(t, breakdown, handler.usage[0].ContextBreakdown)
 	require.Len(t, thread.messages, 2)
 	assert.Equal(t, openai.ChatMessageRoleAssistant, thread.messages[1].Role)
 }
@@ -1583,6 +1593,16 @@ func TestOpenAIProcessMessageExchangeToolCall(t *testing.T) {
 	require.Len(t, thread.messages, 3)
 	assert.Equal(t, openai.ChatMessageRoleTool, thread.messages[2].Role)
 	assert.Equal(t, "call-1", thread.messages[2].ToolCallID)
+	breakdown := thread.GetUsage().ContextBreakdown
+	require.NotNil(t, breakdown)
+	require.Len(t, breakdown.Tools, 1)
+	assert.Equal(t, "missing_tool", breakdown.Tools[0].Name)
+	assert.Equal(t, 1, breakdown.Tools[0].Calls)
+	assert.Equal(t, 1, breakdown.Tools[0].InputTokens)
+	assert.Greater(t, breakdown.Tools[0].OutputTokens, 0)
+	require.Len(t, handler.usage, 2)
+	assert.Zero(t, handler.usage[0].ContextBreakdown.Tools[0].OutputTokens)
+	assert.Equal(t, breakdown, handler.usage[1].ContextBreakdown)
 }
 
 func TestOpenAIProcessMessageExchangeErrorBranches(t *testing.T) {

@@ -391,6 +391,39 @@ func TestAnthropicProcessMessageExchangeUsesManualPromptCaching(t *testing.T) {
 	require.Len(t, capturedRequest.Messages[0].Content, 1)
 	assert.Equal(t, "hello", capturedRequest.Messages[0].Content[0].Text)
 	assert.Equal(t, "ephemeral", capturedRequest.Messages[0].Content[0].CacheControl.Type)
+	breakdown := thread.GetUsage().ContextBreakdown
+	require.NotNil(t, breakdown)
+	assert.Equal(t, 2, breakdown.SystemPromptTokens)
+	assert.Greater(t, breakdown.ToolDefinitionTokens, 0)
+	assert.Equal(t, 2, breakdown.InputTextTokens)
+	assert.Equal(t, 1, breakdown.OutputTextTokens)
+}
+
+func TestAnthropicContextBreakdownIncludesFinalToolResult(t *testing.T) {
+	thread, requests := newNativeCompactionTestThread(t, compactionTestStream(
+		`{"type":"tool_use","id":"call-1","name":"test_tool","input":{}}`,
+		"tool_use", `{"input_tokens":10,"output_tokens":2}`,
+	))
+	thread.Usage.CurrentContextWindow = 0
+	thread.messages = []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("user"))}
+	thread.SetState(tools.NewBasicState(t.Context(), tools.WithExtensionTools([]tooltypes.Tool{
+		codeModeAnthropicTool{testTool{name: "test_tool"}},
+	})))
+	handler := &captureAnthropicToolHandler{}
+	_, used, err := thread.processMessageExchange(t.Context(), handler, "claude-sonnet-4-6", 256, "system", llmtypes.MessageOpt{DisableUsageLog: true})
+	require.NoError(t, err)
+	assert.True(t, used)
+	request := <-requests
+	breakdown := thread.GetUsage().ContextBreakdown
+	require.NotNil(t, breakdown)
+	assert.Equal(t, base.EstimateContextBreakdown(request.params["system"], request.params["tools"], thread.messages, "off"), breakdown)
+	require.Len(t, breakdown.Tools, 1)
+	assert.Equal(t, "test_tool", breakdown.Tools[0].Name)
+	assert.Equal(t, 1, breakdown.Tools[0].Calls)
+	assert.Greater(t, breakdown.Tools[0].OutputTokens, 0)
+	require.Len(t, handler.usage, 2)
+	assert.Zero(t, handler.usage[0].ContextBreakdown.Tools[0].OutputTokens)
+	assert.Equal(t, breakdown, handler.usage[1].ContextBreakdown)
 }
 
 func TestAnthropicToolResultBlockUsesMultimodalPartsWhenAvailable(t *testing.T) {
@@ -1055,8 +1088,10 @@ func TestAddUserMessage(t *testing.T) {
 }
 
 func TestAddAssistantMessage(t *testing.T) {
-	thread := &Thread{}
+	thread := &Thread{Thread: base.NewThread(llmtypes.Config{}, "test")}
+	thread.SetContextBreakdown(&llmtypes.ContextBreakdown{OutputTextTokens: 10})
 	thread.AddAssistantMessage(t.Context(), "Direct response")
+	assert.Nil(t, thread.GetUsage().ContextBreakdown)
 
 	require.Len(t, thread.messages, 1)
 	assert.Equal(t, anthropic.MessageParamRoleAssistant, thread.messages[0].Role)
@@ -1233,6 +1268,23 @@ return {names, text: reply.text, blocked};
 			assert.Equal(t, "completed", result.Metadata.Calls[0].Status)
 			assert.Equal(t, "blocked", result.Metadata.Calls[1].Status)
 			assert.Equal(t, []string{"parent-code:code_execute"}, handler.toolResults, "children must not become provider tool results")
+			params, err := thread.messageParams("claude-sonnet-4-6", 256, "system", llmtypes.MessageOpt{})
+			require.NoError(t, err)
+			history := []anthropic.MessageParam{
+				anthropic.NewAssistantMessage(block.ToParam()),
+				anthropic.NewUserMessage(anthropicToolResultBlock("parent-code", result)),
+			}
+			breakdown := base.EstimateContextBreakdown(params.System, params.Tools, history, config.EffectiveCodeMode())
+			require.NotNil(t, breakdown)
+			assert.Equal(t, tc.mode, breakdown.CodeMode)
+			encodedTools, err := json.Marshal(params.Tools)
+			require.NoError(t, err)
+			assert.Equal(t, (len(encodedTools)+3)/4, breakdown.ToolDefinitionTokens)
+			require.Len(t, breakdown.Tools, 1, "code-mode child calls must not be counted again")
+			assert.Equal(t, parentName, breakdown.Tools[0].Name)
+			assert.Equal(t, 1, breakdown.Tools[0].Calls)
+			assert.Greater(t, breakdown.Tools[0].InputTokens, 0)
+			assert.Greater(t, breakdown.Tools[0].OutputTokens, 0)
 		})
 	}
 }
@@ -1649,6 +1701,11 @@ func (h *captureUserMessageHandler) HandleUserMessage(content string, images []s
 type captureAnthropicToolHandler struct {
 	toolUses    []string
 	toolResults []string
+	usage       []llmtypes.Usage
+}
+
+func (h *captureAnthropicToolHandler) HandleUsage(usage llmtypes.Usage) {
+	h.usage = append(h.usage, usage)
 }
 
 func (h *captureAnthropicToolHandler) HandleText(string) {}

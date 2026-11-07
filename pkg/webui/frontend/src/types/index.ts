@@ -96,6 +96,26 @@ export interface Usage {
   cacheReadCost?: number;
   currentContextWindow?: number;
   maxContextWindow?: number;
+  contextBreakdown?: ContextBreakdown;
+}
+
+export interface ContextBreakdown {
+  systemPromptTokens: number;
+  toolDefinitionTokens: number;
+  inputTextTokens: number;
+  outputTextTokens: number;
+  otherTokens: number;
+  tools: ToolContextUsage[];
+  totalTokens: number;
+  codeMode: string;
+  estimated: boolean;
+}
+
+export interface ToolContextUsage {
+  name: string;
+  inputTokens: number;
+  outputTokens: number;
+  calls: number;
 }
 
 export interface Conversation {

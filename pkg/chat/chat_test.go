@@ -328,6 +328,38 @@ func TestChatMessageHandler_HandleUsageDeduplicatesSnapshots(t *testing.T) {
 	assert.Equal(t, "text", sink.events[1].Kind)
 }
 
+func TestChatMessageHandler_HandleUsageComparesContextBreakdownValues(t *testing.T) {
+	sink := &recordingChatSink{}
+	handler := &chatMessageHandler{conversationID: "conv-123", sink: sink}
+	usage := llmtypes.Usage{
+		CurrentContextWindow: 100,
+		ContextBreakdown: &llmtypes.ContextBreakdown{
+			Estimated: true,
+			CodeMode:  "only",
+			Tools: []llmtypes.ToolContextUsage{
+				{Name: "code_execute", InputTokens: 20, OutputTokens: 40, Calls: 1},
+			},
+			TotalTokens: 60,
+		},
+	}
+	handler.HandleUsage(usage)
+
+	// GetUsage returns independent snapshots; equal values must still deduplicate.
+	copy := *usage.ContextBreakdown
+	copy.Tools = append([]llmtypes.ToolContextUsage(nil), copy.Tools...)
+	usage.ContextBreakdown = &copy
+	handler.HandleUsage(usage)
+	require.Len(t, sink.events, 1)
+
+	// Model-visible tool results can change without new provider token counts.
+	copy.Tools[0].OutputTokens = 50
+	copy.TotalTokens = 70
+	handler.HandleUsage(usage)
+	require.Len(t, sink.events, 2)
+	assert.Equal(t, 40, sink.events[0].Usage.ContextBreakdown.Tools[0].OutputTokens)
+	assert.Equal(t, 50, sink.events[1].Usage.ContextBreakdown.Tools[0].OutputTokens)
+}
+
 func TestChatMessageHandler_HandleToolResultBackfillsToolName(t *testing.T) {
 	sink := &recordingChatSink{}
 	handler := &chatMessageHandler{

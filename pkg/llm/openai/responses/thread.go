@@ -335,6 +335,9 @@ func (t *Thread) appendHistoryItemsWithOperation(
 	t.historyMu.Lock()
 	defer t.historyMu.Unlock()
 	t.inputItems = append(t.inputItems, inputItems...)
+	if len(inputItems) > 0 {
+		t.SetContextBreakdown(nil)
+	}
 	for _, item := range storedItems {
 		t.storedItems = append(t.storedItems, item)
 		if item.Role == "user" {
@@ -382,6 +385,7 @@ type responsesNoSaveSnapshot struct {
 	compactionHistory     *convtypes.CompactionHistory
 	currentContextWindow  int
 	maxContextWindow      int
+	contextBreakdown      *llmtypes.ContextBreakdown
 	structuredToolResults map[string]tooltypes.StructuredToolResult
 	messageMetadata       map[string]any
 	pendingReasoning      string
@@ -420,6 +424,7 @@ func (t *Thread) snapshotNoSaveState() responsesNoSaveSnapshot {
 	if t.Usage != nil {
 		snapshot.currentContextWindow = t.Usage.CurrentContextWindow
 		snapshot.maxContextWindow = t.Usage.MaxContextWindow
+		snapshot.contextBreakdown = t.Usage.ContextBreakdown
 	}
 	snapshot.structuredToolResults = maps.Clone(t.ToolResults)
 	snapshot.compactionHistory = t.CompactionHistory.Clone()
@@ -447,6 +452,10 @@ func (t *Thread) restoreNoSaveState(snapshot responsesNoSaveSnapshot) {
 	}
 	t.Usage.CurrentContextWindow = snapshot.currentContextWindow
 	t.Usage.MaxContextWindow = snapshot.maxContextWindow
+	t.Usage.ContextBreakdown = snapshot.contextBreakdown
+	if len(snapshot.operation.externalAppends) > 0 {
+		t.Usage.ContextBreakdown = nil
+	}
 	t.ToolResults = maps.Clone(snapshot.structuredToolResults)
 	t.CompactionHistory = snapshot.compactionHistory.Clone()
 	if t.ToolResults == nil {
@@ -903,10 +912,21 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 			t.pendingReasoning.Reset()
 			t.pendingReasoning.WriteString(pendingReasoningBeforeAttempt)
 			attemptParams := params
+			inputItems, windowGeneration := t.inputItemsAndWindowSnapshot()
 			attemptParams.Input = responses.ResponseNewParamsInputUnion{
-				OfInputItemList: t.inputItemsSnapshot(),
+				OfInputItemList: inputItems,
 			}
 			t.applyCodexRestrictions(&attemptParams)
+			prefixCount := len(attemptParams.Input.OfInputItemList) - len(inputItems)
+			t.refreshContextBreakdown(attemptParams, prefixCount, windowGeneration)
+			defer func() {
+				// Include all model output and local tool results, even if this is
+				// the final turn or the stream/tool execution fails partway through.
+				t.refreshContextBreakdown(attemptParams, prefixCount, windowGeneration)
+				if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
+					usageHandler.HandleUsage(t.GetUsage())
+				}
+			}()
 
 			attempt, err := newResponsesStream(ctx, attemptParams)
 			if err != nil {
@@ -990,6 +1010,21 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 
 	saveConversation()
 	return finalOutput, finalStreamResult.toolsUsed, finalStreamResult.responseCompleted, nil
+}
+
+// Keep Codex's request-only developer messages, but use the complete current
+// inference window rather than display history or a WebSocket continuation delta.
+func (t *Thread) refreshContextBreakdown(params responses.ResponseNewParams, prefixCount int, windowGeneration uint64) {
+	t.historyMu.Lock()
+	defer t.historyMu.Unlock()
+	if t.codexWindowGeneration != windowGeneration {
+		t.SetContextBreakdown(nil)
+		return
+	}
+	items := append(cloneResponsesInputItems(params.Input.OfInputItemList[:prefixCount]), t.inputItems...)
+	t.SetContextBreakdown(base.EstimateContextBreakdown(
+		params.Instructions.Value, params.Tools, items, t.Config.EffectiveCodeMode(),
+	))
 }
 
 func responseSpanAttributes(response responses.Response) []attribute.KeyValue {

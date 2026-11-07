@@ -2,11 +2,14 @@ package tui
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/jingkaihe/kodelet/pkg/version"
@@ -32,6 +35,7 @@ type runnerStatusProvider interface {
 type aboutDialogState struct {
 	requestID       int
 	scrollOffset    int
+	contextTab      bool
 	loading         bool
 	unsupported     bool
 	status          chat.ServerStatus
@@ -101,7 +105,7 @@ func (m *model) reloadServerStatus() tea.Cmd {
 	}
 	m.nextAboutRequestID++
 	requestID := m.nextAboutRequestID
-	*m.aboutDialog = aboutDialogState{requestID: requestID}
+	*m.aboutDialog = aboutDialogState{requestID: requestID, contextTab: m.aboutDialog.contextTab}
 	var cmds []tea.Cmd
 	provider, ok := m.runner.(serverStatusProvider)
 	if ok {
@@ -159,9 +163,12 @@ func (m *model) updateAboutDialogKey(key string) tea.Cmd {
 		if m.aboutDialog != nil && (m.aboutDialog.err != nil || m.aboutDialog.runnerErr != nil) {
 			return m.reloadServerStatus()
 		}
+	case "tab", "shift+tab", "left", "right":
+		m.aboutDialog.contextTab = !m.aboutDialog.contextTab
+		m.aboutDialog.scrollOffset = 0
 	case "up", "down", "pgup", "pgdown", "home", "end":
 		lines, _ := m.aboutDialogContent()
-		height := max(1, m.height-4) // Reserve the borders, title, and footer.
+		height := max(1, m.height-5) // Reserve the borders, title, tabs, and footer.
 		maxOffset := max(0, len(lines)-height)
 		offset := min(m.aboutDialog.scrollOffset, maxOffset)
 		switch key {
@@ -194,7 +201,7 @@ func (m model) renderAboutDialog() string {
 	}
 	contentWidth := max(1, width-4)
 	lines, footer := m.aboutDialogContent()
-	bodyHeight := max(1, m.height-4) // Reserve the borders, title, and footer.
+	bodyHeight := max(1, m.height-5) // Reserve the borders, title, tabs, and footer.
 	scrollable := len(lines) > bodyHeight
 	if scrollable {
 		offset := min(m.aboutDialog.scrollOffset, len(lines)-bodyHeight)
@@ -214,11 +221,18 @@ func (m model) renderAboutDialog() string {
 	if m.height < 3 {
 		return footer
 	}
-	if m.height < 5 {
+	if m.height < 4 {
 		return renderDialogBox(width, []string{footer})
 	}
+	if m.height == 4 {
+		return renderDialogBox(width, []string{m.aboutDialogTabs(contentWidth), footer})
+	}
 	content := []string{renderPersistentStyle(uiDialogTitleStyle, fitVisible(aboutDialogTitle, contentWidth))}
-	if len(lines)+6 <= m.height {
+	content = append(content, m.aboutDialogTabs(contentWidth))
+	if m.height == 5 {
+		return renderDialogBox(width, append(content, footer))
+	}
+	if len(lines)+7 <= m.height {
 		content = append(content, "")
 		lines = append(lines, "")
 	}
@@ -227,8 +241,40 @@ func (m model) renderAboutDialog() string {
 	return renderDialogBox(width, content)
 }
 
+func (m model) aboutDialogTabs(width int) string {
+	labels := []string{"About", "Context"}
+	var tabs []string
+	for i, label := range labels {
+		if (i == 1) == m.aboutDialog.contextTab {
+			tabs = append(tabs, renderPersistentStyle(uiDialogSelectedStyle, "["+label+"]"))
+		} else {
+			tabs = append(tabs, renderPersistentStyle(uiDialogMutedStyle, label))
+		}
+	}
+	text := strings.Join(tabs, "  ")
+	hint := " · Tab/←/→"
+	if lipgloss.Width(text+hint) > width {
+		hint = " · Tab"
+	}
+	if lipgloss.Width(text+hint) > width {
+		active := "About"
+		if m.aboutDialog.contextTab {
+			active = "Context"
+		}
+		return renderPersistentStyle(uiDialogSelectedStyle, fitVisible("["+active+"] · Tab", width))
+	}
+	return text + renderPersistentStyle(uiDialogMutedStyle, hint)
+}
+
 func (m model) aboutDialogContent() ([]string, string) {
 	about := m.aboutDialog
+	footer := "Press Esc, Enter, or q to close."
+	if about.err != nil || about.runnerErr != nil {
+		footer = "Press r to try again, or Esc to close."
+	}
+	if about.contextTab {
+		return m.contextDialogContent(), footer
+	}
 	contentWidth := max(1, m.uiDialogWidth()-4)
 	labelWidth := min(aboutLabelWidth, max(1, contentWidth/2))
 	valueWidth := max(1, contentWidth-labelWidth-2)
@@ -250,10 +296,6 @@ func (m model) aboutDialogContent() ([]string, string) {
 	}
 	if m.serverURL != "" {
 		lines = append(lines, row("Address", m.serverURL))
-	}
-	footer := "Press Esc, Enter, or q to close."
-	if about.err != nil || about.runnerErr != nil {
-		footer = "Press r to try again, or Esc to close."
 	}
 	var notices []string
 	switch {
@@ -344,6 +386,164 @@ func (m model) aboutDialogContent() ([]string, string) {
 		}
 	}
 	return lines, footer
+}
+
+func (m model) contextDialogContent() []string {
+	width := max(1, m.uiDialogWidth()-4)
+	var lines []string
+	text := func(value string) {
+		for _, line := range strings.Split(wrapText(value, width), "\n") {
+			lines = append(lines, renderPersistentStyle(uiDialogBodyStyle, fitVisible(line, width)))
+		}
+	}
+	heading := func(value string) {
+		lines = append(lines, renderPersistentStyle(uiDialogButtonStyle, fitVisible(value, width)))
+	}
+	row := func(category contextCategory, total int) {
+		share := 0.0
+		if total > 0 {
+			share = 100 * float64(category.tokens) / float64(total)
+		}
+		value := fmt.Sprintf("%7s tokens · %.1f%%", formatTokenCount(category.tokens), share)
+		label := padVisible(category.label, 17)
+		swatch := renderPersistentStyle(category.style, "■")
+		if lipgloss.Width(label)+lipgloss.Width(value)+4 <= width {
+			lines = append(lines, swatch+" "+renderPersistentStyle(uiDialogBodyStyle, label+"  "+value))
+			return
+		}
+		if width < 4 {
+			text(category.label)
+			text(value)
+			return
+		}
+		for i, line := range strings.Split(wrapText(category.label, width-2), "\n") {
+			prefix := "  "
+			if i == 0 {
+				prefix = swatch + " "
+			}
+			lines = append(lines, prefix+renderPersistentStyle(uiDialogBodyStyle, fitVisible(line, width-2)))
+		}
+		text("  " + value)
+	}
+	heading("Context window")
+	usage := m.usage
+	breakdown := usage.ContextBreakdown
+	var categories, tools []contextCategory
+	var total, toolTotal int
+	if breakdown != nil {
+		total = breakdown.TotalTokens
+		toolStyles := []lipgloss.Style{uiDialogCancelStyle, toolHeaderStyle, steeringStyle.Italic(false), composerFlowStyle, diffAddedStyle, thoughtHeaderStyle}
+		for i, tool := range breakdown.Tools {
+			tokens := tool.InputTokens + tool.OutputTokens
+			tools = append(tools, contextCategory{tool.Name, tokens, toolStyles[i%len(toolStyles)]})
+			toolTotal += tokens
+		}
+		categories = []contextCategory{
+			{"System prompt", breakdown.SystemPromptTokens, toolHeaderStyle},
+			{"Tool definitions", breakdown.ToolDefinitionTokens, steeringStyle.Italic(false)},
+			{"Input text", breakdown.InputTextTokens, composerFlowStyle},
+			{"Output text", breakdown.OutputTextTokens, diffAddedStyle},
+			{"Other / reasoning", breakdown.OtherTokens, thoughtHeaderStyle},
+			{"Tool usage", toolTotal, uiDialogCancelStyle},
+		}
+	}
+	used := 0.0
+	if usage.MaxContextWindow > 0 {
+		text(fmt.Sprintf("%s / %s tokens (%.1f%%)", formatTokenCount(usage.CurrentContextWindow), formatTokenCount(usage.MaxContextWindow),
+			100*float64(usage.CurrentContextWindow)/float64(usage.MaxContextWindow)))
+		used = float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow)
+	} else if usage.CurrentContextWindow > 0 {
+		text(formatTokenCount(usage.CurrentContextWindow) + " tokens · Capacity unavailable.")
+	} else {
+		text("Context usage unavailable until a model turn.")
+	}
+	if usage.MaxContextWindow <= 0 && total > 0 {
+		used = 1
+	}
+	if usage.MaxContextWindow > 0 || breakdown != nil {
+		lines = append(lines, contextStackedBar(categories, total, used, width))
+	}
+	if breakdown != nil {
+		if usage.MaxContextWindow > 0 {
+			text("Used split estimated · remainder available")
+		} else {
+			text("Estimated composition · capacity unavailable")
+		}
+	}
+	lines = append(lines, "")
+	if breakdown == nil {
+		text("Breakdown unavailable until a model turn.")
+		return lines
+	}
+	heading("Composition")
+	text("~" + formatTokenCount(total) + " tokens")
+	mode := breakdown.CodeMode
+	if mode == "" {
+		mode = "off"
+	}
+	text("Code mode: " + mode)
+	lines = append(lines, "")
+	for _, category := range categories {
+		row(category, total)
+	}
+	lines = append(lines, "")
+	heading("Tool usage")
+	if len(breakdown.Tools) == 0 {
+		text("No tool usage in this context.")
+		return lines
+	}
+	text("~" + formatTokenCount(toolTotal) + " tokens")
+	if toolTotal > 0 {
+		lines = append(lines, contextStackedBar(tools, toolTotal, 1, width))
+	}
+	for i, tool := range breakdown.Tools {
+		row(tools[i], toolTotal)
+		calls := "calls"
+		if tool.Calls == 1 {
+			calls = "call"
+		}
+		detail := fmt.Sprintf("%d %s · %s input · %s output tokens", tool.Calls, calls, formatTokenCount(tool.InputTokens), formatTokenCount(tool.OutputTokens))
+		for _, line := range strings.Split(wrapText(detail, max(1, width-2)), "\n") {
+			lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible("  "+line, width)))
+		}
+	}
+	return lines
+}
+
+type contextCategory struct {
+	label  string
+	tokens int
+	style  lipgloss.Style
+}
+
+func contextStackedBar(categories []contextCategory, total int, used float64, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	used = max(0, min(1, used))
+	filled := int(math.Round(used * float64(width)))
+	var bar strings.Builder
+	cumulative, rendered := 0, 0
+	if total > 0 {
+		for _, category := range categories {
+			cumulative += max(0, category.tokens)
+			// Round cumulative boundaries, not each category independently, so
+			// small shares do not inflate the used fraction or overflow the bar.
+			end := min(filled, int(math.Round(used*float64(width)*float64(cumulative)/float64(total))))
+			if end > rendered {
+				bar.WriteString(renderPersistentStyle(category.style, strings.Repeat("█", end-rendered)))
+				rendered = end
+			}
+		}
+	}
+	// Missing/empty estimates keep reported usage visible without attribution.
+	if filled > rendered {
+		bar.WriteString(renderPersistentStyle(uiDialogMutedStyle, strings.Repeat("█", filled-rendered)))
+	}
+	if width > filled {
+		bar.WriteString(renderPersistentStyle(uiDialogMutedStyle, strings.Repeat("░", width-filled)))
+	}
+	return bar.String()
 }
 
 func aboutValue(value string) string {
