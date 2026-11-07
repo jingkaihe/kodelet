@@ -28,6 +28,7 @@ func TestPendingUserCheckpointPreservesLiveContextAcrossProviders(t *testing.T) 
 			t.Setenv("ANTHROPIC_API_KEY", "checkpoint-test")
 			t.Setenv("OPENAI_API_KEY", "checkpoint-test")
 			require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+			testStorage := openTestStorage(t)
 			var calls atomic.Int32
 			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				calls.Add(1)
@@ -43,7 +44,7 @@ func TestPendingUserCheckpointPreservesLiveContextAcrossProviders(t *testing.T) 
 				config.AnthropicAPIAccess = llmtypes.AnthropicAPIAccessAPIKey
 				config.Anthropic = &llmtypes.AnthropicConfig{BaseURL: api.URL}
 			}
-			thread, err := llm.NewThread(config)
+			thread, err := llm.NewThread(config, llm.WithStorage(testStorage))
 			require.NoError(t, err)
 			defer llm.CloseThread(thread)
 			thread.SetConversationID("checkpoint")
@@ -70,7 +71,7 @@ func TestPendingUserCheckpointPreservesLiveContextAcrossProviders(t *testing.T) 
 			assert.Equal(t, "runner", record.Metadata[RunnerIDMetadataKey])
 			assert.Equal(t, "parent", convtypes.ParentConversationIDFromMetadata(record.Metadata))
 			assert.Contains(t, record.Metadata, "config_snapshot")
-			reloaded, err := llm.NewThread(config)
+			reloaded, err := llm.NewThread(config, llm.WithStorage(testStorage))
 			require.NoError(t, err)
 			defer llm.CloseThread(reloaded)
 			reloaded.SetConversationID("checkpoint")
@@ -129,6 +130,7 @@ func TestResumeLoadFailurePreservesDurableTranscript(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+	testStorage := openTestStorage(t)
 	store, err := conversations.GetConversationStore(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
@@ -153,7 +155,7 @@ func TestResumeLoadFailurePreservesDurableTranscript(t *testing.T) {
 					config.AnthropicAPIAccess = llmtypes.AnthropicAPIAccessAPIKey
 					config.Anthropic = &llmtypes.AnthropicConfig{BaseURL: api.URL}
 				}
-				thread, err := llm.NewThread(config)
+				thread, err := llm.NewThread(config, llm.WithStorage(testStorage))
 				require.NoError(t, err)
 				defer llm.CloseThread(thread)
 				thread.SetConversationID(provider + "-" + failure)
@@ -188,7 +190,7 @@ func TestResumeLoadFailurePreservesDurableTranscript(t *testing.T) {
 				thread.AddUserMessage(t.Context(), "must not overwrite the archive")
 				require.NoError(t, thread.SaveConversation(t.Context()))
 
-				runner := NewExecutor(config.WorkingDirectory)
+				runner := NewExecutor(config.WorkingDirectory, testStorage)
 				defer runner.Close()
 				for range 2 {
 					_, err = runner.Run(t.Context(),

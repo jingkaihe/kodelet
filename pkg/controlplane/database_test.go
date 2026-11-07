@@ -1,16 +1,43 @@
 package controlplane
 
 import (
+	"os"
 	"testing"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
+	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// openTestStorage returns thread storage on the migrated database under
+// KODELET_BASE_PATH, which tests must point at a temporary directory first.
+func openTestStorage(t *testing.T) llm.Storage {
+	t.Helper()
+	require.NotEmpty(t, os.Getenv("KODELET_BASE_PATH"), "tests must not open the user's database")
+	path, err := db.DefaultDBPath()
+	require.NoError(t, err)
+	database := dbtest.Open(t, path)
+	return llm.Storage{
+		Conversations: conversations.NewConversationStore(database),
+		Steering:      steer.NewStore(database),
+	}
+}
+
+// attachTestDatabase wires database into a hand-built server as NewServer does.
+func attachTestDatabase(s *Server, database *db.DB) {
+	conversationStore := conversations.NewConversationStore(database)
+	s.database = database
+	s.steer = steer.NewStore(database)
+	s.threadStorage = llm.Storage{Conversations: conversationStore, Steering: s.steer}
+	s.conversationService = conversations.NewConversationService(conversationStore)
+}
 
 func TestNewServerSharesOneDatabaseHandle(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())

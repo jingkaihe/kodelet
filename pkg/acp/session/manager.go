@@ -15,6 +15,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	pkgerrors "github.com/pkg/errors"
@@ -126,6 +127,7 @@ type Manager struct {
 
 	sessions map[acptypes.SessionID]*Session
 	store    conversations.ConversationStore
+	steering *steer.Store
 	mu       sync.RWMutex
 }
 
@@ -136,11 +138,16 @@ func NewManager(cfg ManagerConfig) *Manager {
 	if err != nil {
 		logger.G(ctx).WithError(err).Warn("Failed to create conversation store for ACP sessions")
 	}
+	steering, err := steer.NewSteerStore(ctx)
+	if err != nil {
+		logger.G(ctx).WithError(err).Warn("Failed to open the steering queue for ACP sessions")
+	}
 
 	return &Manager{
 		config:   cfg,
 		sessions: make(map[acptypes.SessionID]*Session),
 		store:    store,
+		steering: steering,
 	}
 }
 
@@ -247,7 +254,7 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 	extensionRuntime := m.buildExtensionRuntime(ctx, req.CWD)
 	llmConfig.Extensions = extensionRuntime
 
-	thread, err := llm.NewThread(llmConfig)
+	thread, err := llm.NewThread(llmConfig, llm.WithStorage(m.threadStorage()))
 	if err != nil {
 		if extensionRuntime != nil {
 			_ = extensionRuntime.Close()
@@ -311,7 +318,7 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 	extensionRuntime := m.buildExtensionRuntime(ctx, req.CWD)
 	llmConfig.Extensions = extensionRuntime
 
-	thread, err := llm.NewThread(llmConfig)
+	thread, err := llm.NewThread(llmConfig, llm.WithStorage(m.threadStorage()))
 	if err != nil {
 		if extensionRuntime != nil {
 			_ = extensionRuntime.Close()
@@ -380,8 +387,8 @@ func (m *Manager) Close(ctx context.Context) error {
 		sessions = append(sessions, session)
 	}
 	m.sessions = make(map[acptypes.SessionID]*Session)
-	store := m.store
-	m.store = nil
+	store, steering := m.store, m.steering
+	m.store, m.steering = nil, nil
 	m.mu.Unlock()
 
 	var result error
@@ -398,6 +405,16 @@ func (m *Manager) Close(ctx context.Context) error {
 			result = multierror.Append(result, err)
 		}
 	}
+	if err := steering.Close(); err != nil {
+		result = multierror.Append(result, err)
+	}
 
 	return result
+}
+
+// threadStorage returns the stores the manager's session threads use.
+func (m *Manager) threadStorage() llm.Storage {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return llm.Storage{Conversations: m.store, Steering: m.steering}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
+	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai/responses"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -55,8 +56,43 @@ func resolveModelAlias(modelName string, aliases map[string]string) string {
 	return modelName
 }
 
+// Storage is the persistence a thread uses; see base.Storage.
+type Storage = base.Storage
+
+// ThreadOption configures a thread created by NewThread.
+type ThreadOption func(*threadOptions)
+
+type threadOptions struct {
+	storage Storage
+}
+
+// WithStorage gives the thread the stores it persists to and reads steering
+// from. A thread created without a conversation store cannot be persisted.
+func WithStorage(storage Storage) ThreadOption {
+	return func(options *threadOptions) {
+		options.storage = storage
+	}
+}
+
 // NewThread creates a new thread based on the model specified in the config
-func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
+func NewThread(config llmtypes.Config, opts ...ThreadOption) (llmtypes.Thread, error) {
+	var options threadOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+	thread, err := newProviderThread(config)
+	if err != nil {
+		return nil, err
+	}
+	setter, ok := thread.(interface{ SetStorage(base.Storage) })
+	if !ok {
+		return nil, errors.Errorf("%T does not support conversation storage", thread)
+	}
+	setter.SetStorage(options.storage)
+	return thread, nil
+}
+
+func newProviderThread(config llmtypes.Config) (llmtypes.Thread, error) {
 	if !config.ModelAliasesResolved {
 		config.Model = resolveModelAlias(config.Model, config.Aliases)
 		config.WeakModel = resolveModelAlias(config.WeakModel, config.Aliases)

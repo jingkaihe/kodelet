@@ -7,7 +7,6 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -206,15 +205,12 @@ func TriggerTurnEnd(
 
 // HasPendingSteer reports whether steering arrived while the current model turn was in flight.
 // Providers use this before stopping so the next exchange can inject the queued messages.
-func HasPendingSteer(ctx context.Context, conversationID string) bool {
-	steerStore, err := steer.NewSteerStore(ctx)
-	if err != nil {
-		logger.G(ctx).WithError(err).Warn("failed to check for pending steer before agent stop")
+func (t *Thread) HasPendingSteer(ctx context.Context) bool {
+	if t.Steering == nil {
 		return false
 	}
-	defer steerStore.Close()
-
-	hasPendingSteer, err := steerStore.HasPending(ctx, conversationID)
+	conversationID := t.ConversationID
+	hasPendingSteer, err := t.Steering.HasPending(ctx, conversationID)
 	if err != nil {
 		logger.G(ctx).WithError(err).Warn("failed to query pending steer before agent stop")
 		return false

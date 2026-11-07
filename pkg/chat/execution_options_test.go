@@ -64,7 +64,7 @@ func TestResolveExtensionProfileCodeMode(t *testing.T) {
 	require.NotNil(t, config.RunnerOptions().CodeMode, "an explicit profile code_mode reaches the runner")
 	assert.Equal(t, "off", *config.RunnerOptions().CodeMode)
 
-	resolved, err := ResolveExecutionOptions(t.Context(), ChatRequest{}, config)
+	resolved, err := ResolveExecutionOptions(t.Context(), nil, ChatRequest{}, config)
 	require.NoError(t, err)
 	assert.Equal(t, "off", *resolved.RunnerOptions().CodeMode, "request option merging keeps the profile's mode")
 
@@ -138,7 +138,7 @@ func TestIsolatedProfileCannotWidenHostPermissions(t *testing.T) {
 	assert.False(t, config.EnvironmentOptions().ToolAllowed("bash"), "disjoint commands must deny all, not inherit")
 	assert.True(t, *config.EnvironmentOptions().NoSkills)
 	assert.True(t, *config.EnvironmentOptions().NoExtensions)
-	config, err = ResolveExecutionOptions(t.Context(), ChatRequest{Options: &llmtypes.ExecutionOptions{
+	config, err = ResolveExecutionOptions(t.Context(), nil, ChatRequest{Options: &llmtypes.ExecutionOptions{
 		AllowedTools: &[]string{"file_read", "file_write", "bash"}, AllowedCommands: &[]string{"go test"},
 		NoSkills: new(false), NoExtensions: new(false), MaxTurns: new(2),
 	}}, config)
@@ -525,6 +525,7 @@ func TestExecutionOptionsRejectedBeforeEnvironmentEffects(t *testing.T) {
 	})
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+	testStorage := openTestStorage(t)
 	metadata, err := conversationservice.AddConfigSnapshot(nil, llmtypes.Config{
 		Profile: "work", Provider: "anthropic", Model: "private-main", WeakModel: "private-weak",
 		MaxTokens: 4096, ThinkingBudgetTokens: 1024, ReasoningEffort: "medium",
@@ -554,7 +555,7 @@ func TestExecutionOptionsRejectedBeforeEnvironmentEffects(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			resolver := &recordingEnvironmentResolver{}
 			runtimes := &fakeExtensionRuntimeProvider{}
-			runner := NewExecutor("", runtimes)
+			runner := NewExecutor("", testStorage, runtimes)
 			runner.SetEnvironmentResolver(resolver)
 			t.Cleanup(func() { require.NoError(t, runner.Close()) })
 			tt.request.Message = "/command-that-must-not-run"

@@ -76,6 +76,7 @@ type Server struct {
 	router                *mux.Router
 	database              *db.DB // shared by every store; Close closes it last
 	steer                 *steer.Store
+	threadStorage         llm.Storage // stores for conversation threads the server creates
 	conversationService   conversations.ConversationServiceInterface
 	searchIndexer         *searchindex.Indexer
 	searchIndexDone       chan struct{}
@@ -312,6 +313,7 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 	}
 
 	conversationStore := conversations.NewConversationStore(database)
+	threadStorage := llm.Storage{Conversations: conversationStore, Steering: steer.NewStore(database)}
 	conversationService := conversations.NewConversationService(conversationStore)
 	var searchIndexer *searchindex.Indexer
 	if store, ok := conversationStore.(searchindex.Store); ok {
@@ -357,11 +359,12 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 	s := &Server{
 		router:              mux.NewRouter(),
 		database:            database,
-		steer:               steer.NewStore(database),
+		steer:               threadStorage.Steering,
+		threadStorage:       threadStorage,
 		conversationService: conversationService,
 		searchIndexer:       searchIndexer,
 		chatRunner: &serverChatRunner{
-			runner: chat.NewExecutor("", nil),
+			runner: chat.NewExecutor("", threadStorage, nil),
 		},
 		config:                config,
 		transcription:         transcriber,

@@ -25,6 +25,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/llm"
 	runnerclient "github.com/jingkaihe/kodelet/pkg/runner/client"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
@@ -730,7 +731,7 @@ func TestEmbeddedRunnerDefaultSelectionPrecedence(t *testing.T) {
 				server.runnerRegistry.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, errors.New("offline"))
 			}
 			resolver := &embeddedSelectionResolver{}
-			defaultRunner := NewExecutor("")
+			defaultRunner := NewExecutor("", openTestStorage(t))
 			defaultRunner.SetEnvironmentResolver(resolver)
 			t.Cleanup(func() { assert.NoError(t, defaultRunner.Close()) })
 			_, err := (&serverChatRunner{server: server, runner: defaultRunner}).Run(t.Context(), request, &recordingChatSink{})
@@ -2120,7 +2121,7 @@ func TestServerChatRunnerResolvesAffinityBeforeChatValidation(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, server.runnerRegistry.BindConversationWithEnvironmentProfile(t.Context(), "conversation-chat", registration.RunnerID, "gpu"))
 
-	defaultRunner := NewExecutor("")
+	defaultRunner := NewExecutor("", llm.Storage{})
 	runner := &serverChatRunner{runner: defaultRunner, server: server}
 	defaultRunner.SetEnvironmentResolver(runner)
 	active := newActiveChatRun(func() {})
@@ -2182,7 +2183,7 @@ func TestServerChatRunnerRejectsExistingLocalConversationRunnerMigration(t *test
 			return nil, errors.Errorf("unexpected conversation lookup %q", id)
 		}
 	}}
-	runner := &serverChatRunner{server: server, runner: NewExecutor("")}
+	runner := &serverChatRunner{server: server, runner: NewExecutor("", llm.Storage{})}
 	t.Cleanup(func() { assert.NoError(t, runner.Close()) })
 
 	conversationID, err := runner.Run(t.Context(), ChatRequest{

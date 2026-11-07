@@ -18,6 +18,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -168,7 +169,7 @@ func (f *fakeMetadataThread) SetEnvironment(environment agentenv.Environment) {
 }
 
 func TestNewExecutorStoresDefaultCWD(t *testing.T) {
-	runner := NewExecutor("/workspace")
+	runner := NewExecutor("/workspace", llm.Storage{})
 
 	require.NotNil(t, runner)
 	assert.Equal(t, "/workspace", runner.defaultCWD)
@@ -178,7 +179,7 @@ func TestNewExecutorStoresDefaultCWD(t *testing.T) {
 
 func TestNewExecutorStoresExtensionRuntimeProvider(t *testing.T) {
 	provider := &fakeExtensionRuntimeProvider{}
-	runner := NewExecutor("/workspace", provider)
+	runner := NewExecutor("/workspace", llm.Storage{}, provider)
 
 	require.NotNil(t, runner)
 	assert.Same(t, provider, runner.extensionRuntimes)
@@ -265,6 +266,7 @@ func TestExecutorReloadsWithoutCallingModelOrExtensionCommands(t *testing.T) {
 	viper.Set("profiles.work", map[string]any{"provider": "openai", "model": "gpt-4.1"})
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+	testStorage := openTestStorage(t)
 
 	for _, test := range []struct {
 		name     string
@@ -278,7 +280,7 @@ func TestExecutorReloadsWithoutCallingModelOrExtensionCommands(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			workspace := t.TempDir()
 			conversationID := "conversation-reload"
-			config, err := ResolveRemoteConfigWithReasoning(t.Context(), conversationID, "", "")
+			config, err := ResolveRemoteConfigWithReasoning(t.Context(), testStorage.Conversations, conversationID, "", "")
 			require.NoError(t, err)
 			config.WorkingDirectory = workspace
 			fingerprint, err := chatThreadConfigFingerprint(config)
@@ -288,7 +290,7 @@ func TestExecutorReloadsWithoutCallingModelOrExtensionCommands(t *testing.T) {
 				directCommandEnvironment: directCommandEnvironment{manifest: agentenv.Manifest{WorkingDirectory: workspace}},
 				openErr:                  test.openErr, closeErr: test.closeErr,
 			}
-			runner := NewExecutor(workspace)
+			runner := NewExecutor(workspace, testStorage)
 			runner.SetEnvironmentResolver(&recordingEnvironmentResolver{environment: environment})
 			runner.sessions[conversationID] = &defaultChatSession{
 				thread: thread, configFingerprint: fingerprint, lastUsed: time.Now(),
@@ -347,7 +349,7 @@ func TestExecutorRejectsInvalidOrLocalReload(t *testing.T) {
 	} {
 		t.Run(test.message+test.runnerID, func(t *testing.T) {
 			provider := &fakeExtensionRuntimeProvider{}
-			runner := NewExecutor("", provider)
+			runner := NewExecutor("", llm.Storage{}, provider)
 			sink := &recordingChatSink{}
 			_, err := runner.Run(t.Context(), ChatRequest{
 				Message: test.message, RunnerID: test.runnerID,
@@ -360,7 +362,7 @@ func TestExecutorRejectsInvalidOrLocalReload(t *testing.T) {
 }
 
 func TestExecutorStoresEnvironmentResolver(t *testing.T) {
-	runner := NewExecutor("")
+	runner := NewExecutor("", llm.Storage{})
 	resolver := staticEnvironmentResolver{}
 
 	runner.SetEnvironmentResolver(resolver)
@@ -381,6 +383,7 @@ func TestRunDefaultChatPassesConversationContextToRuntimeProvider(t *testing.T) 
 	viper.Set("profile", "work")
 	viper.Set("profiles.work", map[string]any{"provider": "anthropic", "model": "claude-test"})
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	testStorage := openTestStorage(t)
 	workspace := t.TempDir()
 	sentinel := errors.New("stop after runtime acquisition")
 	provider := &fakeContextualExtensionRuntimeProvider{err: sentinel}
@@ -389,7 +392,7 @@ func TestRunDefaultChatPassesConversationContextToRuntimeProvider(t *testing.T) 
 		context.Background(),
 		ChatRequest{Message: "hello", CWD: workspace},
 		&recordingChatSink{},
-		"",
+		"", testStorage,
 		provider,
 	)
 
@@ -408,6 +411,7 @@ func TestRunDefaultChatPassesConversationContextToRuntimeProvider(t *testing.T) 
 func TestResolveExtensionCallContextIncludesRecipeAndPersistedOrigin(t *testing.T) {
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+	testStorage := openTestStorage(t)
 
 	initiator := convtypes.ConversationForkInitiator{
 		Type:        convtypes.ConversationForkInitiatorTypeExtensionTool,
@@ -428,7 +432,7 @@ func TestResolveExtensionCallContextIncludesRecipeAndPersistedOrigin(t *testing.
 	require.NoError(t, store.Save(t.Context(), child))
 	require.NoError(t, store.Close())
 
-	callContext, err := ResolveExtensionCallContext(t.Context(), " conversation-shortcut ", " /workspace/project ", llmtypes.Config{
+	callContext, err := ResolveExtensionCallContext(t.Context(), testStorage.Conversations, " conversation-shortcut ", " /workspace/project ", llmtypes.Config{
 		Provider: " anthropic ",
 		Model:    " claude-test ",
 		Profile:  " work ",
@@ -444,13 +448,13 @@ func TestResolveExtensionCallContextIncludesRecipeAndPersistedOrigin(t *testing.
 		InvokedBy:      "subagent",
 	}, callContext)
 
-	configuredContext, err := ResolveExtensionCallContext(t.Context(), "conversation-shortcut", "/workspace/project", llmtypes.Config{RecipeName: "configured-review"})
+	configuredContext, err := ResolveExtensionCallContext(t.Context(), testStorage.Conversations, "conversation-shortcut", "/workspace/project", llmtypes.Config{RecipeName: "configured-review"})
 	require.NoError(t, err)
 	assert.Equal(t, "configured-review", configuredContext.RecipeName)
 }
 
 func TestResolveExtensionCallContextDefaultsNewConversationOrigin(t *testing.T) {
-	callContext, err := ResolveExtensionCallContext(t.Context(), "", "/workspace", llmtypes.Config{RecipeName: "review"})
+	callContext, err := ResolveExtensionCallContext(t.Context(), nil, "", "/workspace", llmtypes.Config{RecipeName: "review"})
 	require.NoError(t, err)
 	assert.Equal(t, "main", callContext.InvokedBy)
 	assert.Equal(t, "review", callContext.RecipeName)
@@ -470,6 +474,7 @@ func TestExecutorExecutesRemoteDirectCommandAndPersistsAffinityMetadata(t *testi
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+	testStorage := openTestStorage(t)
 	initiator := convtypes.ConversationForkInitiator{
 		Type:     convtypes.ConversationForkInitiatorTypeExtensionTool,
 		ToolName: "subagent",
@@ -499,7 +504,7 @@ func TestExecutorExecutesRemoteDirectCommandAndPersistsAffinityMetadata(t *testi
 		},
 	}
 	resolver := &recordingEnvironmentResolver{environment: environment}
-	runner := NewExecutor("")
+	runner := NewExecutor("", testStorage)
 	runner.SetEnvironmentResolver(resolver)
 	t.Cleanup(func() { require.NoError(t, runner.Close()) })
 	sink := &recordingChatSink{}
@@ -534,7 +539,7 @@ func TestExecutorExecutesRemoteDirectCommandAndPersistsAffinityMetadata(t *testi
 	assert.Equal(t, "runner-one", record.Metadata[RunnerIDMetadataKey])
 	assert.Equal(t, "gpu", record.Metadata[EnvironmentProfileMetadataKey])
 
-	config, err := ResolveRemoteConfigWithReasoning(t.Context(), "", "", "high")
+	config, err := ResolveRemoteConfigWithReasoning(t.Context(), testStorage.Conversations, "", "", "high")
 	require.NoError(t, err)
 	assert.Equal(t, "high", config.ReasoningEffort)
 }
@@ -567,8 +572,9 @@ func TestExecutorStreamsAndPersistsExplicitCommandDisplay(t *testing.T) {
 	viper.Set("profiles.work", map[string]any{"provider": "openai", "model": "gpt-4.1"})
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+	testStorage := openTestStorage(t)
 	conversationID := "conversation-dictate-display"
-	config, _, err := ResolveRemoteConfigWithReasoningAndEnvironmentProfile(t.Context(), conversationID, "", "", "")
+	config, _, err := ResolveRemoteConfigWithReasoningAndEnvironmentProfile(t.Context(), testStorage.Conversations, conversationID, "", "", "")
 	require.NoError(t, err)
 	fingerprint, err := chatThreadConfigFingerprint(config)
 	require.NoError(t, err)
@@ -582,7 +588,7 @@ func TestExecutorStreamsAndPersistsExplicitCommandDisplay(t *testing.T) {
 		Display:         "What should I make for breakfast?",
 		DisplayOverride: true,
 	}}
-	runner := NewExecutor("")
+	runner := NewExecutor("", testStorage)
 	runner.sessions[conversationID] = &defaultChatSession{
 		thread:            thread,
 		configFingerprint: fingerprint,
@@ -630,8 +636,9 @@ func TestExecutorIncludesImagesInExplicitCommandDisplay(t *testing.T) {
 	viper.Set("profiles.work", map[string]any{"provider": "openai", "model": "gpt-4.1"})
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+	testStorage := openTestStorage(t)
 	conversationID := "conversation-dictate-display-image"
-	config, _, err := ResolveRemoteConfigWithReasoningAndEnvironmentProfile(t.Context(), conversationID, "", "", "")
+	config, _, err := ResolveRemoteConfigWithReasoningAndEnvironmentProfile(t.Context(), testStorage.Conversations, conversationID, "", "", "")
 	require.NoError(t, err)
 	fingerprint, err := chatThreadConfigFingerprint(config)
 	require.NoError(t, err)
@@ -645,7 +652,7 @@ func TestExecutorIncludesImagesInExplicitCommandDisplay(t *testing.T) {
 		Display:         "What is in this image?",
 		DisplayOverride: true,
 	}}
-	runner := NewExecutor("")
+	runner := NewExecutor("", testStorage)
 	runner.sessions[conversationID] = &defaultChatSession{
 		thread:            thread,
 		configFingerprint: fingerprint,
@@ -696,7 +703,7 @@ func TestExecutorReusesAndClosesConversationThread(t *testing.T) {
 	fingerprint, err := chatThreadConfigFingerprint(config)
 	require.NoError(t, err)
 	thread := &fakeMetadataThread{}
-	runner := NewExecutor("/workspace")
+	runner := NewExecutor("/workspace", llm.Storage{})
 	runner.sessions["conv-1"] = &defaultChatSession{
 		thread:            thread,
 		configFingerprint: fingerprint,
@@ -730,12 +737,13 @@ func TestExecutorPersistsFreshChildAndPreservesParentOnResume(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+	testStorage := openTestStorage(t)
 	store, err := conversations.GetConversationStore(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
 	parent := convtypes.NewConversationRecord("parent")
 	require.NoError(t, store.Save(t.Context(), parent))
-	runner := NewExecutor(t.TempDir(), &fakeExtensionRuntimeProvider{})
+	runner := NewExecutor(t.TempDir(), testStorage, &fakeExtensionRuntimeProvider{})
 	t.Cleanup(func() { require.NoError(t, runner.Close()) })
 	_, err = runner.Run(t.Context(), ChatRequest{ConversationID: "child", ParentConversationID: parent.ID, Message: "/rename Child"}, &recordingChatSink{})
 	require.NoError(t, err)
@@ -768,6 +776,7 @@ func TestExecutorValidatesParentAgainAtInitialCheckpoint(t *testing.T) {
 			t.Setenv("OPENAI_API_KEY", "test-key")
 			t.Setenv("KODELET_BASE_PATH", t.TempDir())
 			require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+			testStorage := openTestStorage(t)
 			store, err := conversations.GetConversationStore(t.Context())
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, store.Close()) })
@@ -793,7 +802,7 @@ func TestExecutorValidatesParentAgainAtInitialCheckpoint(t *testing.T) {
 				assert.Contains(t, string(record.RawMessages), "inspect")
 				return nil
 			}
-			runner := NewExecutor("")
+			runner := NewExecutor("", testStorage)
 			runner.SetEnvironmentResolver(&recordingEnvironmentResolver{environment: environment})
 			t.Cleanup(func() { require.NoError(t, runner.Close()) })
 			_, err = runner.Run(t.Context(), ChatRequest{ConversationID: "child", ParentConversationID: "parent", RunnerID: "runner", Message: "inspect"}, &recordingChatSink{})
@@ -823,15 +832,16 @@ func TestExecutorRenameCommandPersistsWithoutCallingModel(t *testing.T) {
 	viper.Set("profiles.work", map[string]any{"provider": "openai", "model": "gpt-4.1"})
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+	testStorage := openTestStorage(t)
 	workspace := t.TempDir()
 	conversationID := "conv-rename"
-	config, _, err := ResolveConfigWithReasoning(context.Background(), conversationID, "", "", workspace, workspace)
+	config, _, err := ResolveConfigWithReasoning(context.Background(), testStorage.Conversations, conversationID, "", "", workspace, workspace)
 	require.NoError(t, err)
 	fingerprint, err := chatThreadConfigFingerprint(config)
 	require.NoError(t, err)
 
 	thread := &fakeMetadataThread{conversationID: conversationID, persisted: true}
-	runner := NewExecutor(workspace, &fakeExtensionRuntimeProvider{})
+	runner := NewExecutor(workspace, testStorage, &fakeExtensionRuntimeProvider{})
 	runner.sessions[conversationID] = &defaultChatSession{
 		thread:            thread,
 		configFingerprint: fingerprint,
@@ -862,6 +872,7 @@ func TestExecutorRenameCommandPersistsWithoutCallingModel(t *testing.T) {
 func TestResolveConfigRejectsRunnerBoundConversationBeforeResolvingRemoteCWD(t *testing.T) {
 	basePath := t.TempDir()
 	t.Setenv("KODELET_BASE_PATH", basePath)
+	testStorage := openTestStorage(t)
 	database := dbtest.Open(t, filepath.Join(basePath, "storage.db"))
 	store := conversationsqlite.NewStore(database)
 	now := time.Now().UTC()
@@ -886,7 +897,7 @@ func TestResolveConfigRejectsRunnerBoundConversationBeforeResolvingRemoteCWD(t *
 	`, "remote-conversation", "runner-one", now, now)
 	require.NoError(t, err)
 
-	_, _, err = ResolveConfigWithReasoning(t.Context(), "remote-conversation", "", "", "", t.TempDir())
+	_, _, err = ResolveConfigWithReasoning(t.Context(), testStorage.Conversations, "remote-conversation", "", "", "", t.TempDir())
 	require.ErrorContains(t, err, "bound to runner runner-one")
 	assert.NotContains(t, err.Error(), "cwd directory does not exist")
 }
@@ -896,7 +907,7 @@ func TestPersistDirectCommandResponseWithoutCallingModel(t *testing.T) {
 	fingerprint, err := chatThreadConfigFingerprint(config)
 	require.NoError(t, err)
 	thread := &fakeMetadataThread{conversationID: "conv-command"}
-	runner := NewExecutor("/workspace")
+	runner := NewExecutor("/workspace", llm.Storage{})
 	runner.sessions[thread.conversationID] = &defaultChatSession{
 		thread:            thread,
 		configFingerprint: fingerprint,
@@ -926,7 +937,7 @@ func TestAcquireChatThreadRejectsSessionDetachedDuringClose(t *testing.T) {
 	fingerprint, err := chatThreadConfigFingerprint(config)
 	require.NoError(t, err)
 	thread := &fakeMetadataThread{}
-	runner := NewExecutor("/workspace")
+	runner := NewExecutor("/workspace", llm.Storage{})
 	session := &defaultChatSession{
 		thread:            thread,
 		configFingerprint: fingerprint,
@@ -1006,7 +1017,7 @@ func TestAcquireChatThreadRejectsSessionDetachedDuringClose(t *testing.T) {
 }
 
 func TestExecutorEvictsIdleConversationThreads(t *testing.T) {
-	runner := NewExecutor("/workspace")
+	runner := NewExecutor("/workspace", llm.Storage{})
 	defer func() { require.NoError(t, runner.Close()) }()
 	idleThread := &fakeMetadataThread{}
 	runner.sessions["idle"] = &defaultChatSession{
@@ -1030,7 +1041,7 @@ func TestExecutorEvictsIdleConversationThreads(t *testing.T) {
 }
 
 func TestExecutorClosesDeletedConversationThread(t *testing.T) {
-	runner := NewExecutor("/workspace")
+	runner := NewExecutor("/workspace", llm.Storage{})
 	defer func() { require.NoError(t, runner.Close()) }()
 	thread := &fakeMetadataThread{}
 	runner.sessions["conv-1"] = &defaultChatSession{thread: thread, lastUsed: time.Now()}

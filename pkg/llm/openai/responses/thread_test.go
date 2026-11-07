@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/avast/retry-go/v4"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -827,16 +828,15 @@ func TestResponsesContextThinkingAccumulatesReportedUsage(t *testing.T) {
 }
 
 func TestProcessMessageExchangeInjectsPendingSteer(t *testing.T) {
-	steerStore, err := steer.NewSteerStore(context.Background())
-	require.NoError(t, err)
-	defer steerStore.Close()
-	_, err = steerStore.Enqueue(context.Background(), "conv-test", "Please focus on error handling", nil)
+	steerStore := steer.NewStore(dbtest.OpenTemp(t))
+	_, err := steerStore.Enqueue(context.Background(), "conv-test", "Please focus on error handling", nil)
 	require.NoError(t, err)
 
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
 		Thread: base.NewThread(config, "conv-test"),
 	}
+	thread.SetStorage(base.Storage{Steering: steerStore})
 	thread.inputItems = []openairesponses.ResponseInputItemUnionParam{
 		{
 			OfMessage: &openairesponses.EasyInputMessageParam{
@@ -874,16 +874,15 @@ func TestProcessMessageExchangeInjectsPendingSteer(t *testing.T) {
 }
 
 func TestProcessMessageExchangeInjectsPendingSteerWithImages(t *testing.T) {
-	steerStore, err := steer.NewSteerStore(context.Background())
-	require.NoError(t, err)
-	defer steerStore.Close()
-	_, err = steerStore.Enqueue(context.Background(), "conv-test", "Use this image", []string{"data:image/png;base64,aGVsbG8="})
+	steerStore := steer.NewStore(dbtest.OpenTemp(t))
+	_, err := steerStore.Enqueue(context.Background(), "conv-test", "Use this image", []string{"data:image/png;base64,aGVsbG8="})
 	require.NoError(t, err)
 
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
 		Thread: base.NewThread(config, "conv-test"),
 	}
+	thread.SetStorage(base.Storage{Steering: steerStore})
 
 	var capturedParams openairesponses.ResponseNewParams
 	thread.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
@@ -1549,9 +1548,7 @@ func TestSendMessageRequiresResponseCompletedEvent(t *testing.T) {
 }
 
 func TestSendMessageContinuesForSteerQueuedBeforeStop(t *testing.T) {
-	steerStore, err := steer.NewSteerStore(context.Background())
-	require.NoError(t, err)
-	defer steerStore.Close()
+	steerStore := steer.NewStore(dbtest.OpenTemp(t))
 
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}
 	thread := &Thread{
@@ -1559,6 +1556,7 @@ func TestSendMessageContinuesForSteerQueuedBeforeStop(t *testing.T) {
 		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),
 		storedItems: make([]StoredInputItem, 0),
 	}
+	thread.SetStorage(base.Storage{Steering: steerStore})
 
 	exchangeCalls := 0
 	thread.processMessageExchangeFunc = func(

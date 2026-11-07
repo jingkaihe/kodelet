@@ -20,6 +20,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
@@ -786,15 +787,14 @@ func TestAddUserMessageWithTooManyImages(t *testing.T) {
 }
 
 func TestProcessPendingSteerWithImages(t *testing.T) {
-	steerStore, err := steer.NewSteerStore(context.Background())
-	require.NoError(t, err)
-	defer steerStore.Close()
-	_, err = steerStore.Enqueue(context.Background(), "conv-test", "Use this image", []string{"data:image/png;base64,aGVsbG8="})
+	steerStore := steer.NewStore(dbtest.OpenTemp(t))
+	_, err := steerStore.Enqueue(context.Background(), "conv-test", "Use this image", []string{"data:image/png;base64,aGVsbG8="})
 	require.NoError(t, err)
 
 	thread := &Thread{
 		Thread: base.NewThread(llm.Config{Provider: "openai", Model: "gpt-4.1"}, "conv-test"),
 	}
+	thread.SetStorage(base.Storage{Steering: steerStore})
 	requestParams := &openai.ChatCompletionRequest{}
 	handler := &llm.StringCollectorHandler{Silent: true}
 

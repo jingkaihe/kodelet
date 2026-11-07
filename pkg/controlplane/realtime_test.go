@@ -160,9 +160,7 @@ func TestRealtimeCreatesConversationWithoutCodingTurn(t *testing.T) {
 			path, err := db.DefaultDBPath()
 			require.NoError(t, err)
 			s.turns = openTurnTestStore(t, path)
-			s.conversationService, err = conversations.GetDefaultConversationService(t.Context())
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = s.conversationService.Close() })
+			attachTestDatabase(s, s.turns.db)
 			session := &testRealtimeSession{events: make(chan llmtypes.RealtimeEvent, 16)}
 			s.realtime = &testRealtimeProvider{session: session}
 			t.Cleanup(s.closeRealtimeCalls)

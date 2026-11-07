@@ -15,6 +15,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
+	"github.com/jingkaihe/kodelet/pkg/llm"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/spf13/viper"
@@ -275,7 +276,7 @@ func TestLocalChatRejectsRunnerEnvironmentProfile(t *testing.T) {
 	_, err := RunDefaultChat(t.Context(), ChatRequest{
 		Message:            "hello",
 		EnvironmentProfile: "workspace",
-	}, &recordingChatSink{}, "", nil)
+	}, &recordingChatSink{}, "", llm.Storage{}, nil)
 	require.ErrorContains(t, err, "environmentProfile requires a remote runner")
 }
 
@@ -297,7 +298,7 @@ func TestResolveWebChatConfig_ResolvesRelativeCWDFromDefaultWorkspace(t *testing
 	viper.Set("profiles.work", map[string]any{"provider": "openai", "model": "gpt-5.5"})
 
 	config, resolvedCWD, err := ResolveConfig(
-		context.Background(),
+		context.Background(), nil,
 		"",
 		"work",
 		"backend",

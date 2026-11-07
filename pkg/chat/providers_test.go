@@ -59,6 +59,7 @@ func TestExtensionProfileSubscriptionRequests(t *testing.T) {
 	t.Chdir(home)
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+	testStorage := openTestStorage(t)
 	t.Setenv("OPENAI_API_KEY", "unused-api-key")
 	t.Setenv("ANTHROPIC_API_KEY", "unused-api-key")
 	viper.Set("provider", "openai")
@@ -194,7 +195,7 @@ data: {"type":"message_stop"}
 			t.Cleanup(func() { require.NoError(t, store.Close()) })
 			conversationID := ""
 			for turn := range 2 {
-				config, err := ResolveRemoteConfigWithReasoning(ctx, conversationID, profile.Name, "")
+				config, err := ResolveRemoteConfigWithReasoning(ctx, testStorage.Conversations, conversationID, profile.Name, "")
 				require.NoError(t, err)
 				assert.Equal(t, new(true), config.EnvironmentOptions().NoSkills)
 				assert.Equal(t, new(true), config.EnvironmentOptions().NoExtensions)

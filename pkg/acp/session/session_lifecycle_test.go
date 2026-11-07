@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +10,7 @@ import (
 	conversationtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -206,7 +206,7 @@ func (f *fakeConversationStore) Load(_ context.Context, id string) (conversation
 			return record, nil
 		}
 	}
-	return conversationtypes.ConversationRecord{}, errors.New("not found")
+	return conversationtypes.ConversationRecord{}, errors.Wrapf(conversationtypes.ErrConversationNotFound, "%s", id)
 }
 
 func (f *fakeConversationStore) Delete(context.Context, string) error { return nil }

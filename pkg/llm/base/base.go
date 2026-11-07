@@ -14,6 +14,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -25,6 +26,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// errConversationStorageUnavailable reports a thread created without a
+// conversation store, which therefore cannot be persisted.
+var errConversationStorageUnavailable = errors.New("conversation storage is unavailable")
+
 // Constants for image processing (shared across all providers)
 const (
 	MaxImageFileSize = 5 * 1024 * 1024 // 5MB limit
@@ -34,6 +39,14 @@ const (
 // ConversationStore is an alias for the conversations.ConversationStore interface
 // to avoid direct dependency on the conversations package in provider implementations.
 type ConversationStore = conversations.ConversationStore
+
+// Storage is the persistence a thread uses. Its stores share the process's
+// database handle, which the caller owns. A thread without Conversations
+// cannot be persisted, and one without Steering ignores queued steering.
+type Storage struct {
+	Conversations ConversationStore
+	Steering      *steer.Store
+}
 
 // LoadConversationFunc is a callback function type for provider-specific conversation loading.
 // This is called by EnablePersistence when persistence is enabled and a store is available.
@@ -50,6 +63,7 @@ type Thread struct {
 	Persisted         bool                                      // Whether conversation is being persisted
 	Metadata          map[string]any                            // Additional provider-neutral conversation metadata
 	Store             ConversationStore                         // Conversation persistence store
+	Steering          *steer.Store                              // Steering queue for this conversation
 	ToolResults       map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
 	CompactionHistory *convtypes.CompactionHistory              // Display archive; never included in inference input
 	RendererRegistry  *renderers.RendererRegistry               // CLI renderer registry for structured tool results
@@ -210,12 +224,20 @@ func (t *Thread) IsPersisted() bool {
 	return t.Persisted
 }
 
+// SetStorage sets the stores the thread persists to and reads steering from.
+// Callers set it once, before enabling persistence.
+func (t *Thread) SetStorage(storage Storage) {
+	t.ConversationMu.Lock()
+	defer t.ConversationMu.Unlock()
+	t.Store = storage.Conversations
+	t.Steering = storage.Steering
+}
+
 // EnablePersistence enables or disables conversation persistence.
-// When enabling persistence:
-//   - Initializes the conversation store if not already initialized
-//   - Calls the LoadConversation callback to load any existing conversation
+// When enabling persistence, it calls the LoadConversation callback to load
+// any existing conversation from the store set by SetStorage.
 //
-// If store initialization or loading fails, persistence is disabled and the error is returned.
+// If the thread has no conversation store or loading fails, persistence is disabled and the error is returned.
 // A missing conversation is normal for a new thread. Disabling persistence cannot fail.
 // The LoadConversation callback must be set by the provider before calling this method
 // if provider-specific conversation loading is needed.
@@ -226,14 +248,9 @@ func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) error {
 
 	t.Persisted = enabled
 
-	// Initialize the store if enabling persistence and it's not already initialized
 	if enabled && t.Store == nil {
-		store, err := conversations.GetConversationStore(ctx)
-		if err != nil {
-			t.Persisted = false
-			return errors.Wrap(err, "failed to initialize conversation store")
-		}
-		t.Store = store
+		t.Persisted = false
+		return errConversationStorageUnavailable
 	}
 
 	// If enabling persistence and there's an existing conversation ID,

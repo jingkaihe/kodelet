@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
-	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	openaillm "github.com/jingkaihe/kodelet/pkg/llm/openai"
@@ -33,9 +32,8 @@ func TestCentralModelHelperUsesFrozenToolFreeProvider(t *testing.T) {
 	t.Setenv("KODELET_SERVER", "http://127.0.0.1:1")
 	t.Setenv("KODELET_AUTH_TOKEN", "invalid-cli-token")
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
-	store, err := conversations.GetConversationStore(t.Context())
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	testStorage := openTestStorage(t)
+	store := testStorage.Conversations
 	goal := "Extract the evidence from the document"
 	workspace := filepath.Join(root, "workspace")
 	require.NoError(t, os.MkdirAll(workspace, 0o700))
@@ -120,9 +118,9 @@ func TestCentralModelHelperUsesFrozenToolFreeProvider(t *testing.T) {
 	parentEnvironment := &struct{ agentenv.Environment }{}
 	parent.SetEnvironment(parentEnvironment)
 	parent.AddUserMessage(t.Context(), "PARENT_ONLY")
+	parent.SetStorage(testStorage)
 	require.NoError(t, parent.EnablePersistence(t.Context(), true))
 	require.True(t, parent.IsPersisted())
-	t.Cleanup(func() { require.NoError(t, parent.Store.Close()) })
 	require.NoError(t, parent.SaveConversation(t.Context()))
 	originalParentRecord, err := store.Load(t.Context(), parent.GetConversationID())
 	require.NoError(t, err)

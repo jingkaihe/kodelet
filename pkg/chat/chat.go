@@ -249,6 +249,7 @@ type EnvironmentResolver interface {
 // Executor orchestrates persisted chat turns, LLM threads, and execution environments.
 type Executor struct {
 	defaultCWD          string
+	storage             llm.Storage
 	extensionRuntimes   ExtensionRuntimeProvider
 	environmentResolver EnvironmentResolver
 	sessionsMu          sync.Mutex
@@ -269,14 +270,16 @@ const (
 	defaultChatSessionIdleTTL = 30 * time.Minute
 )
 
-// NewExecutor creates a chat executor with cached conversation threads.
-func NewExecutor(defaultCWD string, extensionRuntimes ...ExtensionRuntimeProvider) *Executor {
+// NewExecutor creates a chat executor with cached conversation threads that
+// persist to storage. The caller owns storage's database handle.
+func NewExecutor(defaultCWD string, storage llm.Storage, extensionRuntimes ...ExtensionRuntimeProvider) *Executor {
 	var provider ExtensionRuntimeProvider
 	if len(extensionRuntimes) > 0 {
 		provider = extensionRuntimes[0]
 	}
 	return &Executor{
 		defaultCWD:        defaultCWD,
+		storage:           storage,
 		extensionRuntimes: provider,
 		sessions:          make(map[string]*defaultChatSession),
 	}
@@ -364,8 +367,10 @@ func (r *Executor) ExtensionRuntimeProvider() ExtensionRuntimeProvider {
 }
 
 // RunDefaultChat executes a single persisted chat turn and streams events to the sink.
-func RunDefaultChat(ctx context.Context, req ChatRequest, sink ChatEventSink, defaultCWD string, extensionRuntimes ExtensionRuntimeProvider) (string, error) {
-	return runDefaultChat(ctx, req, sink, defaultCWD, extensionRuntimes, nil, nil)
+func RunDefaultChat(ctx context.Context, req ChatRequest, sink ChatEventSink, defaultCWD string, storage llm.Storage, extensionRuntimes ExtensionRuntimeProvider) (string, error) {
+	executor := NewExecutor(defaultCWD, storage, extensionRuntimes)
+	defer func() { _ = executor.Close() }()
+	return executor.Run(ctx, req, sink)
 }
 
 func runDefaultChat(
@@ -377,6 +382,7 @@ func runDefaultChat(
 	threadOwner *Executor,
 	environmentResolver EnvironmentResolver,
 ) (resultSessionID string, resultErr error) {
+	storage := threadOwner.threadStorage()
 	req.Options = req.Options.Clone()
 	if err := req.Options.Validate(); err != nil {
 		return "", err
@@ -423,11 +429,10 @@ func runDefaultChat(
 		if req.ParentConversationID == "" {
 			return nil
 		}
-		service, err := conversationservice.GetDefaultConversationService(ctx)
+		service, err := conversationServiceFor(storage.Conversations)
 		if err != nil {
 			return err
 		}
-		defer func() { _ = service.Close() }()
 		return conversationservice.ValidateParentConversation(ctx, service, sessionID, req.ParentConversationID)
 	}
 	if err := validateParent(ctx); err != nil {
@@ -435,7 +440,7 @@ func runDefaultChat(
 	}
 	invokedBy := "main"
 	if strings.TrimSpace(req.ConversationID) != "" {
-		invokedBy, err = resolveConversationInvokedBy(ctx, sessionID)
+		invokedBy, err = resolveConversationInvokedBy(ctx, storage.Conversations, sessionID)
 		if err != nil {
 			return sessionID, err
 		}
@@ -448,6 +453,7 @@ func runDefaultChat(
 	if strings.TrimSpace(req.RunnerID) != "" {
 		llmConfig, environmentProfile, err = ResolveRemoteConfigWithReasoningAndEnvironmentProfile(
 			ctx,
+			storage.Conversations,
 			sessionID,
 			strings.TrimSpace(req.Profile),
 			strings.TrimSpace(req.ReasoningEffort),
@@ -460,12 +466,12 @@ func runDefaultChat(
 		if strings.TrimSpace(req.EnvironmentProfile) != "" {
 			return sessionID, errors.New("environmentProfile requires a remote runner")
 		}
-		llmConfig, resolvedCWD, err = ResolveConfigWithReasoning(ctx, sessionID, strings.TrimSpace(req.Profile), strings.TrimSpace(req.ReasoningEffort), strings.TrimSpace(req.CWD), defaultCWD)
+		llmConfig, resolvedCWD, err = ResolveConfigWithReasoning(ctx, storage.Conversations, sessionID, strings.TrimSpace(req.Profile), strings.TrimSpace(req.ReasoningEffort), strings.TrimSpace(req.CWD), defaultCWD)
 	}
 	if err != nil {
 		return sessionID, errors.Wrap(err, "failed to load configuration")
 	}
-	llmConfig, err = ResolveExecutionOptions(ctx, req, llmConfig)
+	llmConfig, err = ResolveExecutionOptions(ctx, storage.Conversations, req, llmConfig)
 	if err != nil {
 		return sessionID, err
 	}
@@ -892,7 +898,7 @@ func acquireChatThread(
 		return nil, false, func() {}, err
 	}
 
-	thread, err = llm.NewThread(config)
+	thread, err = llm.NewThread(config, llm.WithStorage(owner.threadStorage()))
 	if err != nil {
 		release()
 		return nil, false, func() {}, err
@@ -900,6 +906,27 @@ func acquireChatThread(
 	session.thread = thread
 	session.configFingerprint = fingerprint
 	return thread, true, release, nil
+}
+
+// conversationServiceFor reads conversations from store without owning it.
+func conversationServiceFor(store conversationservice.ConversationStore) (*conversationservice.ConversationService, error) {
+	if store == nil {
+		return nil, errConversationStorageUnavailable
+	}
+	return conversationservice.NewConversationService(store), nil
+}
+
+// errConversationStorageUnavailable reports an executor without a
+// conversation store, which can neither load nor persist conversations.
+var errConversationStorageUnavailable = errors.New("conversation storage is unavailable")
+
+// threadStorage returns the storage the executor's threads persist to. A nil
+// executor has none, so its threads cannot be persisted.
+func (r *Executor) threadStorage() llm.Storage {
+	if r == nil {
+		return llm.Storage{}
+	}
+	return r.storage
 }
 
 func chatThreadConfigFingerprint(config llmtypes.Config) (string, error) {
@@ -957,17 +984,16 @@ func closeDefaultChatSession(session *defaultChatSession) error {
 	return err
 }
 
-func resolveConversationInvokedBy(ctx context.Context, conversationID string) (string, error) {
-	invokedBy, _, err := resolveConversationExtensionMetadata(ctx, conversationID)
+func resolveConversationInvokedBy(ctx context.Context, store conversationservice.ConversationStore, conversationID string) (string, error) {
+	invokedBy, _, err := resolveConversationExtensionMetadata(ctx, store, conversationID)
 	return invokedBy, err
 }
 
-func resolveConversationExtensionMetadata(ctx context.Context, conversationID string) (string, string, error) {
-	service, err := conversationservice.GetDefaultConversationService(ctx)
+func resolveConversationExtensionMetadata(ctx context.Context, store conversationservice.ConversationStore, conversationID string) (string, string, error) {
+	service, err := conversationServiceFor(store)
 	if err != nil {
 		return "", "", errors.Wrap(err, "failed to open conversation service")
 	}
-	defer func() { _ = service.Close() }()
 
 	record, err := service.GetConversation(ctx, strings.TrimSpace(conversationID))
 	if errors.Is(err, convtypes.ErrConversationNotFound) {
@@ -982,13 +1008,13 @@ func resolveConversationExtensionMetadata(ctx context.Context, conversationID st
 
 // ResolveExtensionCallContext builds the extension context for an interactive
 // operation, including the persisted origin of a resumed conversation.
-func ResolveExtensionCallContext(ctx context.Context, conversationID, cwd string, config llmtypes.Config) (extensions.ExtensionCallContext, error) {
+func ResolveExtensionCallContext(ctx context.Context, store conversationservice.ConversationStore, conversationID, cwd string, config llmtypes.Config) (extensions.ExtensionCallContext, error) {
 	conversationID = strings.TrimSpace(conversationID)
 	invokedBy := "main"
 	persistedRecipeName := ""
 	if conversationID != "" {
 		var err error
-		invokedBy, persistedRecipeName, err = resolveConversationExtensionMetadata(ctx, conversationID)
+		invokedBy, persistedRecipeName, err = resolveConversationExtensionMetadata(ctx, store, conversationID)
 		if err != nil {
 			return extensions.ExtensionCallContext{}, err
 		}
@@ -1011,11 +1037,11 @@ func extensionCallContext(conversationID, cwd string, config llmtypes.Config, in
 	}
 }
 
-func ResolveConfig(ctx context.Context, conversationID, requestedProfile, requestedCWD, defaultCWDInput string) (llmtypes.Config, string, error) {
-	return ResolveConfigWithReasoning(ctx, conversationID, requestedProfile, "", requestedCWD, defaultCWDInput)
+func ResolveConfig(ctx context.Context, store conversationservice.ConversationStore, conversationID, requestedProfile, requestedCWD, defaultCWDInput string) (llmtypes.Config, string, error) {
+	return ResolveConfigWithReasoning(ctx, store, conversationID, requestedProfile, "", requestedCWD, defaultCWDInput)
 }
 
-func ResolveConfigWithReasoning(ctx context.Context, conversationID, requestedProfile, requestedReasoningEffort, requestedCWD, defaultCWDInput string) (llmtypes.Config, string, error) {
+func ResolveConfigWithReasoning(ctx context.Context, store conversationservice.ConversationStore, conversationID, requestedProfile, requestedReasoningEffort, requestedCWD, defaultCWDInput string) (llmtypes.Config, string, error) {
 	defaultCWD, err := ResolveConfiguredDefaultCWD(defaultCWDInput)
 	if err != nil {
 		return llmtypes.Config{}, "", err
@@ -1039,13 +1065,10 @@ func ResolveConfigWithReasoning(ctx context.Context, conversationID, requestedPr
 		return config, resolution.CWD, nil
 	}
 
-	service, err := conversationservice.GetDefaultConversationService(ctx)
+	service, err := conversationServiceFor(store)
 	if err != nil {
 		return llmtypes.Config{}, "", errors.Wrap(err, "failed to open conversation service")
 	}
-	defer func() {
-		_ = service.Close()
-	}()
 
 	record, recordErr := service.GetConversation(ctx, conversationID)
 	if recordErr == nil {
@@ -1077,8 +1100,8 @@ func ResolveConfigWithReasoning(ctx context.Context, conversationID, requestedPr
 
 // ResolveRemoteConfigWithReasoning resolves only control-plane provider settings.
 // The runner manifest supplies the authoritative workspace path and environment configuration.
-func ResolveRemoteConfigWithReasoning(ctx context.Context, conversationID, requestedProfile, requestedReasoningEffort string) (llmtypes.Config, error) {
-	config, _, err := ResolveRemoteConfigWithReasoningAndEnvironmentProfile(ctx, conversationID, requestedProfile, requestedReasoningEffort, "")
+func ResolveRemoteConfigWithReasoning(ctx context.Context, store conversationservice.ConversationStore, conversationID, requestedProfile, requestedReasoningEffort string) (llmtypes.Config, error) {
+	config, _, err := ResolveRemoteConfigWithReasoningAndEnvironmentProfile(ctx, store, conversationID, requestedProfile, requestedReasoningEffort, "")
 	return config, err
 }
 
@@ -1097,7 +1120,7 @@ func resolveRemoteNewConversationConfig(ctx context.Context, profile, effort str
 }
 
 // ResolveRemoteConfigWithReasoningAndEnvironmentProfile resolves central model policy and the independently locked runner profile.
-func ResolveRemoteConfigWithReasoningAndEnvironmentProfile(ctx context.Context, conversationID, requestedProfile, requestedReasoningEffort, requestedEnvironmentProfile string) (llmtypes.Config, string, error) {
+func ResolveRemoteConfigWithReasoningAndEnvironmentProfile(ctx context.Context, store conversationservice.ConversationStore, conversationID, requestedProfile, requestedReasoningEffort, requestedEnvironmentProfile string) (llmtypes.Config, string, error) {
 	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" {
 		config, err := resolveRemoteNewConversationConfig(ctx, requestedProfile, requestedReasoningEffort)
@@ -1105,13 +1128,10 @@ func ResolveRemoteConfigWithReasoningAndEnvironmentProfile(ctx context.Context, 
 		return config, NormalizeEnvironmentProfile(requestedEnvironmentProfile), err
 	}
 
-	service, err := conversationservice.GetDefaultConversationService(ctx)
+	service, err := conversationServiceFor(store)
 	if err != nil {
 		return llmtypes.Config{}, "", errors.Wrap(err, "failed to open conversation service")
 	}
-	defer func() {
-		_ = service.Close()
-	}()
 
 	record, err := service.GetConversation(ctx, conversationID)
 	if err != nil {

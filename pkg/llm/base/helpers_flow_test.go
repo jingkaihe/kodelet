@@ -9,8 +9,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
-	"github.com/jingkaihe/kodelet/pkg/db"
-	"github.com/jingkaihe/kodelet/pkg/db/migrations"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/steer"
@@ -753,20 +752,21 @@ func TestTriggerTurnEnd(t *testing.T) {
 }
 
 func TestHasPendingSteer(t *testing.T) {
-	basePath := t.TempDir()
-	t.Setenv("HOME", basePath)
-	t.Setenv("KODELET_BASE_PATH", basePath)
-	require.NoError(t, db.RunMigrations(context.Background(), migrations.All()))
+	thread := NewThread(llmtypes.Config{}, "conv-test")
+	assert.False(t, thread.HasPendingSteer(t.Context()), "a thread without a steering queue has nothing pending")
 
-	assert.False(t, HasPendingSteer(context.Background(), "conv-test"))
-
-	steerStore, err := steer.NewSteerStore(context.Background())
+	steerStore := steer.NewStore(dbtest.OpenTemp(t))
+	thread.SetStorage(Storage{Steering: steerStore})
+	assert.False(t, thread.HasPendingSteer(t.Context()))
+	_, err := steerStore.Enqueue(t.Context(), "conv-test", "keep going", nil)
 	require.NoError(t, err)
-	defer steerStore.Close()
-	_, err = steerStore.Enqueue(context.Background(), "conv-test", "keep going", nil)
-	require.NoError(t, err)
+	assert.True(t, thread.HasPendingSteer(t.Context()))
 
-	assert.True(t, HasPendingSteer(context.Background(), "conv-test"))
+	_, err = steerStore.Enqueue(t.Context(), "other-conversation", "unrelated", nil)
+	require.NoError(t, err)
+	other := NewThread(llmtypes.Config{}, "third-conversation")
+	other.SetStorage(Storage{Steering: steerStore})
+	assert.False(t, other.HasPendingSteer(t.Context()), "steering belongs to its conversation")
 }
 
 func TestHandleAgentStopFollowUps(t *testing.T) {

@@ -22,6 +22,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/codemode"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/steer"
@@ -1176,15 +1177,14 @@ func TestAddAssistantMessage(t *testing.T) {
 }
 
 func TestProcessPendingSteerWithImages(t *testing.T) {
-	steerStore, err := steer.NewSteerStore(context.Background())
-	require.NoError(t, err)
-	defer steerStore.Close()
-	_, err = steerStore.Enqueue(context.Background(), "conv-test", "Use this image", []string{"data:image/png;base64,aGVsbG8="})
+	steerStore := steer.NewStore(dbtest.OpenTemp(t))
+	_, err := steerStore.Enqueue(context.Background(), "conv-test", "Use this image", []string{"data:image/png;base64,aGVsbG8="})
 	require.NoError(t, err)
 
 	thread := &Thread{
 		Thread: base.NewThread(llmtypes.Config{Provider: "anthropic", Model: "claude-sonnet-4-6"}, "conv-test"),
 	}
+	thread.SetStorage(base.Storage{Steering: steerStore})
 	params := &anthropic.MessageNewParams{}
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
 
@@ -1202,15 +1202,14 @@ func TestProcessPendingSteerWithImages(t *testing.T) {
 }
 
 func TestProcessPendingSteerWithUserMessageHandler(t *testing.T) {
-	steerStore, err := steer.NewSteerStore(context.Background())
-	require.NoError(t, err)
-	defer steerStore.Close()
-	_, err = steerStore.Enqueue(context.Background(), "conv-test", "Use this image", []string{"data:image/png;base64,aGVsbG8="})
+	steerStore := steer.NewStore(dbtest.OpenTemp(t))
+	_, err := steerStore.Enqueue(context.Background(), "conv-test", "Use this image", []string{"data:image/png;base64,aGVsbG8="})
 	require.NoError(t, err)
 
 	thread := &Thread{
 		Thread: base.NewThread(llmtypes.Config{Provider: "anthropic", Model: "claude-sonnet-4-6"}, "conv-test"),
 	}
+	thread.SetStorage(base.Storage{Steering: steerStore})
 	params := &anthropic.MessageNewParams{}
 	handler := &captureUserMessageHandler{}
 

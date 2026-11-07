@@ -51,7 +51,7 @@ func (s *Server) createRealtimeConversation(ctx context.Context, req *chat.ChatR
 	if err != nil {
 		return err
 	}
-	config, err = chat.ResolveExecutionOptions(ctx, *req, config)
+	config, err = chat.ResolveExecutionOptions(ctx, s.threadStorage.Conversations, *req, config)
 	if err != nil {
 		return err
 	}
@@ -66,7 +66,7 @@ func (s *Server) createRealtimeConversation(ctx context.Context, req *chat.ChatR
 		return errors.Wrap(err, "could not resolve the voice conversation's workspace")
 	}
 	config.WorkingDirectory = directory.BaseDir
-	thread, err := llm.NewThread(config)
+	thread, err := llm.NewThread(config, llm.WithStorage(s.threadStorage))
 	if err != nil {
 		return err
 	}

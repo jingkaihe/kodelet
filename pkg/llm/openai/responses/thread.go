@@ -692,7 +692,7 @@ OUTER:
 					}
 					continue OUTER
 				}
-				if canContinue && base.HasPendingSteer(ctx, t.ConversationID) {
+				if canContinue && t.HasPendingSteer(ctx) {
 					continue OUTER
 				}
 
@@ -1306,13 +1306,10 @@ func logResponsesAPIRequestFailure(log *logrus.Entry, err error, model string, t
 }
 
 func (t *Thread) processPendingSteer(ctx context.Context, handler llmtypes.MessageHandler) error {
-	steerStore, err := steer.NewSteerStore(ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to create steer store")
+	if t.Steering == nil {
+		return nil
 	}
-	defer steerStore.Close()
-
-	pendingSteer, err := steerStore.Consume(ctx, t.ConversationID)
+	pendingSteer, err := t.Steering.Consume(ctx, t.ConversationID)
 	if err != nil {
 		return errors.Wrap(err, "failed to consume pending steer")
 	}

@@ -223,10 +223,6 @@ func TestManagerCreatesAndLoadsSessionsWithLocalEnvironment(t *testing.T) {
 			RawMessages: json.RawMessage(`[]`),
 		},
 	}}
-	persistedStore, err := conversations.GetConversationStore(t.Context())
-	require.NoError(t, err)
-	require.NoError(t, persistedStore.Save(t.Context(), store.loads["loaded-session"]))
-	require.NoError(t, persistedStore.Close())
 	manager := &Manager{
 		config: ManagerConfig{
 			Provider:     "anthropic",
