@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,7 +24,6 @@ func TestOpen(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	require.NoError(t, VerifyConfiguration(db))
 	assert.Equal(t, 1, db.Writer.Stats().MaxOpenConnections)
 	assert.Equal(t, readerConnections, db.Reader.Stats().MaxOpenConnections)
 	assert.NoError(t, (*DB)(nil).Close())
@@ -204,7 +204,7 @@ func TestOpenEscapesDatabasePath(t *testing.T) {
 			database, err := Open(t.Context(), path)
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, database.Close()) })
-			require.NoError(t, VerifyConfiguration(database))
+			require.NoError(t, verifyWAL(t.Context(), database.Writer))
 
 			_, err = os.Stat(path)
 			require.NoError(t, err, "URI metacharacters must remain part of the filename")
@@ -322,18 +322,6 @@ func TestDefaultDBPath(t *testing.T) {
 		home, _ := os.UserHomeDir()
 		assert.Equal(t, filepath.Join(home, ".kodelet", "storage.db"), path)
 	})
-}
-
-func TestVerifyConfiguration(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-
-	db, err := Open(context.Background(), dbPath)
-	require.NoError(t, err)
-	defer db.Close()
-
-	err = VerifyConfiguration(db)
-	require.NoError(t, err)
 }
 
 func TestMigrationRunner(t *testing.T) {
@@ -691,37 +679,7 @@ func TestMigrationRunnerRollbackPropagatesDownAndDeleteErrors(t *testing.T) {
 	})
 }
 
-func TestVerifyConfigurationReportsPragmaMismatches(t *testing.T) {
-	ctx := context.Background()
-	database, err := Open(ctx, filepath.Join(t.TempDir(), "verify.db"))
-	require.NoError(t, err)
-	defer database.Close()
-
-	_, err = database.Writer.ExecContext(ctx, `PRAGMA foreign_keys=OFF`)
-	require.NoError(t, err)
-	err = VerifyConfiguration(database)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "expected foreign keys ON")
-
-	_, err = database.Writer.ExecContext(ctx, `PRAGMA foreign_keys=ON`)
-	require.NoError(t, err)
-	_, err = database.Writer.ExecContext(ctx, `PRAGMA synchronous=FULL`)
-	require.NoError(t, err)
-	err = VerifyConfiguration(database)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "expected NORMAL synchronous mode")
-
-	_, err = database.Writer.ExecContext(ctx, `PRAGMA synchronous=NORMAL`)
-	require.NoError(t, err)
-	database.Reader.SetMaxOpenConns(1)
-	_, err = database.Reader.ExecContext(ctx, `PRAGMA query_only=OFF`)
-	require.NoError(t, err)
-	err = VerifyConfiguration(database)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "expected read-only readers")
-}
-
-func TestVerifyWALAndVerifyConfigurationReturnClosedDatabaseErrors(t *testing.T) {
+func TestVerifyWALReturnsClosedDatabaseError(t *testing.T) {
 	database, err := Open(context.Background(), filepath.Join(t.TempDir(), "closed.db"))
 	require.NoError(t, err)
 	require.NoError(t, database.Close())
@@ -729,10 +687,57 @@ func TestVerifyWALAndVerifyConfigurationReturnClosedDatabaseErrors(t *testing.T)
 	err = verifyWAL(context.Background(), database.Writer)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to query journal mode")
+}
 
-	err = VerifyConfiguration(database)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to query journal mode")
+// errInjectedClose is returned when closing a failingCloseConn.
+var errInjectedClose = errors.New("injected close failure")
+
+// failingCloseConnector opens connections that fail to close.
+type failingCloseConnector struct{}
+
+func (failingCloseConnector) Connect(context.Context) (driver.Conn, error) {
+	return failingCloseConn{}, nil
+}
+
+func (failingCloseConnector) Driver() driver.Driver { return failingCloseDriver{} }
+
+type failingCloseDriver struct{}
+
+func (failingCloseDriver) Open(string) (driver.Conn, error) { return failingCloseConn{}, nil }
+
+type failingCloseConn struct{}
+
+func (failingCloseConn) Prepare(string) (driver.Stmt, error) { return nil, driver.ErrSkip }
+func (failingCloseConn) Close() error                        { return errInjectedClose }
+func (failingCloseConn) Begin() (driver.Tx, error)           { return nil, driver.ErrSkip }
+
+// failingClosePool returns a pool holding one idle connection that fails to close.
+func failingClosePool(t *testing.T) *sqlx.DB {
+	t.Helper()
+	pool := sqlx.NewDb(sql.OpenDB(failingCloseConnector{}), "sqlite")
+	require.NoError(t, pool.Ping())
+	return pool
+}
+
+func TestCloseClosesBothPoolsAndReportsEachFailure(t *testing.T) {
+	t.Run("reader fails", func(t *testing.T) {
+		database, err := Open(t.Context(), filepath.Join(t.TempDir(), "close.db"))
+		require.NoError(t, err)
+		require.NoError(t, database.Reader.Close())
+		database.Reader = failingClosePool(t)
+
+		err = database.Close()
+		require.ErrorIs(t, err, errInjectedClose)
+		assert.ErrorContains(t, err, "failed to close database readers")
+		assert.ErrorContains(t, database.Writer.Ping(), "database is closed", "a reader failure must not leave the writer open")
+	})
+	t.Run("both fail", func(t *testing.T) {
+		database := &DB{Reader: failingClosePool(t), Writer: failingClosePool(t)}
+
+		err := database.Close()
+		assert.ErrorContains(t, err, "failed to close database readers")
+		assert.ErrorContains(t, err, "failed to close database writer")
+	})
 }
 
 func TestMigrationRunnerRecordsDescriptionAndAppliedAt(t *testing.T) {

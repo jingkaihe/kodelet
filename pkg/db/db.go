@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
@@ -39,14 +38,10 @@ var readerPragmas = []string{
 	"query_only=ON",
 }
 
-const (
-	// readerConnections bounds concurrent reads. WAL readers do not block one
-	// another or the writer, but each connection holds its own page cache.
-	readerConnections = 4
-	// readerIdleTimeout releases read connections opened for a burst of
-	// concurrent reads once the process no longer needs them.
-	readerIdleTimeout = time.Minute
-)
+// readerConnections bounds concurrent reads. WAL readers do not block one
+// another or the writer, but each connection holds its own page cache. A
+// process shares one handle, so its idle readers stay open until it closes.
+const readerConnections = 4
 
 // DB is a SQLite database opened as one writer connection and a pool of
 // read-only connections, and WAL lets reads run alongside the writer and each
@@ -139,7 +134,6 @@ func Open(ctx context.Context, dbPath string) (*DB, error) {
 	}
 	reader.SetMaxIdleConns(readerConnections)
 	reader.SetMaxOpenConns(readerConnections)
-	reader.SetConnMaxIdleTime(readerIdleTimeout)
 	// A ping does not read the file, so read the schema to surface access
 	// errors here rather than on the first query.
 	var tables int
@@ -234,42 +228,4 @@ func GetMigrationStatus(ctx context.Context) ([]int64, error) {
 
 	runner := NewMigrationRunner(sqlDB)
 	return runner.GetAppliedVersions(ctx)
-}
-
-// VerifyConfiguration checks the writer's WAL, durability and integrity
-// settings and that a reader connection rejects writes.
-func VerifyConfiguration(database *DB) error {
-	var journalMode string
-	if err := database.Writer.Get(&journalMode, "PRAGMA journal_mode"); err != nil {
-		return errors.Wrap(err, "failed to query journal mode")
-	}
-	if strings.ToLower(journalMode) != "wal" {
-		return errors.Errorf("expected WAL mode, got %s", journalMode)
-	}
-
-	var synchronous string
-	if err := database.Writer.Get(&synchronous, "PRAGMA synchronous"); err != nil {
-		return errors.Wrap(err, "failed to query synchronous mode")
-	}
-	if synchronous != "1" {
-		return errors.Errorf("expected NORMAL synchronous mode, got %s", synchronous)
-	}
-
-	var foreignKeys string
-	if err := database.Writer.Get(&foreignKeys, "PRAGMA foreign_keys"); err != nil {
-		return errors.Wrap(err, "failed to query foreign keys")
-	}
-	if foreignKeys != "1" {
-		return errors.Errorf("expected foreign keys ON, got %s", foreignKeys)
-	}
-
-	var queryOnly string
-	if err := database.Reader.Get(&queryOnly, "PRAGMA query_only"); err != nil {
-		return errors.Wrap(err, "failed to query reader query_only mode")
-	}
-	if queryOnly != "1" {
-		return errors.Errorf("expected read-only readers, got query_only %s", queryOnly)
-	}
-
-	return nil
 }
