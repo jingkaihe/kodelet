@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.8.24-beta
+
+Improved SQLite concurrency with shared connections, parallel reads, and safer write transactions. Centralized database ownership and hardened startup and shutdown.
+
 ## 0.8.23-beta
 
 Added a Context tab to About Kodelet in the TUI and Web UI, showing context-window utilization, estimated composition, code-mode status, and per-tool call counts and input/output token estimates, with color-coded usage bars.
