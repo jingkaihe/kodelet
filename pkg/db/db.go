@@ -43,18 +43,25 @@ const (
 	// readerConnections bounds concurrent reads. WAL readers do not block one
 	// another or the writer, but each connection holds its own page cache.
 	readerConnections = 4
-	// readerIdleTimeout releases read connections of short-lived stores.
+	// readerIdleTimeout releases read connections opened for a burst of
+	// concurrent reads once the process no longer needs them.
 	readerIdleTimeout = time.Minute
 )
 
 // DB is a SQLite database opened as one writer connection and a pool of
-// read-only connections. SQLite admits one writer at a time, so writes queue
-// for the writer connection instead of polling SQLite's busy handler, while
-// WAL lets reads run alongside the writer and each other.
+// read-only connections, and WAL lets reads run alongside the writer and each
+// other. A process opens one DB per database file and shares it, so its writes
+// queue in Go for the writer connection; writers in other processes still wait
+// in SQLite's busy handler, up to busy_timeout.
 //
 // Use Writer for writes and for transactions that read before writing: its
 // transactions begin IMMEDIATE, reserving the write lock before reading, so a
 // concurrent commit cannot make the snapshot unwritable (SQLITE_BUSY_SNAPSHOT).
+// A transaction begun with sql.TxOptions{ReadOnly: true} skips that
+// reservation, so begin read-only transactions on Reader. While holding a
+// Writer transaction, pass the transaction rather than using Writer again: the
+// second call waits for the only writer connection until its context ends.
+//
 // Use Reader for reads that need no write in the same transaction, including
 // read-only transactions; it sees every write committed before the read began.
 type DB struct {
@@ -69,15 +76,19 @@ func (d *DB) Path() string {
 	return d.path
 }
 
-// Close closes both pools.
+// Close closes both pools, reporting every failure.
 func (d *DB) Close() error {
 	if d == nil {
 		return nil
 	}
-	return stderrors.Join(
-		errors.Wrap(d.Reader.Close(), "failed to close database readers"),
-		errors.Wrap(d.Writer.Close(), "failed to close database writer"),
-	)
+	var errs []error
+	if d.Reader != nil {
+		errs = append(errs, errors.Wrap(d.Reader.Close(), "failed to close database readers"))
+	}
+	if d.Writer != nil {
+		errs = append(errs, errors.Wrap(d.Writer.Close(), "failed to close database writer"))
+	}
+	return stderrors.Join(errs...)
 }
 
 // DefaultDBPath returns the default path for the shared storage database.
@@ -129,6 +140,14 @@ func Open(ctx context.Context, dbPath string) (*DB, error) {
 	reader.SetMaxIdleConns(readerConnections)
 	reader.SetMaxOpenConns(readerConnections)
 	reader.SetConnMaxIdleTime(readerIdleTimeout)
+	// A ping does not read the file, so read the schema to surface access
+	// errors here rather than on the first query.
+	var tables int
+	if err := reader.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master").Scan(&tables); err != nil {
+		reader.Close()
+		writer.Close()
+		return nil, errors.Wrap(err, "failed to read database")
+	}
 
 	return &DB{Writer: writer, Reader: reader, path: absolutePath}, nil
 }
@@ -218,7 +237,7 @@ func GetMigrationStatus(ctx context.Context) ([]int64, error) {
 }
 
 // VerifyConfiguration checks the writer's WAL, durability and integrity
-// settings and that the readers reject writes.
+// settings and that a reader connection rejects writes.
 func VerifyConfiguration(database *DB) error {
 	var journalMode string
 	if err := database.Writer.Get(&journalMode, "PRAGMA journal_mode"); err != nil {

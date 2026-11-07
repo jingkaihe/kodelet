@@ -802,6 +802,7 @@ func TestBrowserOIDCExpiryClosesSocketDuringBlockedAuthCheck(t *testing.T) {
 	defer connection.Close()
 	socket.assertClosed(t, browserAuthCheckInterval+2*time.Second)
 	assert.Zero(t, f.stops.Load())
+	assert.Positive(t, f.server.authStore.db.Reader.Stats().WaitCount, "the revalidation must have blocked on the held reader")
 }
 
 func TestBrowserOIDCRevocationAndRoleChangesCloseWebsocket(t *testing.T) {

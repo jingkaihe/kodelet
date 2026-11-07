@@ -27,6 +27,7 @@ func TestOpen(t *testing.T) {
 	assert.Equal(t, 1, db.Writer.Stats().MaxOpenConnections)
 	assert.Equal(t, readerConnections, db.Reader.Stats().MaxOpenConnections)
 	assert.NoError(t, (*DB)(nil).Close())
+	assert.NoError(t, (&DB{}).Close(), "closing a handle without pools must not panic")
 }
 
 func TestOpenReaderRejectsWrites(t *testing.T) {
@@ -43,6 +44,10 @@ func TestOpenReaderRejectsWrites(t *testing.T) {
 	_, err = tx.ExecContext(t.Context(), `INSERT INTO probe VALUES (1)`)
 	require.ErrorContains(t, err, "readonly")
 	require.NoError(t, tx.Rollback())
+	// Writes that return rows look like reads to the caller.
+	var value int
+	err = database.Reader.GetContext(t.Context(), &value, `INSERT INTO probe VALUES (1) RETURNING value`)
+	require.ErrorContains(t, err, "readonly")
 }
 
 func TestOpenReadersRunAlongsideWriterTransaction(t *testing.T) {
@@ -93,7 +98,8 @@ func TestOpenWriterTransactionsBeginImmediate(t *testing.T) {
 	_, err = other.Writer.ExecContext(t.Context(), `PRAGMA busy_timeout = 0`)
 	require.NoError(t, err)
 
-	// A deferred transaction takes no lock until it first touches the database.
+	// Without IMMEDIATE, this empty transaction would hold no lock yet and the
+	// other handle's write below would succeed.
 	tx, err := database.Writer.BeginTxx(t.Context(), nil)
 	require.NoError(t, err)
 	_, err = other.Writer.ExecContext(t.Context(), `INSERT INTO probe VALUES (1)`)
@@ -102,6 +108,28 @@ func TestOpenWriterTransactionsBeginImmediate(t *testing.T) {
 
 	_, err = other.Writer.ExecContext(t.Context(), `INSERT INTO probe VALUES (1)`)
 	require.NoError(t, err)
+}
+
+func TestOpenWriterReadOnlyTransactionsDoNotReserveTheWriteLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "readonly-writer.db")
+	database, err := Open(t.Context(), path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, database.Close()) })
+	_, err = database.Writer.ExecContext(t.Context(), `CREATE TABLE probe (value INTEGER)`)
+	require.NoError(t, err)
+	other, err := Open(t.Context(), path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, other.Close()) })
+	_, err = other.Writer.ExecContext(t.Context(), `PRAGMA busy_timeout = 0`)
+	require.NoError(t, err)
+
+	// The driver begins read-only transactions without IMMEDIATE, as the DB
+	// documentation warns; read-only transactions belong on Reader.
+	tx, err := database.Writer.BeginTxx(t.Context(), &sql.TxOptions{ReadOnly: true})
+	require.NoError(t, err)
+	_, err = other.Writer.ExecContext(t.Context(), `INSERT INTO probe VALUES (1)`)
+	require.NoError(t, err)
+	require.NoError(t, tx.Rollback())
 }
 
 func TestOpenConfiguresReplacementConnections(t *testing.T) {
