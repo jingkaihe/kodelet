@@ -1059,6 +1059,7 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	thread.Usage.OutputTokens = 5
 	thread.Usage.CurrentContextWindow = 123
 	thread.Usage.MaxContextWindow = 456
+	thread.Usage.ContextBreakdown = &llmtypes.ContextBreakdown{TotalTokens: 123}
 	thread.SetMetadataValue("custom_key", "parent value")
 	store := &mockResponsesConversationStore{}
 	thread.Store = store
@@ -1077,6 +1078,7 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	assert.Equal(t, thread.ConversationID, snapshot.ID)
 	assert.Empty(t, store.savedRecords, "capturing a child seed must not publish a temporary conversation")
 	assert.NotContains(t, string(snapshot.RawMessages), "call-subagent")
+	assert.Nil(t, snapshot.Usage.ContextBreakdown, "pending calls removed from the snapshot invalidate the live breakdown")
 	forkedID, err := thread.ForkConversation(forkContext)
 
 	require.NoError(t, err)
@@ -1097,6 +1099,7 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	assert.Zero(t, store.savedRecords[0].Usage.OutputTokens)
 	assert.Equal(t, 123, store.savedRecords[0].Usage.CurrentContextWindow)
 	assert.Equal(t, 456, store.savedRecords[0].Usage.MaxContextWindow)
+	assert.Nil(t, store.savedRecords[0].Usage.ContextBreakdown)
 	assert.NotContains(t, store.savedRecords[0].Metadata, convtypes.CodexResponsesWindowGenerationMetadataKey)
 	assert.Equal(t, "parent value", store.savedRecords[0].Metadata["custom_key"])
 	assert.Equal(t, llmtypes.OpenAIAPIMode(""), thread.Config.OpenAI.APIMode)
@@ -1109,6 +1112,31 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	savedInitiator, ok := convtypes.ConversationForkInitiatorFromMetadata(store.savedRecords[0].Metadata)
 	require.True(t, ok)
 	assert.Equal(t, initiator, savedInitiator)
+}
+
+func TestForkConversationPreservesUnchangedContextBreakdown(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(llmtypes.Config{Model: "gpt-4.1"}, "parent-conversation"),
+		storedItems: []StoredInputItem{
+			{Type: "message", Role: "user", Content: "hello"},
+			{Type: "message", Role: "assistant", Content: "hi"},
+		},
+	}
+	store := &mockResponsesConversationStore{}
+	thread.Store = store
+	thread.Persisted = true
+	thread.Usage.ContextBreakdown = &llmtypes.ContextBreakdown{InputTextTokens: 10, TotalTokens: 10}
+
+	snapshot, err := thread.SnapshotConversationFork(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, thread.Usage.ContextBreakdown, snapshot.Usage.ContextBreakdown)
+	_, err = thread.ForkConversation(t.Context())
+	require.NoError(t, err)
+	require.Len(t, store.savedRecords, 1)
+	forked := store.savedRecords[0]
+	require.Equal(t, thread.Usage.ContextBreakdown, forked.Usage.ContextBreakdown)
+	forked.Usage.ContextBreakdown.TotalTokens = 999
+	assert.Equal(t, 10, thread.Usage.ContextBreakdown.TotalTokens)
 }
 
 func TestResponsesSaveConversationKeepsInitialNameAndPreservesExplicitRenames(t *testing.T) {

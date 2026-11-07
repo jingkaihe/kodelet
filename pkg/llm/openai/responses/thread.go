@@ -1537,6 +1537,10 @@ func (t *Thread) snapshotConversationState(cleanupLive bool) conversationStateSn
 		usage = *t.Usage
 		usage.ContextThinkingByResponse = maps.Clone(usage.ContextThinkingByResponse)
 	}
+	if !cleanupLive && len(storedItems) != len(t.storedItems) {
+		// The live breakdown includes pending calls removed from the fork snapshot.
+		usage.ContextBreakdown = nil
+	}
 	toolResults := maps.Clone(t.ToolResults)
 	metadata := maps.Clone(t.Metadata)
 	compactionHistory := t.CompactionHistory.Clone()

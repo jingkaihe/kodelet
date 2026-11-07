@@ -37,6 +37,7 @@ func TestParentConversationIDFromMetadata(t *testing.T) {
 }
 
 func TestForkConversationRecord(t *testing.T) {
+	thinkingTokens := 50
 	source := NewConversationRecord("source")
 	source.RawMessages = json.RawMessage(`[{"role":"user","content":"hello"}]`)
 	source.CWD = "/workspace"
@@ -48,6 +49,20 @@ func TestForkConversationRecord(t *testing.T) {
 		CurrentContextWindow:      123,
 		MaxContextWindow:          456,
 		ContextThinkingByResponse: map[string]int{"response-1": 50},
+		ContextBreakdown: &llmtypes.ContextBreakdown{
+			SystemPromptTokens:   10,
+			ToolDefinitionTokens: 10,
+			InputTextTokens:      20,
+			OutputTextTokens:     10,
+			ThinkingTokens:       &thinkingTokens,
+			OtherTokens:          3,
+			Tools: []llmtypes.ToolContextUsage{
+				{Name: "bash", InputTokens: 10, OutputTokens: 10, Calls: 1},
+			},
+			TotalTokens: 123,
+			CodeMode:    "off",
+			Estimated:   true,
+		},
 	}
 	source.Metadata = map[string]any{
 		"profile":                                 "work",
@@ -71,6 +86,13 @@ func TestForkConversationRecord(t *testing.T) {
 	assert.Zero(t, forked.Usage.OutputTokens)
 	assert.Equal(t, 123, forked.Usage.CurrentContextWindow)
 	assert.Equal(t, 456, forked.Usage.MaxContextWindow)
+	require.Equal(t, source.Usage.ContextBreakdown, forked.Usage.ContextBreakdown)
+	forked.Usage.ContextBreakdown.TotalTokens = 999
+	*forked.Usage.ContextBreakdown.ThinkingTokens = 999
+	forked.Usage.ContextBreakdown.Tools[0].InputTokens = 999
+	assert.Equal(t, 123, source.Usage.ContextBreakdown.TotalTokens)
+	assert.Equal(t, 50, *source.Usage.ContextBreakdown.ThinkingTokens)
+	assert.Equal(t, 10, source.Usage.ContextBreakdown.Tools[0].InputTokens)
 	assert.Equal(t, source.Usage.ContextThinkingByResponse, forked.Usage.ContextThinkingByResponse)
 	forked.Usage.ContextThinkingByResponse["response-1"] = 999
 	assert.Equal(t, 50, source.Usage.ContextThinkingByResponse["response-1"])
@@ -96,6 +118,17 @@ func TestForkConversationRecord(t *testing.T) {
 	assert.Equal(t, byte('['), source.RawMessages[0])
 	assert.Equal(t, "work", source.Metadata["profile"])
 	assert.Contains(t, source.ToolResults, "call-1")
+}
+
+func TestForkConversationRecordWithMissingContextBreakdownData(t *testing.T) {
+	source := NewConversationRecord("source")
+	assert.Nil(t, ForkConversationRecord(source).Usage.ContextBreakdown)
+
+	source.Usage.ContextBreakdown = &llmtypes.ContextBreakdown{InputTextTokens: 10, TotalTokens: 10}
+	forked := ForkConversationRecord(source)
+	require.Equal(t, source.Usage.ContextBreakdown, forked.Usage.ContextBreakdown)
+	assert.Nil(t, forked.Usage.ContextBreakdown.ThinkingTokens)
+	assert.Nil(t, forked.Usage.ContextBreakdown.Tools)
 }
 
 func TestForkConversationRecordTracksNestedLineageAndInitiator(t *testing.T) {

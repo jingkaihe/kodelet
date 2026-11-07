@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -246,6 +247,15 @@ func ForkConversationRecordWithOptions(source ConversationRecord, options Conver
 	forked.Usage.CurrentContextWindow = source.Usage.CurrentContextWindow
 	forked.Usage.MaxContextWindow = source.Usage.MaxContextWindow
 	forked.Usage.ContextThinkingByResponse = maps.Clone(source.Usage.ContextThinkingByResponse)
+	if source.Usage.ContextBreakdown != nil {
+		breakdown := *source.Usage.ContextBreakdown
+		if breakdown.ThinkingTokens != nil {
+			thinking := *breakdown.ThinkingTokens
+			breakdown.ThinkingTokens = &thinking
+		}
+		breakdown.Tools = slices.Clone(breakdown.Tools)
+		forked.Usage.ContextBreakdown = &breakdown
+	}
 	if source.Metadata != nil {
 		forked.Metadata = maps.Clone(source.Metadata)
 		delete(forked.Metadata, ParentConversationIDMetadataKey)

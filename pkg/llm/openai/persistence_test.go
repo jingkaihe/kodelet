@@ -646,6 +646,7 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	thread.Usage.OutputTokens = 5
 	thread.Usage.CurrentContextWindow = 123
 	thread.Usage.MaxContextWindow = 456
+	thread.Usage.ContextBreakdown = &llmtypes.ContextBreakdown{TotalTokens: 123}
 	thread.messages = []openai.ChatCompletionMessage{
 		{Role: openai.ChatMessageRoleUser, Content: "implement context inheritance"},
 		{
@@ -670,6 +671,7 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	assert.Equal(t, thread.ConversationID, snapshot.ID)
 	assert.Empty(t, store.SavedRecords, "capturing a child seed must not publish a temporary conversation")
 	assert.NotContains(t, string(snapshot.RawMessages), "call-subagent")
+	assert.Nil(t, snapshot.Usage.ContextBreakdown, "pending calls removed from the snapshot invalidate the live breakdown")
 	forkedID, err := thread.ForkConversation(context.Background())
 
 	require.NoError(t, err)
@@ -694,6 +696,7 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	assert.Zero(t, store.SavedRecords[0].Usage.OutputTokens)
 	assert.Equal(t, 123, store.SavedRecords[0].Usage.CurrentContextWindow)
 	assert.Equal(t, 456, store.SavedRecords[0].Usage.MaxContextWindow)
+	assert.Nil(t, store.SavedRecords[0].Usage.ContextBreakdown)
 	forkMetadata, ok := store.SavedRecords[0].Metadata[conversations.ConversationForkMetadataKey].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, thread.ConversationID, forkMetadata["source_conversation_id"])
@@ -701,6 +704,26 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	assert.Equal(t, 1, forkMetadata["depth"])
 	assert.Equal(t, string(conversations.ConversationForkModeLiveSnapshot), forkMetadata["mode"])
 	assert.NotContains(t, forkMetadata, "initiator")
+}
+
+func TestSnapshotConversationForkPreservesUnchangedContextBreakdown(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	thread, err := NewOpenAIThread(llmtypes.Config{Model: "gpt-4.1"})
+	require.NoError(t, err)
+	thread.Store = &MockConversationStore{}
+	thread.Persisted = true
+	thread.ConversationID = "parent-conversation"
+	thread.messages = []openai.ChatCompletionMessage{
+		{Role: openai.ChatMessageRoleUser, Content: "hello"},
+		{Role: openai.ChatMessageRoleAssistant, Content: "hi"},
+	}
+	thread.Usage.ContextBreakdown = &llmtypes.ContextBreakdown{InputTextTokens: 10, TotalTokens: 10}
+
+	snapshot, err := thread.SnapshotConversationFork(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, thread.GetUsage().ContextBreakdown, snapshot.Usage.ContextBreakdown)
+	snapshot.Usage.ContextBreakdown.TotalTokens = 999
+	assert.Equal(t, 10, thread.Usage.ContextBreakdown.TotalTokens)
 }
 
 func TestCompactionHistoryAndResultsSurviveSaveLoadAndFork(t *testing.T) {

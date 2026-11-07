@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -168,7 +169,16 @@ func (t *Thread) SnapshotConversationFork(ctx context.Context) (convtypes.Conver
 	if !t.Persisted || t.Store == nil {
 		return convtypes.ConversationRecord{}, llmtypes.ErrConversationForkUnavailable
 	}
-	return t.buildConversationRecord(ctx, cleanedOpenAIMessagesForFork(t.messages), false)
+	messages := cleanedOpenAIMessagesForFork(t.messages)
+	record, err := t.buildConversationRecord(ctx, messages, false)
+	if err != nil {
+		return convtypes.ConversationRecord{}, err
+	}
+	if !reflect.DeepEqual(messages, t.messages) {
+		// The live breakdown includes content removed from the fork snapshot.
+		record.Usage.ContextBreakdown = nil
+	}
+	return record, nil
 }
 
 // ForkConversation snapshots the live thread into a new persisted conversation.
