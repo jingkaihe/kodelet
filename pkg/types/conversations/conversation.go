@@ -402,7 +402,7 @@ func (cr *ConversationRecord) ToSummary() ConversationSummary {
 		Summary:              cr.Summary,
 		Provider:             cr.Provider,
 		Metadata:             cr.Metadata,
-		Usage:                cr.Usage,
+		Usage:                cr.Usage.ForDisplay(),
 		CreatedAt:            cr.CreatedAt,
 		UpdatedAt:            cr.UpdatedAt,
 	}

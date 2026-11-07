@@ -1741,6 +1741,7 @@ func (h *chatMessageHandler) HandleThinking(thinking string) {
 func (h *chatMessageHandler) HandleDone() {}
 
 func (h *chatMessageHandler) HandleUsage(usage llmtypes.Usage) {
+	usage = usage.ForDisplay()
 	h.usageMu.Lock()
 	if h.hasLastUsage && reflect.DeepEqual(h.lastUsage, usage) {
 		h.usageMu.Unlock()

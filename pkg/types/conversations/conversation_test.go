@@ -236,6 +236,17 @@ func TestToSummaryAppliesMessageDisplay(t *testing.T) {
 	assert.Equal(t, "/init focus", summary.FirstMessage)
 }
 
+func TestToSummaryOmitsThinkingBookkeeping(t *testing.T) {
+	thinking := 80
+	record := NewConversationRecord("test-id")
+	record.Usage = llmtypes.Usage{
+		ContextThinkingByResponse: map[string]int{"response-1": thinking},
+		ContextBreakdown:          &llmtypes.ContextBreakdown{ThinkingTokens: &thinking, TotalTokens: 100},
+	}
+	assert.Equal(t, record.Usage.ForDisplay(), record.ToSummary().Usage)
+	assert.Equal(t, map[string]int{"response-1": thinking}, record.Usage.ContextThinkingByResponse)
+}
+
 func TestToSummaryAppliesLegacyMessageDisplay(t *testing.T) {
 	expanded := "This is the full recipe prompt"
 	key := fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(expanded)))

@@ -315,16 +315,23 @@ func TestChatMessageHandler_HandleUsageDeduplicatesSnapshots(t *testing.T) {
 		sink:           sink,
 	}
 
-	usage := llmtypes.Usage{InputTokens: 100, OutputTokens: 50}
+	usage := llmtypes.Usage{
+		InputTokens: 100, OutputTokens: 50,
+		ContextThinkingByResponse: map[string]int{"response-1": 20},
+	}
 	handler.HandleUsage(usage)
+	handler.HandleUsage(usage)
+	// Changes to internal bookkeeping alone do not need a client event.
+	usage.ContextThinkingByResponse = map[string]int{"response-2": 20}
 	handler.HandleUsage(usage)
 	handler.HandleText("done")
 
 	require.Len(t, sink.events, 2)
 	assert.Equal(t, "usage", sink.events[0].Kind)
 	if assert.NotNil(t, sink.events[0].Usage) {
-		assert.Equal(t, usage, *sink.events[0].Usage)
+		assert.Equal(t, usage.ForDisplay(), *sink.events[0].Usage)
 	}
+	assert.NotEmpty(t, usage.ContextThinkingByResponse)
 	assert.Equal(t, "text", sink.events[1].Kind)
 }
 

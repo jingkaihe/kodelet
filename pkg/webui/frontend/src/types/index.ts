@@ -97,7 +97,6 @@ export interface Usage {
   currentContextWindow?: number;
   maxContextWindow?: number;
   contextBreakdown?: ContextBreakdown;
-  contextThinkingByResponse?: Record<string, number>;
 }
 
 export interface ContextBreakdown {

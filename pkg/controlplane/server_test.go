@@ -1315,7 +1315,11 @@ func TestDaemonRawConversationRetainsExportFields(t *testing.T) {
 		return &conversations.GetConversationResponse{
 			ID: id, CWD: "/runner/not-on-daemon", CreatedAt: created, UpdatedAt: created,
 			Provider: "anthropic", RawMessages: json.RawMessage(`[{"role":"user","content":"hello"}]`),
-			Summary: "original summary", Usage: llmtypes.Usage{InputTokens: 42, InputCost: 0.123},
+			Summary: "original summary",
+			Usage: llmtypes.Usage{
+				InputTokens: 42, InputCost: 0.123,
+				ContextThinkingByResponse: map[string]int{"response-1": 80},
+			},
 			Metadata:          map[string]any{"custom": "preserved"},
 			CompactionHistory: history,
 		}, nil
@@ -1335,12 +1339,43 @@ func TestDaemonRawConversationRetainsExportFields(t *testing.T) {
 	assert.Equal(t, created, record.UpdatedAt)
 	assert.Equal(t, 42, record.Usage.InputTokens)
 	assert.Equal(t, 0.123, record.Usage.InputCost)
+	assert.Equal(t, map[string]int{"response-1": 80}, record.Usage.ContextThinkingByResponse)
 	assert.Equal(t, "preserved", record.Metadata["custom"])
 	assert.JSONEq(t, `[{"role":"user","content":"hello"}]`, string(record.RawMessages))
 	assert.Equal(t, history, record.CompactionHistory)
 	response = httptest.NewRecorder()
 	server.handleGetConversation(response, mux.SetURLVars(request, map[string]string{"id": "missing"}))
 	assert.Equal(t, http.StatusNotFound, response.Code)
+}
+
+func TestConversationDisplayUsageOmitsThinkingBookkeeping(t *testing.T) {
+	thinking := 80
+	usage := llmtypes.Usage{
+		ContextThinkingByResponse: map[string]int{"response-1": thinking},
+		ContextBreakdown:          &llmtypes.ContextBreakdown{ThinkingTokens: &thinking, TotalTokens: 100},
+	}
+	server := &Server{conversationService: &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+		return &conversations.GetConversationResponse{
+			ID: "conversation-1", Provider: "anthropic", Usage: usage,
+			RawMessages: json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"hello"}]}]`),
+		}, nil
+	}}}
+	for _, format := range []string{"web", "stream"} {
+		t.Run(format, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/api/conversations/conversation-1?format="+format, nil)
+			request = mux.SetURLVars(request, map[string]string{"id": "conversation-1"})
+			response := httptest.NewRecorder()
+			server.handleGetConversation(response, request)
+			require.Equal(t, http.StatusOK, response.Code)
+			var body struct {
+				Usage llmtypes.Usage `json:"usage"`
+			}
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+			assert.Equal(t, usage.ForDisplay(), body.Usage)
+			assert.NotContains(t, response.Body.String(), "contextThinkingByResponse")
+		})
+	}
+	assert.NotEmpty(t, usage.ContextThinkingByResponse)
 }
 
 func TestServer_handleGetConversationStreamFormatReturnsAuthoritativeEntries(t *testing.T) {

@@ -391,6 +391,25 @@ func TestFromConversationSummary_EmptySummary(t *testing.T) {
 	assert.Nil(t, dbSummary.Summary) // Should be nil for database storage
 }
 
+func TestThinkingBookkeepingOnlyStoredInFullRecords(t *testing.T) {
+	thinking := 80
+	usage := llmtypes.Usage{
+		ContextThinkingByResponse: map[string]int{"response-1": thinking},
+		ContextBreakdown:          &llmtypes.ContextBreakdown{ThinkingTokens: &thinking, TotalTokens: 100},
+	}
+	record := fromConversationRecord(conversations.ConversationRecord{Usage: usage})
+	assert.Equal(t, usage, record.ToConversationRecord().Usage)
+
+	summary := fromConversationSummary(conversations.ConversationSummary{Usage: usage})
+	assert.Equal(t, usage.ForDisplay(), summary.Usage.Data)
+	assert.Equal(t, usage.ForDisplay(), summary.ToConversationSummary().Usage)
+
+	// Existing summary rows may still contain the bookkeeping.
+	summary.Usage.Data = usage
+	assert.Equal(t, usage.ForDisplay(), summary.ToConversationSummary().Usage)
+	assert.Equal(t, map[string]int{"response-1": thinking}, usage.ContextThinkingByResponse)
+}
+
 func TestRoundTripConversion(t *testing.T) {
 	// Test that converting from domain -> db -> domain preserves data
 	now := time.Now().UTC().Truncate(time.Second)

@@ -18,6 +18,13 @@ type Usage struct {
 	ContextThinkingByResponse map[string]int `json:"contextThinkingByResponse,omitempty"`
 }
 
+// ForDisplay omits the per-response bookkeeping used to resume thinking counts.
+// Full conversation records retain it; clients only need the aggregate breakdown.
+func (u Usage) ForDisplay() Usage {
+	u.ContextThinkingByResponse = nil
+	return u
+}
+
 // ContextBreakdown estimates the current model-visible context, not cumulative
 // billed usage. It excludes archived history and opaque media/encrypted payloads.
 // ThinkingTokens sums provider-reported thinking generated since the last context

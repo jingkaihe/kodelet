@@ -1694,7 +1694,7 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		ReasoningEffortLocked: response.ID != "",
 		Summary:               response.Summary,
 		IsRunning:             s.isActiveChat(response.ID),
-		Usage:                 response.Usage,
+		Usage:                 response.Usage.ForDisplay(),
 		Messages:              webMessages,
 		PendingSteer:          pendingSteer,
 		ToolResults:           response.ToolResults,
@@ -1738,7 +1738,7 @@ func (s *Server) writeConversationHistoryResponse(w http.ResponseWriter, r *http
 		Profile:              resolveConversationProfile(response.Metadata),
 		ReasoningEffort:      resolveConversationReasoningEffort(response),
 		Summary:              response.Summary,
-		Usage:                response.Usage,
+		Usage:                response.Usage.ForDisplay(),
 		Entries:              entries,
 	}
 	if s.runnerRegistry != nil {

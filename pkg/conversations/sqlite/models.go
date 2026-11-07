@@ -110,7 +110,7 @@ func (dbs *dbConversationSummary) ToConversationSummary() conversations.Conversa
 		FirstMessage:         dbs.FirstMessage,
 		Provider:             dbs.Provider,
 		Metadata:             dbs.Metadata.Data,
-		Usage:                dbs.Usage.Data,
+		Usage:                dbs.Usage.Data.ForDisplay(),
 		CreatedAt:            dbs.CreatedAt,
 		UpdatedAt:            dbs.UpdatedAt,
 	}
@@ -167,7 +167,7 @@ func fromConversationSummary(summary conversations.ConversationSummary) *dbConve
 		FirstMessage: summary.FirstMessage,
 		Provider:     summary.Provider,
 		Metadata:     JSONField[map[string]any]{Data: summary.Metadata},
-		Usage:        JSONField[llmtypes.Usage]{Data: summary.Usage},
+		Usage:        JSONField[llmtypes.Usage]{Data: summary.Usage.ForDisplay()},
 		CreatedAt:    summary.CreatedAt,
 		UpdatedAt:    summary.UpdatedAt,
 	}
