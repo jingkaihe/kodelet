@@ -652,8 +652,8 @@ func TestAboutContextThinkingAvailability(t *testing.T) {
 				thinking = *test.tokens
 			}
 			assert.Equal(t, contextStackedBar([]contextCategory{
-				{"Input text", 100, composerFlowStyle},
-				{"Thinking", thinking, thoughtHeaderStyle},
+				{label: "Input text", tokens: 100, style: composerFlowStyle},
+				{label: "Thinking", tokens: thinking, style: thoughtHeaderStyle},
 			}, total, 0.5, m.uiDialogWidth()-4), lines[2])
 		})
 	}
@@ -732,13 +732,13 @@ func TestAboutContextStaysBoundedOnSmallTerminals(t *testing.T) {
 func TestContextStackedBar(t *testing.T) {
 	newThemeTestModel(t, Config{})
 	categories := []contextCategory{
-		{"System prompt", 100, toolHeaderStyle},
-		{"Tool definitions", 200, steeringStyle.Italic(false)},
-		{"Input text", 100, composerFlowStyle},
-		{"Output text", 100, diffAddedStyle},
-		{"Thinking", 25, thoughtHeaderStyle},
-		{"Other", 25, uiDialogMutedStyle},
-		{"Tool usage", 450, uiDialogCancelStyle},
+		{label: "System prompt", tokens: 100, style: toolHeaderStyle},
+		{label: "Tool definitions", tokens: 200, style: steeringStyle.Italic(false)},
+		{label: "Input text", tokens: 100, style: composerFlowStyle},
+		{label: "Output text", tokens: 100, style: diffAddedStyle},
+		{label: "Thinking", tokens: 25, style: thoughtHeaderStyle},
+		{label: "Other", tokens: 25, style: uiDialogMutedStyle},
+		{label: "Tool usage", tokens: 450, style: uiDialogCancelStyle},
 	}
 	// Shared UI snapshot: used is 50%; category shares within it are
 	// 10/20/10/10/2.5/2.5/45%, giving 4/8/4/4/1/1/18 cells of an 80-cell bar.

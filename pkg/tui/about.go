@@ -404,13 +404,13 @@ func (m model) contextDialogContent() []string {
 			lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible("  "+line, width)))
 		}
 	}
-	row := func(category contextCategory, total int, available bool) {
+	row := func(category contextCategory, total int) {
 		share := 0.0
 		if total > 0 {
 			share = 100 * float64(category.tokens) / float64(total)
 		}
 		value := fmt.Sprintf("%7s tokens · %.1f%%", formatTokenCount(category.tokens), share)
-		if !available {
+		if category.unavailable {
 			value = "—"
 		}
 		label := padVisible(category.label, 17)
@@ -447,17 +447,17 @@ func (m model) contextDialogContent() []string {
 		toolStyles := []lipgloss.Style{uiDialogCancelStyle, toolHeaderStyle, steeringStyle.Italic(false), composerFlowStyle, diffAddedStyle, thoughtHeaderStyle}
 		for i, tool := range breakdown.Tools {
 			tokens := tool.InputTokens + tool.OutputTokens
-			tools = append(tools, contextCategory{tool.Name, tokens, toolStyles[i%len(toolStyles)]})
+			tools = append(tools, contextCategory{label: tool.Name, tokens: tokens, style: toolStyles[i%len(toolStyles)]})
 			toolTotal += tokens
 		}
 		categories = []contextCategory{
-			{"System prompt", breakdown.SystemPromptTokens, toolHeaderStyle},
-			{"Tool definitions", breakdown.ToolDefinitionTokens, steeringStyle.Italic(false)},
-			{"Input text", breakdown.InputTextTokens, composerFlowStyle},
-			{"Output text", breakdown.OutputTextTokens, diffAddedStyle},
-			{"Thinking", thinkingTokens, thoughtHeaderStyle},
-			{"Other", breakdown.OtherTokens, uiDialogMutedStyle},
-			{"Tool usage", toolTotal, uiDialogCancelStyle},
+			{label: "System prompt", tokens: breakdown.SystemPromptTokens, style: toolHeaderStyle},
+			{label: "Tool definitions", tokens: breakdown.ToolDefinitionTokens, style: steeringStyle.Italic(false)},
+			{label: "Input text", tokens: breakdown.InputTextTokens, style: composerFlowStyle},
+			{label: "Output text", tokens: breakdown.OutputTextTokens, style: diffAddedStyle},
+			{label: "Thinking", tokens: thinkingTokens, style: thoughtHeaderStyle, unavailable: breakdown.ThinkingTokens == nil},
+			{label: "Other", tokens: breakdown.OtherTokens, style: uiDialogMutedStyle},
+			{label: "Tool usage", tokens: toolTotal, style: uiDialogCancelStyle},
 		}
 	}
 	used := 0.0
@@ -497,8 +497,7 @@ func (m model) contextDialogContent() []string {
 	text("Code mode: " + mode)
 	lines = append(lines, "")
 	for _, category := range categories {
-		available := category.label != "Thinking" || breakdown.ThinkingTokens != nil
-		row(category, total, available)
+		row(category, total)
 	}
 	lines = append(lines, "")
 	heading("Tool usage")
@@ -511,7 +510,7 @@ func (m model) contextDialogContent() []string {
 		lines = append(lines, contextStackedBar(tools, toolTotal, 1, width))
 	}
 	for i, tool := range breakdown.Tools {
-		row(tools[i], toolTotal, true)
+		row(tools[i], toolTotal)
 		calls := "calls"
 		if tool.Calls == 1 {
 			calls = "call"
@@ -522,9 +521,10 @@ func (m model) contextDialogContent() []string {
 }
 
 type contextCategory struct {
-	label  string
-	tokens int
-	style  lipgloss.Style
+	label       string
+	tokens      int
+	style       lipgloss.Style
+	unavailable bool
 }
 
 func contextStackedBar(categories []contextCategory, total int, used float64, width int) string {
