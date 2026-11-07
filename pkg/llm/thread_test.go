@@ -353,37 +353,6 @@ func TestExtractConversationRecordEntriesAppliesMessageDisplay(t *testing.T) {
 	assert.Equal(t, "/init focus", messages[0].Content)
 }
 
-// Integration test for SendMessageAndGetText with real Anthropic client
-func TestSendMessageAndGetText(t *testing.T) {
-	requireAnthropicIntegration(t)
-
-	ctx := context.Background()
-
-	// We won't set expectations since these may not be called in a simple text response
-	// The state methods would only be called if tools are used
-
-	// Use a simple query that should return a predictable response
-	query := "Respond with exactly these words: 'Hello from test'"
-
-	// Test with real client
-	result := SendMessageAndGetText(ctx,
-		tools.NewBasicState(ctx),
-		query,
-		llmtypes.Config{
-			Provider:  "anthropic",
-			Model:     anthropic.ModelClaudeHaiku4_5_20251001,
-			MaxTokens: 100,
-		},
-		true,
-		llmtypes.MessageOpt{NoSaveConversation: true},
-	)
-
-	// Verify we got a non-error response
-	assert.False(t, strings.HasPrefix(result, "Error:"), "Response should not contain an error")
-	// Verify the result contains expected response
-	assert.Contains(t, result, "Hello from test", "Response should contain the requested text")
-}
-
 // MockMessageHandler is a mock implementation of MessageHandler
 type MockMessageHandler struct {
 	mock.Mock

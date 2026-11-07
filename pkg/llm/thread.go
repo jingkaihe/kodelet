@@ -6,7 +6,6 @@ package llm
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
@@ -123,34 +122,6 @@ func CloseThread(thread llmtypes.Thread) error {
 		return nil
 	}
 	return closer.Close()
-}
-
-// SendMessageAndGetTextWithUsage is a convenience method for one-shot queries that returns the response as a string and usage information
-func SendMessageAndGetTextWithUsage(ctx context.Context, state tooltypes.State, query string, config llmtypes.Config, silent bool, opt llmtypes.MessageOpt) (string, llmtypes.Usage) {
-	thread, err := NewThread(config)
-	if err != nil {
-		return fmt.Sprintf("Error creating thread: %v", err), llmtypes.Usage{}
-	}
-	defer func() {
-		_ = CloseThread(thread)
-	}()
-	thread.SetState(state)
-	if err := thread.EnablePersistence(ctx, !opt.NoSaveConversation); err != nil {
-		return fmt.Sprintf("Error: %v", err), llmtypes.Usage{}
-	}
-
-	handler := &llmtypes.StringCollectorHandler{Silent: silent}
-	_, err = thread.SendMessage(ctx, query, handler, opt)
-	if err != nil {
-		return fmt.Sprintf("Error: %v", err), llmtypes.Usage{}
-	}
-	return handler.CollectedText(), thread.GetUsage()
-}
-
-// SendMessageAndGetText is a convenience method for one-shot queries that returns the response as a string
-func SendMessageAndGetText(ctx context.Context, state tooltypes.State, query string, config llmtypes.Config, silent bool, opt llmtypes.MessageOpt) string {
-	text, _ := SendMessageAndGetTextWithUsage(ctx, state, query, config, silent, opt)
-	return text
 }
 
 func extractDisplayMessages(provider string, rawMessages []byte, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult, userOrdinal *int) ([]llmtypes.Message, error) {
