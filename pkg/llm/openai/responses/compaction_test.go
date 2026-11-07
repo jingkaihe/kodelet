@@ -42,8 +42,16 @@ func TestThreadSwapContextArchivesHistoryAndPreservesToolResults(t *testing.T) {
 	thread.SetState(state)
 	thread.SetStructuredToolResult("call-1", tooltypes.StructuredToolResult{ToolName: "bash", Success: true})
 	thread.SetContextBreakdown(&llmtypes.ContextBreakdown{TotalTokens: 100})
+	thread.RecordContextThinking("before-compaction", 20)
+	previousWindow := thread.codexWindowGeneration
 
 	require.NoError(t, thread.SwapContext(context.Background(), "summary of prior context"))
+	assert.Nil(t, thread.GetUsage().ContextBreakdown)
+	assert.Empty(t, thread.GetUsage().ContextThinkingByResponse)
+	var staleResponse openairesponses.Response
+	require.NoError(t, json.Unmarshal([]byte(`{"id":"stale-response","usage":{"output_tokens_details":{"reasoning_tokens":50}}}`), &staleResponse))
+	thread.refreshContextBreakdown(openairesponses.ResponseNewParams{}, 0, previousWindow, &staleResponse)
+	assert.Empty(t, thread.GetUsage().ContextThinkingByResponse, "old response cannot repopulate a compacted window")
 	assert.Nil(t, thread.GetUsage().ContextBreakdown)
 
 	require.Len(t, thread.inputItems, 1)

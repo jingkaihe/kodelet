@@ -97,6 +97,7 @@ export interface Usage {
   currentContextWindow?: number;
   maxContextWindow?: number;
   contextBreakdown?: ContextBreakdown;
+  contextThinkingByResponse?: Record<string, number>;
 }
 
 export interface ContextBreakdown {
@@ -104,6 +105,8 @@ export interface ContextBreakdown {
   toolDefinitionTokens: number;
   inputTextTokens: number;
   outputTextTokens: number;
+  // Reported thinking accumulated since context replacement; retention is estimated.
+  thinkingTokens?: number | null;
   otherTokens: number;
   tools: ToolContextUsage[];
   totalTokens: number;

@@ -399,12 +399,20 @@ func (m model) contextDialogContent() []string {
 	heading := func(value string) {
 		lines = append(lines, renderPersistentStyle(uiDialogButtonStyle, fitVisible(value, width)))
 	}
-	row := func(category contextCategory, total int) {
+	detail := func(value string) {
+		for _, line := range strings.Split(wrapText(value, max(1, width-2)), "\n") {
+			lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible("  "+line, width)))
+		}
+	}
+	row := func(category contextCategory, total int, available bool) {
 		share := 0.0
 		if total > 0 {
 			share = 100 * float64(category.tokens) / float64(total)
 		}
 		value := fmt.Sprintf("%7s tokens · %.1f%%", formatTokenCount(category.tokens), share)
+		if !available {
+			value = "—"
+		}
 		label := padVisible(category.label, 17)
 		swatch := renderPersistentStyle(category.style, "■")
 		if lipgloss.Width(label)+lipgloss.Width(value)+4 <= width {
@@ -432,6 +440,10 @@ func (m model) contextDialogContent() []string {
 	var total, toolTotal int
 	if breakdown != nil {
 		total = breakdown.TotalTokens
+		thinkingTokens := 0
+		if breakdown.ThinkingTokens != nil {
+			thinkingTokens = *breakdown.ThinkingTokens
+		}
 		toolStyles := []lipgloss.Style{uiDialogCancelStyle, toolHeaderStyle, steeringStyle.Italic(false), composerFlowStyle, diffAddedStyle, thoughtHeaderStyle}
 		for i, tool := range breakdown.Tools {
 			tokens := tool.InputTokens + tool.OutputTokens
@@ -443,7 +455,8 @@ func (m model) contextDialogContent() []string {
 			{"Tool definitions", breakdown.ToolDefinitionTokens, steeringStyle.Italic(false)},
 			{"Input text", breakdown.InputTextTokens, composerFlowStyle},
 			{"Output text", breakdown.OutputTextTokens, diffAddedStyle},
-			{"Other / reasoning", breakdown.OtherTokens, thoughtHeaderStyle},
+			{"Thinking", thinkingTokens, thoughtHeaderStyle},
+			{"Other", breakdown.OtherTokens, uiDialogMutedStyle},
 			{"Tool usage", toolTotal, uiDialogCancelStyle},
 		}
 	}
@@ -484,7 +497,8 @@ func (m model) contextDialogContent() []string {
 	text("Code mode: " + mode)
 	lines = append(lines, "")
 	for _, category := range categories {
-		row(category, total)
+		available := category.label != "Thinking" || breakdown.ThinkingTokens != nil
+		row(category, total, available)
 	}
 	lines = append(lines, "")
 	heading("Tool usage")
@@ -497,15 +511,12 @@ func (m model) contextDialogContent() []string {
 		lines = append(lines, contextStackedBar(tools, toolTotal, 1, width))
 	}
 	for i, tool := range breakdown.Tools {
-		row(tools[i], toolTotal)
+		row(tools[i], toolTotal, true)
 		calls := "calls"
 		if tool.Calls == 1 {
 			calls = "call"
 		}
-		detail := fmt.Sprintf("%d %s · %s input · %s output tokens", tool.Calls, calls, formatTokenCount(tool.InputTokens), formatTokenCount(tool.OutputTokens))
-		for _, line := range strings.Split(wrapText(detail, max(1, width-2)), "\n") {
-			lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible("  "+line, width)))
-		}
+		detail(fmt.Sprintf("%d %s · %s input · %s output tokens", tool.Calls, calls, formatTokenCount(tool.InputTokens), formatTokenCount(tool.OutputTokens)))
 	}
 	return lines
 }

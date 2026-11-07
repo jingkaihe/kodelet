@@ -2,6 +2,7 @@ package responses
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -434,8 +435,10 @@ func TestSendMessageNoSaveRestoresCodexWindowAndWebSocketIdentity(t *testing.T) 
 	thread.Usage.CacheReadInputTokens = 3
 	thread.Usage.CurrentContextWindow = 90
 	thread.Usage.MaxContextWindow = 100
-	originalBreakdown := &llmtypes.ContextBreakdown{TotalTokens: 90, Estimated: true, Tools: []llmtypes.ToolContextUsage{}}
+	thinking := 7
+	originalBreakdown := &llmtypes.ContextBreakdown{ThinkingTokens: &thinking, TotalTokens: 90, Estimated: true, Tools: []llmtypes.ToolContextUsage{}}
 	thread.SetContextBreakdown(originalBreakdown)
+	thread.RecordContextThinking("original-response", thinking)
 	thread.newStreamingFunc = func(context.Context, openairesponses.ResponseNewParams, ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
 		return remoteCompactionV2Stream(t, "temporary-encrypted-summary")
 	}
@@ -458,6 +461,8 @@ func TestSendMessageNoSaveRestoresCodexWindowAndWebSocketIdentity(t *testing.T) 
 		assert.Equal(t, "incoming", extractInputItemText(history[2]))
 		require.NotNil(t, thread.CompactionHistory)
 		assert.Len(t, thread.CompactionHistory.Segments, 1)
+		assert.Empty(t, thread.GetUsage().ContextThinkingByResponse, "temporary compaction starts a new context")
+		thread.RecordContextThinking("temporary-response", 100)
 		return "done", false, true, nil
 	}
 
@@ -485,6 +490,7 @@ func TestSendMessageNoSaveRestoresCodexWindowAndWebSocketIdentity(t *testing.T) 
 	assert.Equal(t, 90, thread.Usage.CurrentContextWindow)
 	assert.Equal(t, 100, thread.Usage.MaxContextWindow)
 	assert.Equal(t, originalBreakdown, thread.GetUsage().ContextBreakdown)
+	assert.Equal(t, map[string]int{"original-response": thinking}, thread.GetUsage().ContextThinkingByResponse)
 	assert.Contains(t, thread.GetStructuredToolResults(), "old-call")
 	assert.Equal(t, 2, fakeWebSocket.resets, "compaction install and no-save rollback must each reset websocket identity")
 	assert.Empty(t, store.savedRecords)
@@ -661,7 +667,7 @@ func TestResponsesContextBreakdownUsesCodexRequestPrefixAndLiveHistory(t *testin
 	require.Positive(t, prefixCount)
 	expected := base.EstimateContextBreakdown(params.Instructions.Value, params.Tools, params.Input.OfInputItemList, "")
 	thread.AddAssistantMessage(t.Context(), "last")
-	thread.refreshContextBreakdown(params, prefixCount, thread.codexWindowGeneration)
+	thread.refreshContextBreakdown(params, prefixCount, thread.codexWindowGeneration, nil)
 	breakdown := thread.GetUsage().ContextBreakdown
 	require.NotNil(t, breakdown)
 	assert.Equal(t, expected.SystemPromptTokens, breakdown.SystemPromptTokens)
@@ -671,8 +677,58 @@ func TestResponsesContextBreakdownUsesCodexRequestPrefixAndLiveHistory(t *testin
 	assert.Zero(t, breakdown.ToolDefinitionTokens, "disabled tools have no definitions")
 	assert.Zero(t, breakdown.OtherTokens)
 	thread.codexWindowGeneration++
-	thread.refreshContextBreakdown(params, prefixCount, thread.codexWindowGeneration-1)
+	thread.refreshContextBreakdown(params, prefixCount, thread.codexWindowGeneration-1, nil)
 	assert.Nil(t, thread.GetUsage().ContextBreakdown, "stale request cannot overwrite compacted context")
+}
+
+func TestResponsesContextThinkingAccumulatesReportedUsage(t *testing.T) {
+	thread := &Thread{Thread: base.NewThread(llmtypes.Config{}, "thinking")}
+	thread.AddUserMessage(t.Context(), "user")
+	thread.AddAssistantMessage(t.Context(), "done")
+	thread.Usage.CurrentContextWindow = 50
+	thread.Usage.OutputTokens = 40
+	thread.storedItems = append(thread.storedItems, StoredInputItem{Type: "reasoning", Content: "display-only summary"})
+	params := openairesponses.ResponseNewParams{}
+	for _, test := range []struct {
+		name, id, usage     string
+		known               bool
+		tokens, accumulated int
+	}{
+		{"reported thinking", "first", `{"output_tokens":40,"output_tokens_details":{"reasoning_tokens":30}}`, true, 30, 30},
+		{"next response adds to previous", "second", `{"output_tokens":20,"output_tokens_details":{"reasoning_tokens":12}}`, true, 12, 42},
+		{"same response is not added twice", "second", `{"output_tokens":20,"output_tokens_details":{"reasoning_tokens":12}}`, true, 12, 42},
+		{"explicit zero", "third", `{"output_tokens":10,"output_tokens_details":{"reasoning_tokens":0}}`, true, 0, 42},
+		{"details absent", "fourth", `{"output_tokens":10}`, false, 0, 42},
+		{"count absent", "fifth", `{"output_tokens":10,"output_tokens_details":{}}`, false, 0, 42},
+		{"null count", "sixth", `{"output_tokens":10,"output_tokens_details":{"reasoning_tokens":null}}`, false, 0, 42},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := openairesponses.Response{ID: test.id}
+			require.NoError(t, json.Unmarshal([]byte(test.usage), &response.Usage))
+			thread.refreshContextBreakdown(params, 0, thread.codexWindowGeneration, &response)
+			breakdown := thread.GetUsage().ContextBreakdown
+			require.NotNil(t, breakdown)
+			require.NotNil(t, breakdown.ThinkingTokens)
+			assert.Equal(t, test.accumulated, *breakdown.ThinkingTokens)
+			assert.Equal(t, 2+test.accumulated, breakdown.TotalTokens)
+			assert.Equal(t, 1, breakdown.OutputTextTokens)
+			assert.Zero(t, breakdown.OtherTokens)
+			assert.Equal(t, 50, thread.GetUsage().CurrentContextWindow, "thinking is already in reported context usage")
+			assert.Equal(t, 40, thread.GetUsage().OutputTokens, "thinking is already in billed output")
+			thinkingTraced := false
+			for _, attr := range responseSpanAttributes(response) {
+				if attr.Key == "gen_ai.usage.reasoning.output_tokens" {
+					thinkingTraced = true
+					assert.EqualValues(t, test.tokens, attr.Value.AsInt64())
+				}
+			}
+			assert.Equal(t, test.known, thinkingTraced, "unknown thinking must not trace a false zero")
+		})
+	}
+	thread.AddUserMessage(t.Context(), "next")
+	thread.refreshContextBreakdown(params, 0, thread.codexWindowGeneration, nil)
+	assert.Equal(t, 42, *thread.GetUsage().ContextBreakdown.ThinkingTokens, "new requests retain earlier thinking")
+	assert.Equal(t, map[string]int{"first": 30, "second": 12, "third": 0}, thread.GetUsage().ContextThinkingByResponse)
 }
 
 func TestProcessMessageExchangeInjectsPendingSteer(t *testing.T) {

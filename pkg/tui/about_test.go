@@ -525,6 +525,7 @@ func TestAboutDialogRetryPreservesContextTab(t *testing.T) {
 
 func TestAboutContextShowsSeparateUsageAndEstimates(t *testing.T) {
 	m := newThemeTestModel(t, Config{})
+	thinkingTokens := 25
 	m.usage = llmtypes.Usage{
 		CurrentContextWindow: 1500,
 		MaxContextWindow:     3000,
@@ -533,7 +534,8 @@ func TestAboutContextShowsSeparateUsageAndEstimates(t *testing.T) {
 			ToolDefinitionTokens: 200,
 			InputTextTokens:      100,
 			OutputTextTokens:     100,
-			OtherTokens:          50,
+			ThinkingTokens:       &thinkingTokens,
+			OtherTokens:          25,
 			TotalTokens:          1000,
 			CodeMode:             "only",
 			Estimated:            true,
@@ -557,7 +559,8 @@ func TestAboutContextShowsSeparateUsageAndEstimates(t *testing.T) {
 		"Tool definitions",
 		"Input text",
 		"Output text",
-		"Other / reasoning",
+		"Thinking",
+		"Other",
 		"Tool usage",
 		"code_execute",
 		"450 tokens · 45.0%",
@@ -585,7 +588,8 @@ func TestAboutContextShowsSeparateUsageAndEstimates(t *testing.T) {
 		"■ Tool definitions 200 tokens · 20.0%",
 		"■ Input text 100 tokens · 10.0%",
 		"■ Output text 100 tokens · 10.0%",
-		"■ Other / reasoning 50 tokens · 5.0%",
+		"■ Thinking 25 tokens · 2.5%",
+		"■ Other 25 tokens · 2.5%",
 		"■ Tool usage 450 tokens · 45.0%",
 		"■ code_execute 350 tokens · 77.8%",
 		"■ skill 100 tokens · 22.2%",
@@ -604,6 +608,55 @@ func TestAboutContextShowsSeparateUsageAndEstimates(t *testing.T) {
 	assert.Contains(t, view, "1.8K / 3.0K tokens (60.0%)")
 	assert.Contains(t, view, "Breakdown unavailable")
 	assert.NotContains(t, view, "code_execute")
+}
+
+func TestAboutContextThinkingAvailability(t *testing.T) {
+	zero, reported := 0, 100
+	for _, test := range []struct {
+		name   string
+		tokens *int
+		row    string
+	}{
+		{name: "unknown", row: "■ Thinking —"},
+		{name: "zero", tokens: &zero, row: "■ Thinking 0 tokens · 0.0%"},
+		{name: "reported", tokens: &reported, row: "■ Thinking 100 tokens · 50.0%"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			m := newThemeTestModel(t, Config{})
+			total := 100
+			if test.tokens != nil {
+				total += *test.tokens
+			}
+			m.usage = llmtypes.Usage{
+				CurrentContextWindow: 150, MaxContextWindow: 300,
+				ContextBreakdown: &llmtypes.ContextBreakdown{
+					InputTextTokens: 100, ThinkingTokens: test.tokens, TotalTokens: total,
+				},
+			}
+			lines := m.contextDialogContent()
+			for i, line := range lines {
+				plain := strings.Join(strings.Fields(xansi.Strip(line)), " ")
+				if strings.HasPrefix(plain, "■ Thinking") {
+					assert.Equal(t, test.row, plain)
+					assert.Contains(t, xansi.Strip(lines[i+1]), "■ Other")
+				}
+			}
+			view := xansi.Strip(strings.Join(lines, "\n"))
+			assert.Contains(t, view, "Thinking")
+			assert.Contains(t, view, "Other")
+			assert.NotContains(t, view, "Other / reasoning")
+			assert.NotContains(t, view, "Not reported")
+			assert.NotContains(t, view, "Last response")
+			thinking := 0
+			if test.tokens != nil {
+				thinking = *test.tokens
+			}
+			assert.Equal(t, contextStackedBar([]contextCategory{
+				{"Input text", 100, composerFlowStyle},
+				{"Thinking", thinking, thoughtHeaderStyle},
+			}, total, 0.5, m.uiDialogWidth()-4), lines[2])
+		})
+	}
 }
 
 func TestAboutContextHandlesUnavailableAndEmptyUsage(t *testing.T) {
@@ -683,19 +736,20 @@ func TestContextStackedBar(t *testing.T) {
 		{"Tool definitions", 200, steeringStyle.Italic(false)},
 		{"Input text", 100, composerFlowStyle},
 		{"Output text", 100, diffAddedStyle},
-		{"Other / reasoning", 50, thoughtHeaderStyle},
+		{"Thinking", 25, thoughtHeaderStyle},
+		{"Other", 25, uiDialogMutedStyle},
 		{"Tool usage", 450, uiDialogCancelStyle},
 	}
 	// Shared UI snapshot: used is 50%; category shares within it are
-	// 10/20/10/10/5/45%, giving 2/4/2/2/1/9 cells of a 40-cell bar.
-	bar := contextStackedBar(categories, 1000, 0.5, 40)
+	// 10/20/10/10/2.5/2.5/45%, giving 4/8/4/4/1/1/18 cells of an 80-cell bar.
+	bar := contextStackedBar(categories, 1000, 0.5, 80)
 	want := ""
-	for i, cells := range []int{2, 4, 2, 2, 1, 9} {
+	for i, cells := range []int{4, 8, 4, 4, 1, 1, 18} {
 		want += renderPersistentStyle(categories[i].style, strings.Repeat("█", cells))
 	}
-	want += renderPersistentStyle(uiDialogMutedStyle, strings.Repeat("░", 20))
+	want += renderPersistentStyle(uiDialogMutedStyle, strings.Repeat("░", 40))
 	assert.Equal(t, want, bar)
-	assert.Equal(t, 40, lipgloss.Width(bar))
+	assert.Equal(t, 80, lipgloss.Width(bar))
 
 	for _, test := range []struct {
 		name  string
@@ -727,11 +781,13 @@ func TestAboutContextBarAndLegendUseThemeColours(t *testing.T) {
 	for _, themeName := range []string{DefaultThemeName, LightThemeName} {
 		t.Run(themeName, func(t *testing.T) {
 			m := newThemeTestModel(t, Config{Theme: themeName})
+			thinkingTokens := 2
 			m.usage = llmtypes.Usage{
-				CurrentContextWindow: 12, MaxContextWindow: 12,
+				CurrentContextWindow: 14, MaxContextWindow: 14,
 				ContextBreakdown: &llmtypes.ContextBreakdown{
-					TotalTokens: 12, SystemPromptTokens: 2, ToolDefinitionTokens: 2,
+					TotalTokens: 14, SystemPromptTokens: 2, ToolDefinitionTokens: 2,
 					InputTextTokens: 2, OutputTextTokens: 2, OtherTokens: 2,
+					ThinkingTokens: &thinkingTokens,
 					Tools: []llmtypes.ToolContextUsage{
 						{Name: "code_execute", InputTokens: 1},
 						{Name: "skill", OutputTokens: 1},
@@ -739,17 +795,23 @@ func TestAboutContextBarAndLegendUseThemeColours(t *testing.T) {
 				},
 			}
 			lines := m.contextDialogContent()
-			colours := []string{m.theme.ToolHeader, m.theme.Steering, m.theme.ComposerFlow, m.theme.DiffAdded, m.theme.ThoughtHeader, m.theme.UI.DialogCancel}
+			var rows []string
+			for _, line := range lines {
+				if strings.HasPrefix(xansi.Strip(line), "■ ") {
+					rows = append(rows, line)
+				}
+			}
+			colours := []string{m.theme.ToolHeader, m.theme.Steering, m.theme.ComposerFlow, m.theme.DiffAdded, m.theme.ThoughtHeader, m.theme.UI.DialogMuted, m.theme.UI.DialogCancel}
 			for i, colour := range colours {
 				style := lipgloss.NewStyle().Foreground(themeColor(colour))
 				start, _ := styleSequences(style)
 				assert.Contains(t, lines[2], start+"█", "bar colour %d", i)
-				assert.Contains(t, lines[9+i], renderPersistentStyle(style, "■"), "legend colour %d", i)
+				assert.Contains(t, rows[i], renderPersistentStyle(style, "■"), "legend colour %d", i)
 			}
 			// The tool palette starts orange, then teal, without inheriting a
 			// category's italic text styling or making free space look used.
-			assert.Contains(t, lines[19], renderPersistentStyle(uiDialogCancelStyle, "■"))
-			assert.Contains(t, lines[21], renderPersistentStyle(toolHeaderStyle, "■"))
+			assert.Contains(t, rows[7], renderPersistentStyle(uiDialogCancelStyle, "■"))
+			assert.Contains(t, rows[8], renderPersistentStyle(toolHeaderStyle, "■"))
 			assert.NotContains(t, strings.Join(lines, "\n"), "\x1b[3m")
 		})
 	}

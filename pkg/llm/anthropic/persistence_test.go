@@ -938,6 +938,8 @@ func TestCompactionHistoryAndResultsSurviveSaveLoadAndFork(t *testing.T) {
 	require.NoError(t, thread.SwapContext(t.Context(), "replacement summary"))
 	thread.AddUserMessage(t.Context(), "continued question")
 	thread.messages = append(thread.messages, anthropic.NewAssistantMessage(anthropic.NewTextBlock("continued answer")))
+	thread.RecordContextThinking("continued-response", 10)
+	thread.SetContextBreakdown(base.EstimateContextBreakdown(nil, nil, thread.messages, "off"))
 	active, err := json.Marshal(thread.messages)
 	require.NoError(t, err)
 	store := &MockConversationStore{}
@@ -963,6 +965,12 @@ func TestCompactionHistoryAndResultsSurviveSaveLoadAndFork(t *testing.T) {
 	assert.Equal(t, saved.CompactionHistory, resumed.GetCompactionHistory())
 	assert.Equal(t, saved.ToolResults, resumed.GetStructuredToolResults())
 	assert.NotSame(t, saved.CompactionHistory, resumed.CompactionHistory)
+	assert.Equal(t, map[string]int{"continued-response": 10}, resumed.GetUsage().ContextThinkingByResponse)
+	resumed.RecordContextThinking("resumed-response", 7)
+	resumed.SetContextBreakdown(base.EstimateContextBreakdown(nil, nil, resumed.messages, "off"))
+	require.NotNil(t, resumed.GetUsage().ContextBreakdown.ThinkingTokens)
+	assert.Equal(t, 17, *resumed.GetUsage().ContextBreakdown.ThinkingTokens)
+	assert.Equal(t, map[string]int{"continued-response": 10}, saved.Usage.ContextThinkingByResponse, "resume must not mutate saved usage")
 
 	forkID, err := resumed.ForkConversation(t.Context())
 	require.NoError(t, err)
@@ -979,6 +987,10 @@ func TestCompactionHistoryAndResultsSurviveSaveLoadAndFork(t *testing.T) {
 	// A resumed second compaction excludes the first summary and cannot mutate
 	// the persisted source or fork's archived segments.
 	require.NoError(t, resumed.SwapContext(t.Context(), "second summary"))
+	assert.Empty(t, resumed.GetUsage().ContextThinkingByResponse)
+	assert.Nil(t, resumed.GetUsage().ContextBreakdown)
+	assert.Equal(t, map[string]int{"continued-response": 10}, saved.Usage.ContextThinkingByResponse,
+		"context replacement must not clear the saved source's thinking")
 	history := resumed.GetCompactionHistory()
 	require.Len(t, history.Segments, 2)
 	tail, err := saved.CompactionHistory.VisibleMessages(active)

@@ -245,6 +245,7 @@ func ForkConversationRecordWithOptions(source ConversationRecord, options Conver
 	forked.Summary = source.Summary
 	forked.Usage.CurrentContextWindow = source.Usage.CurrentContextWindow
 	forked.Usage.MaxContextWindow = source.Usage.MaxContextWindow
+	forked.Usage.ContextThinkingByResponse = maps.Clone(source.Usage.ContextThinkingByResponse)
 	if source.Metadata != nil {
 		forked.Metadata = maps.Clone(source.Metadata)
 		delete(forked.Metadata, ParentConversationIDMetadataKey)

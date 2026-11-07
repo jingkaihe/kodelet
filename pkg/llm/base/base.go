@@ -314,6 +314,7 @@ func (t *Thread) ResetContextStateLocked() {
 	// for archived tool calls, attachment references, and conversation forks.
 	if t.Usage != nil {
 		t.Usage.ContextBreakdown = nil
+		t.Usage.ContextThinkingByResponse = nil
 	}
 }
 
@@ -336,6 +337,7 @@ func (t *Thread) GetUsage() llmtypes.Usage {
 	}
 	usage := *t.Usage
 	usage.ContextBreakdown = cloneContextBreakdown(usage.ContextBreakdown)
+	usage.ContextThinkingByResponse = maps.Clone(usage.ContextThinkingByResponse)
 	return usage
 }
 

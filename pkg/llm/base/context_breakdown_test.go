@@ -64,9 +64,10 @@ func TestEstimateContextBreakdownProviderHistory(t *testing.T) {
 			assert.Equal(t, (len(definitions)+3)/4, breakdown.ToolDefinitionTokens)
 			assert.Equal(t, 1, breakdown.InputTextTokens)
 			assert.Equal(t, 2, breakdown.OutputTextTokens)
-			assert.Equal(t, 1, breakdown.OtherTokens)
+			assert.Nil(t, breakdown.ThinkingTokens, "summary text does not measure generated thinking")
+			assert.Zero(t, breakdown.OtherTokens)
 			assert.Equal(t, []llmtypes.ToolContextUsage{{Name: "code_execute", InputTokens: 4, OutputTokens: 1, Calls: 1}}, breakdown.Tools)
-			assert.Equal(t, 11+breakdown.ToolDefinitionTokens, breakdown.TotalTokens)
+			assert.Equal(t, 10+breakdown.ToolDefinitionTokens, breakdown.TotalTokens)
 		})
 	}
 }
@@ -81,7 +82,9 @@ func TestContextBreakdownMediaAndOpaqueContentExcluded(t *testing.T) {
 			{"type":"input_audio","data":"PAYLOAD"}
 		]},
 		{"role":"assistant","content":[{"type":"redacted_thinking","data":"PAYLOAD"}]},
-		{"type":"reasoning","encrypted_content":"PAYLOAD"},
+		{"role":"assistant","content":[{"type":"thinking","thinking":"PAYLOAD","signature":"PAYLOAD"}]},
+		{"role":"assistant","reasoning_content":"PAYLOAD"},
+		{"type":"reasoning","summary":[{"type":"summary_text","text":"PAYLOAD"}],"content":[{"type":"reasoning_text","text":"PAYLOAD"}],"encrypted_content":"PAYLOAD"},
 		{"type":"compaction","encrypted_content":"PAYLOAD"}
 	]`)
 	short := EstimateContextBreakdown(nil, nil, history, "")
@@ -89,6 +92,7 @@ func TestContextBreakdownMediaAndOpaqueContentExcluded(t *testing.T) {
 	require.NotNil(t, short)
 	assert.Equal(t, short, long)
 	assert.Equal(t, 1, short.TotalTokens)
+	assert.Nil(t, short.ThinkingTokens)
 	assert.Equal(t, "off", short.CodeMode)
 	assert.NotNil(t, short.Tools)
 	assert.Empty(t, short.Tools)
@@ -120,18 +124,25 @@ func TestContextBreakdownAggregatesToolNamesAndNativeResults(t *testing.T) {
 
 func TestContextBreakdownSnapshots(t *testing.T) {
 	thread := NewThread(llmtypes.Config{}, "test")
+	thinking := 0
 	breakdown := &llmtypes.ContextBreakdown{
 		SystemPromptTokens: 1, TotalTokens: 4, Estimated: true, CodeMode: "only",
-		Tools: []llmtypes.ToolContextUsage{{Name: "code_execute", Calls: 1, InputTokens: 1, OutputTokens: 2}},
+		ThinkingTokens: &thinking,
+		Tools:          []llmtypes.ToolContextUsage{{Name: "code_execute", Calls: 1, InputTokens: 1, OutputTokens: 2}},
 	}
 	thread.SetContextBreakdown(breakdown)
+	thinking = 999
 	breakdown.Tools[0].Name = "mutated"
 	usage := thread.GetUsage()
+	require.NotNil(t, usage.ContextBreakdown.ThinkingTokens)
+	assert.Zero(t, *usage.ContextBreakdown.ThinkingTokens)
+	*usage.ContextBreakdown.ThinkingTokens = 999
 	assert.Equal(t, "code_execute", usage.ContextBreakdown.Tools[0].Name)
 	usage.ContextBreakdown.Tools[0].InputTokens = 999
 	usage.ContextBreakdown.TotalTokens = 999
 	assert.Equal(t, 4, thread.GetUsage().ContextBreakdown.TotalTokens)
 	assert.Equal(t, 1, thread.GetUsage().ContextBreakdown.Tools[0].InputTokens)
+	assert.Zero(t, *thread.GetUsage().ContextBreakdown.ThinkingTokens)
 	thread.AggregateSubagentUsage(usage)
 	assert.Equal(t, 4, thread.GetUsage().ContextBreakdown.TotalTokens)
 
@@ -141,6 +152,7 @@ func TestContextBreakdownSnapshots(t *testing.T) {
 			for range 20 {
 				snapshot := thread.GetUsage().ContextBreakdown
 				snapshot.Tools[0].Calls++
+				*snapshot.ThinkingTokens++
 				thread.SetContextBreakdown(snapshot)
 			}
 		})
@@ -156,4 +168,81 @@ func TestContextBreakdownInvalidWireContent(t *testing.T) {
 	assert.Nil(t, EstimateContextBreakdown(make(chan int), nil, nil, ""))
 	assert.Nil(t, EstimateContextBreakdown(nil, make(chan int), nil, ""))
 	assert.Nil(t, EstimateContextBreakdown(nil, nil, json.RawMessage(`invalid`), ""))
+}
+
+func TestContextThinkingAccumulation(t *testing.T) {
+	thread := NewThread(llmtypes.Config{}, "thinking")
+	estimate := &llmtypes.ContextBreakdown{InputTextTokens: 10, TotalTokens: 10, Estimated: true}
+	thread.SetContextBreakdown(estimate)
+	assert.Nil(t, thread.GetUsage().ContextBreakdown.ThinkingTokens)
+	thread.RecordContextThinking("", 100)
+	thread.RecordContextThinking("invalid", -1)
+	assert.Empty(t, thread.GetUsage().ContextThinkingByResponse)
+	thread.RecordContextThinking("first", 0)
+	require.NotNil(t, thread.GetUsage().ContextBreakdown.ThinkingTokens)
+	assert.Zero(t, *thread.GetUsage().ContextBreakdown.ThinkingTokens)
+
+	thread.RecordContextThinking("first", 100)
+	before := thread.GetUsage()
+	thread.RecordContextThinking("second", 50)
+	thread.RecordContextThinking("second", 50)
+	thread.RecordContextThinking("third", 0)
+	usage := thread.GetUsage()
+	assert.Equal(t, 150, *usage.ContextBreakdown.ThinkingTokens)
+	assert.Equal(t, 160, usage.ContextBreakdown.TotalTokens)
+	assert.Equal(t, 100, *before.ContextBreakdown.ThinkingTokens)
+	assert.Equal(t, map[string]int{"first": 100}, before.ContextThinkingByResponse)
+
+	usage.ContextThinkingByResponse["first"] = 999
+	*usage.ContextBreakdown.ThinkingTokens = 999
+	assert.Equal(t, 100, thread.GetUsage().ContextThinkingByResponse["first"])
+	assert.Equal(t, 150, *thread.GetUsage().ContextBreakdown.ThinkingTokens)
+	thread.AggregateSubagentUsage(llmtypes.Usage{ContextThinkingByResponse: map[string]int{"child": 999}})
+	assert.NotContains(t, thread.GetUsage().ContextThinkingByResponse, "child")
+	assert.Zero(t, thread.GetUsage().OutputTokens, "already part of provider output, not added again")
+
+	// Appending messages invalidates the text estimate, not the recorded usage.
+	thread.SetContextBreakdown(nil)
+	assert.Nil(t, thread.GetUsage().ContextBreakdown)
+	thread.SetContextBreakdown(estimate)
+	assert.Equal(t, 150, *thread.GetUsage().ContextBreakdown.ThinkingTokens)
+	thread.SetContextBreakdown(thread.GetUsage().ContextBreakdown)
+	assert.Equal(t, 160, thread.GetUsage().ContextBreakdown.TotalTokens, "refresh must not double count")
+
+	// Persistence/forks carry counts independently, including when no estimate exists.
+	thread.SetContextBreakdown(nil)
+	raw, err := json.Marshal(thread.GetUsage())
+	require.NoError(t, err)
+	resumed := NewThread(llmtypes.Config{}, "resumed")
+	require.NoError(t, json.Unmarshal(raw, resumed.Usage))
+	resumed.RecordContextThinking("second", 50)
+	resumed.RecordContextThinking("fourth", 20)
+	resumed.SetContextBreakdown(estimate)
+	assert.Equal(t, 170, *resumed.GetUsage().ContextBreakdown.ThinkingTokens)
+	assert.Equal(t, 180, resumed.GetUsage().ContextBreakdown.TotalTokens)
+	resumed.Mu.Lock()
+	resumed.FinalizeSwapContextLocked("summary")
+	resumed.Mu.Unlock()
+	assert.Empty(t, resumed.GetUsage().ContextThinkingByResponse)
+	resumed.SetContextBreakdown(estimate)
+	assert.Nil(t, resumed.GetUsage().ContextBreakdown.ThinkingTokens)
+	resumed.RecordContextThinking("after-compaction", 5)
+	assert.Equal(t, 5, *resumed.GetUsage().ContextBreakdown.ThinkingTokens)
+}
+
+func TestContextThinkingConcurrentSnapshots(t *testing.T) {
+	thread := NewThread(llmtypes.Config{}, "thinking")
+	thread.SetContextBreakdown(&llmtypes.ContextBreakdown{InputTextTokens: 10, TotalTokens: 10})
+	var wg sync.WaitGroup
+	for _, response := range []string{"first", "second", "third", "fourth"} {
+		wg.Go(func() {
+			for range 20 {
+				thread.RecordContextThinking(response, 10)
+				thread.SetContextBreakdown(thread.GetUsage().ContextBreakdown)
+			}
+		})
+	}
+	wg.Wait()
+	assert.Equal(t, 40, *thread.GetUsage().ContextBreakdown.ThinkingTokens)
+	assert.Equal(t, 50, thread.GetUsage().ContextBreakdown.TotalTokens)
 }

@@ -83,20 +83,27 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"outpu
 
 `
 	for _, tc := range []struct {
-		name    string
-		content bool
-		partial bool
+		name     string
+		content  bool
+		partial  bool
+		thinking string
 	}{
 		{name: "metadata only"},
 		{name: "content opted in", content: true},
 		{name: "truncated stream", partial: true},
+		{name: "reported thinking", thinking: "3"},
+		{name: "reported zero thinking", thinking: "0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			recorder, provider := telemetrytest.NewRecorder(t, tc.content)
 			collectMetrics := telemetrytest.NewMetricsRecorder(t)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "text/event-stream")
-				_, _ = io.WriteString(w, streamStart)
+				stream := streamStart
+				if tc.thinking != "" {
+					stream = strings.Replace(stream, `"output_tokens":5`, fmt.Sprintf(`"output_tokens":5,"output_tokens_details":{"thinking_tokens":%s}`, tc.thinking), 1)
+				}
+				_, _ = io.WriteString(w, stream)
 				if !tc.partial {
 					_, _ = io.WriteString(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
 				}
@@ -139,6 +146,11 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"outpu
 				assert.Equal(t, int64(3), attrs["gen_ai.usage.cache_write.input_tokens"].AsInt64())
 				assert.Equal(t, "actual-model", attrs["gen_ai.response.model"].AsString())
 				assert.Equal(t, "msg_trace", attrs["gen_ai.response.id"].AsString())
+				thinking, reported := attrs["gen_ai.usage.reasoning.output_tokens"]
+				assert.Equal(t, tc.thinking != "", reported)
+				if reported {
+					assert.Equal(t, tc.thinking, strconv.FormatInt(thinking.AsInt64(), 10))
+				}
 			}
 			metrics := collectMetrics()
 			require.Contains(t, metrics, "kodelet.model.calls")
@@ -402,7 +414,7 @@ func TestAnthropicProcessMessageExchangeUsesManualPromptCaching(t *testing.T) {
 func TestAnthropicContextBreakdownIncludesFinalToolResult(t *testing.T) {
 	thread, requests := newNativeCompactionTestThread(t, compactionTestStream(
 		`{"type":"tool_use","id":"call-1","name":"test_tool","input":{}}`,
-		"tool_use", `{"input_tokens":10,"output_tokens":2}`,
+		"tool_use", `{"input_tokens":10,"output_tokens":12,"output_tokens_details":{"thinking_tokens":10}}`,
 	))
 	thread.Usage.CurrentContextWindow = 0
 	thread.messages = []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("user"))}
@@ -416,14 +428,77 @@ func TestAnthropicContextBreakdownIncludesFinalToolResult(t *testing.T) {
 	request := <-requests
 	breakdown := thread.GetUsage().ContextBreakdown
 	require.NotNil(t, breakdown)
-	assert.Equal(t, base.EstimateContextBreakdown(request.params["system"], request.params["tools"], thread.messages, "off"), breakdown)
+	expected := base.EstimateContextBreakdown(request.params["system"], request.params["tools"], thread.messages, "off")
+	thinking := 10
+	expected.ThinkingTokens = &thinking
+	expected.TotalTokens += thinking
+	assert.Equal(t, expected, breakdown)
 	require.Len(t, breakdown.Tools, 1)
 	assert.Equal(t, "test_tool", breakdown.Tools[0].Name)
 	assert.Equal(t, 1, breakdown.Tools[0].Calls)
 	assert.Greater(t, breakdown.Tools[0].OutputTokens, 0)
 	require.Len(t, handler.usage, 2)
 	assert.Zero(t, handler.usage[0].ContextBreakdown.Tools[0].OutputTokens)
+	require.NotNil(t, handler.usage[0].ContextBreakdown.ThinkingTokens)
+	assert.Equal(t, thinking, *handler.usage[0].ContextBreakdown.ThinkingTokens)
 	assert.Equal(t, breakdown, handler.usage[1].ContextBreakdown)
+	assert.Equal(t, map[string]int{"msg-compact": 10}, thread.GetUsage().ContextThinkingByResponse,
+		"refreshing after tool results must not count the response twice")
+}
+
+func TestAnthropicContextBreakdownAccumulatesReportedThinking(t *testing.T) {
+	cases := []struct {
+		name, responseID, details string
+		tokens                    int
+	}{
+		{name: "reported", responseID: "first", details: `,"output_tokens_details":{"thinking_tokens":120}`, tokens: 120},
+		{name: "accumulated", responseID: "second", details: `,"output_tokens_details":{"thinking_tokens":7}`, tokens: 127},
+		{name: "explicit zero preserves total", responseID: "third", details: `,"output_tokens_details":{"thinking_tokens":0}`, tokens: 127},
+		{name: "not reported preserves total", responseID: "fourth", tokens: 127},
+		{name: "repeated response is not counted twice", responseID: "second", details: `,"output_tokens_details":{"thinking_tokens":7}`, tokens: 127},
+	}
+	var replies []string
+	for _, tc := range cases {
+		stream := compactionTestStream(
+			`{"type":"thinking","thinking":"brief summary","signature":"opaque-full-thinking"}`,
+			"end_turn", fmt.Sprintf(`{"input_tokens":10,"output_tokens":200%s}`, tc.details),
+		)
+		replies = append(replies, strings.Replace(stream, "msg-compact", tc.responseID, 1))
+	}
+	thread, requests := newNativeCompactionTestThread(t, replies...)
+	thread.Usage.CurrentContextWindow = 0
+	thread.messages = []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("user"))}
+	handler := &captureAnthropicToolHandler{}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if i > 0 {
+				before := thread.GetUsage().ContextThinkingByResponse
+				thread.AddUserMessage(t.Context(), "continue")
+				assert.Equal(t, before, thread.GetUsage().ContextThinkingByResponse, "new user input preserves accumulated thinking")
+			}
+			_, used, err := thread.processMessageExchange(t.Context(), handler, "claude-sonnet-4-6", 256, "system", llmtypes.MessageOpt{NoToolUse: true, DisableUsageLog: true})
+			require.NoError(t, err)
+			assert.False(t, used)
+			request := <-requests
+			usage := thread.GetUsage()
+			breakdown := usage.ContextBreakdown
+			require.NotNil(t, breakdown)
+			expected := base.EstimateContextBreakdown(request.params["system"], request.params["tools"], thread.messages, "off")
+			tokens := tc.tokens
+			expected.ThinkingTokens = &tokens
+			expected.TotalTokens += tokens
+			assert.Equal(t, expected, breakdown)
+			assert.Zero(t, breakdown.OtherTokens, "thinking summaries must not be counted again")
+			assert.Zero(t, breakdown.OutputTextTokens)
+			assert.Equal(t, 200*(i+1), usage.OutputTokens, "thinking is already included in output usage")
+			assert.Equal(t, 210, usage.CurrentContextWindow)
+			require.Len(t, handler.usage, i+1)
+			assert.Equal(t, breakdown, handler.usage[i].ContextBreakdown)
+		})
+	}
+	require.NotNil(t, handler.usage[0].ContextBreakdown.ThinkingTokens)
+	assert.Equal(t, 120, *handler.usage[0].ContextBreakdown.ThinkingTokens, "prior snapshots remain unchanged")
+	assert.Equal(t, map[string]int{"first": 120, "second": 7, "third": 0}, thread.GetUsage().ContextThinkingByResponse)
 }
 
 func TestAnthropicToolResultBlockUsesMultimodalPartsWhenAvailable(t *testing.T) {
@@ -1646,7 +1721,7 @@ func TestAnthropicSendMessageNoSaveBlocksForkAndRestoresMessages(t *testing.T) {
 			"event: content_block_stop\n" +
 			`data: {"type":"content_block_stop","index":0}` + "\n\n" +
 			"event: message_delta\n" +
-			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":1,"output_tokens":2}}` + "\n\n" +
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":1,"output_tokens":2,"output_tokens_details":{"thinking_tokens":1}}}` + "\n\n" +
 			"event: message_stop\n" +
 			`data: {"type":"message_stop"}` + "\n\n"))
 	}))
@@ -1672,11 +1747,15 @@ func TestAnthropicSendMessageNoSaveBlocksForkAndRestoresMessages(t *testing.T) {
 	thread.Store = store
 	thread.Persisted = true
 	thread.SetState(tools.NewBasicState(context.Background(), tools.WithLLMConfig(config)))
+	thread.RecordContextThinking("previous", 11)
+	thread.SetContextBreakdown(base.EstimateContextBreakdown(nil, nil, thread.messages, "off"))
+	originalUsage := thread.GetUsage()
+	handler := &captureAnthropicToolHandler{}
 
 	output, err := thread.SendMessage(
 		context.Background(),
 		"transient",
-		&llmtypes.StringCollectorHandler{Silent: true},
+		handler,
 		llmtypes.MessageOpt{MaxTurns: 1, NoSaveConversation: true, DisableUsageLog: true},
 	)
 
@@ -1685,6 +1764,14 @@ func TestAnthropicSendMessageNoSaveBlocksForkAndRestoresMessages(t *testing.T) {
 	assert.Equal(t, originalMessages, thread.messages)
 	assert.Empty(t, store.SavedRecords)
 	assert.False(t, thread.ConversationForkBlocked())
+	require.Len(t, handler.usage, 1)
+	assert.Equal(t, map[string]int{"previous": 11, "msg_no_save": 1}, handler.usage[0].ContextThinkingByResponse,
+		"temporary response thinking is tracked during the no-save turn")
+	usage := thread.GetUsage()
+	assert.Equal(t, originalUsage.ContextThinkingByResponse, usage.ContextThinkingByResponse)
+	assert.Equal(t, originalUsage.ContextBreakdown, usage.ContextBreakdown)
+	assert.Equal(t, originalUsage.OutputTokens+2, usage.OutputTokens, "no-save rollback must retain billable output")
+	assert.Greater(t, usage.OutputCost, originalUsage.OutputCost)
 }
 
 type captureUserMessageHandler struct {

@@ -79,7 +79,8 @@ type Thread struct {
 	// history representation changes.
 	historyRevision uint64
 	// codexWindowGeneration is guarded by historyMu and identifies the logical
-	// installed context lineage advertised to Codex Responses requests.
+	// installed context lineage. It guards usage snapshots for all platforms and
+	// is also advertised to Codex Responses requests.
 	codexWindowGeneration uint64
 	// activeNoSaveOperation records public history appends that arrive while a
 	// no-save model call is in flight so rollback can preserve them.
@@ -386,6 +387,7 @@ type responsesNoSaveSnapshot struct {
 	currentContextWindow  int
 	maxContextWindow      int
 	contextBreakdown      *llmtypes.ContextBreakdown
+	contextThinking       map[string]int
 	structuredToolResults map[string]tooltypes.StructuredToolResult
 	messageMetadata       map[string]any
 	pendingReasoning      string
@@ -425,6 +427,7 @@ func (t *Thread) snapshotNoSaveState() responsesNoSaveSnapshot {
 		snapshot.currentContextWindow = t.Usage.CurrentContextWindow
 		snapshot.maxContextWindow = t.Usage.MaxContextWindow
 		snapshot.contextBreakdown = t.Usage.ContextBreakdown
+		snapshot.contextThinking = maps.Clone(t.Usage.ContextThinkingByResponse)
 	}
 	snapshot.structuredToolResults = maps.Clone(t.ToolResults)
 	snapshot.compactionHistory = t.CompactionHistory.Clone()
@@ -453,6 +456,7 @@ func (t *Thread) restoreNoSaveState(snapshot responsesNoSaveSnapshot) {
 	t.Usage.CurrentContextWindow = snapshot.currentContextWindow
 	t.Usage.MaxContextWindow = snapshot.maxContextWindow
 	t.Usage.ContextBreakdown = snapshot.contextBreakdown
+	t.Usage.ContextThinkingByResponse = snapshot.contextThinking
 	if len(snapshot.operation.externalAppends) > 0 {
 		t.Usage.ContextBreakdown = nil
 	}
@@ -918,11 +922,12 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 			}
 			t.applyCodexRestrictions(&attemptParams)
 			prefixCount := len(attemptParams.Input.OfInputItemList) - len(inputItems)
-			t.refreshContextBreakdown(attemptParams, prefixCount, windowGeneration)
+			var response *responses.Response
+			t.refreshContextBreakdown(attemptParams, prefixCount, windowGeneration, nil)
 			defer func() {
 				// Include all model output and local tool results, even if this is
 				// the final turn or the stream/tool execution fails partway through.
-				t.refreshContextBreakdown(attemptParams, prefixCount, windowGeneration)
+				t.refreshContextBreakdown(attemptParams, prefixCount, windowGeneration, response)
 				if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
 					usageHandler.HandleUsage(t.GetUsage())
 				}
@@ -939,6 +944,7 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 			log.WithField("transport", transportName).Debug("stream created, processing events")
 
 			streamResult, err := processStream(ctx, attempt.stream, handler, model, opt)
+			response = streamResult.response
 			if attempt.stream != nil {
 				if closeErr := attempt.stream.Close(); err == nil && closeErr != nil {
 					err = errors.Wrap(closeErr, "failed to close Responses API stream")
@@ -946,6 +952,9 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 			}
 			if response := streamResult.response; response != nil {
 				span.SetAttributes(responseSpanAttributes(*response)...)
+				// Capture thinking before tools can fork this context. The deferred
+				// refresh includes tool results without adding this response twice.
+				t.refreshContextBreakdown(attemptParams, prefixCount, windowGeneration, response)
 			}
 			if err == nil && !streamResult.responseCompleted {
 				err = errors.New("response stream ended before response.completed event")
@@ -1014,7 +1023,7 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 
 // Keep Codex's request-only developer messages, but use the complete current
 // inference window rather than display history or a WebSocket continuation delta.
-func (t *Thread) refreshContextBreakdown(params responses.ResponseNewParams, prefixCount int, windowGeneration uint64) {
+func (t *Thread) refreshContextBreakdown(params responses.ResponseNewParams, prefixCount int, windowGeneration uint64, response *responses.Response) {
 	t.historyMu.Lock()
 	defer t.historyMu.Unlock()
 	if t.codexWindowGeneration != windowGeneration {
@@ -1022,20 +1031,27 @@ func (t *Thread) refreshContextBreakdown(params responses.ResponseNewParams, pre
 		return
 	}
 	items := append(cloneResponsesInputItems(params.Input.OfInputItemList[:prefixCount]), t.inputItems...)
-	t.SetContextBreakdown(base.EstimateContextBreakdown(
+	breakdown := base.EstimateContextBreakdown(
 		params.Instructions.Value, params.Tools, items, t.Config.EffectiveCodeMode(),
-	))
+	)
+	if breakdown != nil && response != nil && response.Usage.OutputTokensDetails.JSON.ReasoningTokens.Valid() {
+		t.RecordContextThinking(response.ID, int(response.Usage.OutputTokensDetails.ReasoningTokens))
+	}
+	t.SetContextBreakdown(breakdown)
 }
 
 func responseSpanAttributes(response responses.Response) []attribute.KeyValue {
-	return []attribute.KeyValue{
+	attrs := []attribute.KeyValue{
 		attribute.String("gen_ai.response.id", response.ID),
 		attribute.String("gen_ai.response.model", response.Model),
 		attribute.Int64("gen_ai.usage.input_tokens", response.Usage.InputTokens),
 		attribute.Int64("gen_ai.usage.output_tokens", response.Usage.OutputTokens),
 		attribute.Int64("gen_ai.usage.cache_read.input_tokens", response.Usage.InputTokensDetails.CachedTokens),
-		attribute.Int64("gen_ai.usage.reasoning.output_tokens", response.Usage.OutputTokensDetails.ReasoningTokens),
 	}
+	if response.Usage.OutputTokensDetails.JSON.ReasoningTokens.Valid() {
+		attrs = append(attrs, attribute.Int64("gen_ai.usage.reasoning.output_tokens", response.Usage.OutputTokensDetails.ReasoningTokens))
+	}
+	return attrs
 }
 
 func (t *Thread) lastAssistantMessageText() string {
@@ -1502,6 +1518,7 @@ func (t *Thread) snapshotConversationState(cleanupLive bool) conversationStateSn
 	usage := llmtypes.Usage{}
 	if t.Usage != nil {
 		usage = *t.Usage
+		usage.ContextThinkingByResponse = maps.Clone(usage.ContextThinkingByResponse)
 	}
 	toolResults := maps.Clone(t.ToolResults)
 	metadata := maps.Clone(t.Metadata)

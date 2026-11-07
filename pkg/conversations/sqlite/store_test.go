@@ -128,13 +128,15 @@ func TestStore_BasicOperations(t *testing.T) {
 
 	// Create test conversation record
 	now := time.Now()
+	thinking := 40
 	record := conversations.ConversationRecord{
 		ID:          "test-conversation-1",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Hello world"}]}]`),
 		Provider:    "anthropic",
 		Usage: llmtypes.Usage{
-			InputTokens:  100,
-			OutputTokens: 50,
+			InputTokens:               100,
+			OutputTokens:              50,
+			ContextThinkingByResponse: map[string]int{"response-1": 30, "response-2": 10},
 			ContextBreakdown: &llmtypes.ContextBreakdown{
 				Estimated:            true,
 				CodeMode:             "only",
@@ -142,7 +144,8 @@ func TestStore_BasicOperations(t *testing.T) {
 				ToolDefinitionTokens: 30,
 				InputTextTokens:      10,
 				OutputTextTokens:     10,
-				TotalTokens:          100,
+				ThinkingTokens:       &thinking,
+				TotalTokens:          140,
 				Tools: []llmtypes.ToolContextUsage{
 					{Name: "code_execute", Calls: 1, InputTokens: 10, OutputTokens: 20},
 				},
@@ -184,6 +187,7 @@ func TestStore_BasicOperations(t *testing.T) {
 	assert.Equal(t, record.Metadata, loaded.Metadata)
 	assert.Equal(t, record.Usage.OutputTokens, loaded.Usage.OutputTokens)
 	assert.Equal(t, record.Usage.ContextBreakdown, loaded.Usage.ContextBreakdown)
+	assert.Equal(t, record.Usage.ContextThinkingByResponse, loaded.Usage.ContextThinkingByResponse)
 	assert.Equal(t, string(record.RawMessages), string(loaded.RawMessages))
 
 	// Test Load non-existent

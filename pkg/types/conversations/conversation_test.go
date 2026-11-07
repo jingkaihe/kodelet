@@ -43,10 +43,11 @@ func TestForkConversationRecord(t *testing.T) {
 	source.Provider = "openai"
 	source.Summary = "hello"
 	source.Usage = llmtypes.Usage{
-		InputTokens:          10,
-		OutputTokens:         5,
-		CurrentContextWindow: 123,
-		MaxContextWindow:     456,
+		InputTokens:               10,
+		OutputTokens:              5,
+		CurrentContextWindow:      123,
+		MaxContextWindow:          456,
+		ContextThinkingByResponse: map[string]int{"response-1": 50},
 	}
 	source.Metadata = map[string]any{
 		"profile":                                 "work",
@@ -70,6 +71,9 @@ func TestForkConversationRecord(t *testing.T) {
 	assert.Zero(t, forked.Usage.OutputTokens)
 	assert.Equal(t, 123, forked.Usage.CurrentContextWindow)
 	assert.Equal(t, 456, forked.Usage.MaxContextWindow)
+	assert.Equal(t, source.Usage.ContextThinkingByResponse, forked.Usage.ContextThinkingByResponse)
+	forked.Usage.ContextThinkingByResponse["response-1"] = 999
+	assert.Equal(t, 50, source.Usage.ContextThinkingByResponse["response-1"])
 	assert.Equal(t, "work", forked.Metadata["profile"])
 	assert.NotContains(t, forked.Metadata, CodexResponsesWindowGenerationMetadataKey)
 	assert.NotContains(t, forked.Metadata, RunnerIDMetadataKey)

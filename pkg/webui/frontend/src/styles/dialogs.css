@@ -1540,8 +1540,11 @@
 .about-context-output {
   --context-color: var(--kodelet-success);
 }
-.about-context-other {
+.about-context-thinking {
   --context-color: var(--kodelet-warning);
+}
+.about-context-other {
+  --context-color: var(--kodelet-muted);
 }
 
 @media (max-width: 420px) {

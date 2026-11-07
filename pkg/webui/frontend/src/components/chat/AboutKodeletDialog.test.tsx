@@ -56,7 +56,8 @@ const contextBreakdown: ContextBreakdown = {
   toolDefinitionTokens: 200,
   inputTextTokens: 100,
   outputTextTokens: 100,
-  otherTokens: 50,
+  thinkingTokens: 25,
+  otherTokens: 25,
   tools: [
     { name: 'code_execute', inputTokens: 100, outputTokens: 250, calls: 3 },
     { name: 'skill', inputTokens: 20, outputTokens: 80, calls: 1 },
@@ -357,7 +358,8 @@ describe('AboutKodeletDialog', () => {
       ['Tool definitions', '200 tokens', '20.0%', 'definitions', '10%'],
       ['Input text', '100 tokens', '10.0%', 'input', '5%'],
       ['Output text', '100 tokens', '10.0%', 'output', '5%'],
-      ['Other / reasoning', '50 tokens', '5.0%', 'other', '2.5%'],
+      ['Thinking', '25 tokens', '2.5%', 'thinking', '1.25%'],
+      ['Other', '25 tokens', '2.5%', 'other', '1.25%'],
       ['Tool usage', '450 tokens', '45.0%', 'tool', '22.5%'],
     ];
     expect(Array.from(composition.querySelectorAll('dt'), (dt) => dt.textContent)).toEqual(
@@ -374,6 +376,7 @@ describe('AboutKodeletDialog', () => {
       expect(segment).toHaveAttribute('aria-hidden', 'true');
     }
     expect(meter.querySelector('.about-context-available')).toHaveStyle({ width: '50%' });
+    expect(within(composition).queryByText('Last response')).not.toBeInTheDocument();
     const toolBar = screen.getByRole('img', { name: 'Tool usage breakdown' });
     expect(toolBar).not.toHaveAttribute('aria-valuenow');
     expect(toolBar.querySelector('.about-context-available')).toBeNull();
@@ -394,6 +397,66 @@ describe('AboutKodeletDialog', () => {
     expect(screen.getByText('1 call · 20 input · 80 output tokens')).toBeInTheDocument();
     expect(screen.getByRole('tabpanel').querySelectorAll('.about-context-meter')).toHaveLength(2);
     expect(screen.getByRole('tabpanel').querySelector('.about-context-bar')).toBeNull();
+  });
+
+  it.each([
+    undefined,
+    null,
+    0,
+    100,
+  ])('distinguishes reported and unknown thinking: %s', async (thinkingTokens) => {
+    const user = userEvent.setup();
+    const totalTokens = 100 + (thinkingTokens ?? 0);
+    render(
+      <AboutKodeletDialog
+        onClose={vi.fn()}
+        terminalAuthorized
+        usage={{
+          currentContextWindow: 150,
+          maxContextWindow: 300,
+          contextBreakdown: {
+            systemPromptTokens: 0,
+            toolDefinitionTokens: 0,
+            inputTextTokens: 100,
+            outputTextTokens: 0,
+            thinkingTokens,
+            otherTokens: 0,
+            totalTokens,
+            tools: [],
+            codeMode: 'off',
+            estimated: true,
+          },
+        }}
+      />
+    );
+    await user.click(screen.getByRole('tab', { name: 'Context' }));
+    const row = screen.getByText('Thinking', { selector: 'dt' }).parentElement;
+    const meter = screen.getByRole('meter');
+    const segment = meter.querySelector('.about-context-thinking');
+    expect(segment).toHaveStyle({
+      width: `${(50 * (thinkingTokens ?? 0)) / totalTokens}%`,
+    });
+    expect(meter.querySelector('.about-context-available')).toHaveStyle({ width: '50%' });
+    expect(
+      Array.from(meter.children).reduce(
+        (sum, part) => sum + Number.parseFloat((part as HTMLElement).style.width),
+        0
+      )
+    ).toBe(100);
+    if (thinkingTokens == null) {
+      expect(row).toHaveTextContent(/^Thinking—$/);
+      expect(row).not.toHaveTextContent(/tokens|%/);
+      expect(segment).toHaveAttribute('title', 'Thinking: —');
+    } else {
+      expect(row).toHaveTextContent(`${thinkingTokens} tokens`);
+      expect(row).toHaveTextContent(`${((thinkingTokens / totalTokens) * 100).toFixed(1)}%`);
+    }
+    expect(row?.querySelector('.about-context-detail')).toBeNull();
+    expect(segment?.getAttribute('title')).not.toContain('Last response');
+    expect(screen.getByText('Other', { selector: 'dt' }).parentElement).toHaveTextContent(
+      '0 tokens'
+    );
+    expect(screen.queryByText('Other / reasoning')).not.toBeInTheDocument();
   });
 
   it.each([
@@ -439,7 +502,7 @@ describe('AboutKodeletDialog', () => {
     );
     await user.click(screen.getByRole('tab', { name: 'Context' }));
     const toolBar = screen.getByRole('img', { name: 'Tool usage breakdown' });
-    const palette = ['tool', 'system', 'definitions', 'input', 'output', 'other'];
+    const palette = ['tool', 'system', 'definitions', 'input', 'output', 'thinking'];
     for (const [index, tool] of tools.entries()) {
       const row = screen.getByText(tool.name, { selector: 'dt' }).parentElement;
       expect(row).toHaveTextContent('3.3%');
@@ -451,7 +514,8 @@ describe('AboutKodeletDialog', () => {
     expect(screen.getAllByText('1 call · 10 input · 20 output tokens')).toHaveLength(30);
     expect(screen.getByRole('meter').querySelectorAll('.about-context-tool')).toHaveLength(1);
     expect(toolBar.children).toHaveLength(30);
-    expect(screen.getByText('Other / reasoning', { selector: 'dt' })).toBeInTheDocument();
+    expect(screen.getByText('Thinking', { selector: 'dt' })).toBeInTheDocument();
+    expect(screen.getByText('Other', { selector: 'dt' })).toBeInTheDocument();
   });
 
   it('handles unknown capacity and an empty estimate, then updates without reopening', async () => {
@@ -470,6 +534,7 @@ describe('AboutKodeletDialog', () => {
             toolDefinitionTokens: 0,
             inputTextTokens: 0,
             outputTextTokens: 0,
+            thinkingTokens: 0,
             otherTokens: 0,
             tools: [],
             totalTokens: 0,
@@ -562,7 +627,7 @@ describe('AboutKodeletDialog', () => {
     expect(meter.querySelector('.about-context-unclassified')).toHaveStyle({ width: '50%' });
     expect(meter.querySelector('.about-context-available')).toHaveStyle({ width: '50%' });
     expect(screen.getByRole('region', { name: 'Composition' }).querySelectorAll('dt')).toHaveLength(
-      6
+      7
     );
     expect(screen.queryByRole('img', { name: 'Tool usage breakdown' })).not.toBeInTheDocument();
     expect(

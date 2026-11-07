@@ -734,7 +734,10 @@ func TestRemoteCompactionV2PersistsLoadsAndReplaysFollowUp(t *testing.T) {
 		return remoteCompactionV2Stream(t, "persisted-encrypted-summary")
 	}
 
+	thread.RecordContextThinking("before-compaction", 100)
 	require.NoError(t, thread.CompactContext(context.Background()))
+	assert.Empty(t, thread.GetUsage().ContextThinkingByResponse)
+	thread.RecordContextThinking("after-compaction", 20)
 	store := &mockResponsesConversationStore{}
 	thread.Store = store
 	thread.Persisted = true
@@ -757,6 +760,9 @@ func TestRemoteCompactionV2PersistsLoadsAndReplaysFollowUp(t *testing.T) {
 	restored.Store = loadStore
 	restored.LoadConversation = restored.loadConversation
 	require.NoError(t, restored.EnablePersistence(context.Background(), true))
+	assert.Equal(t, map[string]int{"after-compaction": 20}, restored.GetUsage().ContextThinkingByResponse)
+	restored.RecordContextThinking("after-compaction", 20)
+	restored.RecordContextThinking("follow-up", 30)
 
 	loadedSnapshot := restored.snapshotHistory()
 	require.Len(t, loadedSnapshot.inputItems, 2)
@@ -790,12 +796,14 @@ func TestRemoteCompactionV2PersistsLoadsAndReplaysFollowUp(t *testing.T) {
 	require.NotNil(t, captured.Input.OfInputItemList[1].OfCompaction)
 	assert.Equal(t, "persisted-encrypted-summary", captured.Input.OfInputItemList[1].OfCompaction.EncryptedContent)
 	assert.Equal(t, "follow up", extractInputItemText(captured.Input.OfInputItemList[2]))
+	assert.Equal(t, 50, *restored.GetUsage().ContextBreakdown.ThinkingTokens)
 
 	// A compaction after resume must archive only the follow-up, not its seed.
 	restored.newStreamingFunc = func(context.Context, openairesponses.ResponseNewParams, ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
 		return remoteCompactionV2Stream(t, "second-encrypted-summary")
 	}
 	require.NoError(t, restored.CompactContext(t.Context()))
+	assert.Empty(t, restored.GetUsage().ContextThinkingByResponse)
 	require.NoError(t, restored.SaveConversation(t.Context()))
 	require.Len(t, restored.CompactionHistory.Segments, 2)
 	assert.Equal(t, 3, restored.CompactionHistory.ActiveDisplayStart)

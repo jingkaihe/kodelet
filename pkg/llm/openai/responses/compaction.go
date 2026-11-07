@@ -83,9 +83,7 @@ func (t *Thread) replaceWithSummary(expectedRevision *uint64, summary string) er
 		},
 	}
 	t.historyRevision++
-	if t.isCodex {
-		t.codexWindowGeneration++
-	}
+	t.codexWindowGeneration++
 
 	t.FinalizeSwapContextLocked(summary)
 	t.Mu.Unlock()
@@ -924,9 +922,7 @@ func (t *Thread) replaceCompactedHistory(
 	t.inputItems = newInputItems
 	t.storedItems = newStoredItems
 	t.historyRevision++
-	if t.isCodex {
-		t.codexWindowGeneration++
-	}
+	t.codexWindowGeneration++
 
 	t.ResetContextStateLocked()
 	pricing := t.getPricing(t.Config.Model)

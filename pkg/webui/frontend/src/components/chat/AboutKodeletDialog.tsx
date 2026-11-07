@@ -255,7 +255,7 @@ const ContextUsage: React.FC<{ usage?: Usage }> = ({ usage }) => {
       : breakdown && breakdown.totalTokens > 0
         ? 1
         : 0;
-  const toolTones = ['tool', 'system', 'definitions', 'input', 'output', 'other'];
+  const toolTones = ['tool', 'system', 'definitions', 'input', 'output', 'thinking'];
   const toolRows =
     breakdown?.tools.map((tool, index) => ({
       ...tool,
@@ -270,7 +270,8 @@ const ContextUsage: React.FC<{ usage?: Usage }> = ({ usage }) => {
         { label: 'Tool definitions', tokens: breakdown.toolDefinitionTokens, tone: 'definitions' },
         { label: 'Input text', tokens: breakdown.inputTextTokens, tone: 'input' },
         { label: 'Output text', tokens: breakdown.outputTextTokens, tone: 'output' },
-        { label: 'Other / reasoning', tokens: breakdown.otherTokens, tone: 'other' },
+        { label: 'Thinking', tokens: breakdown.thinkingTokens ?? null, tone: 'thinking' },
+        { label: 'Other', tokens: breakdown.otherTokens, tone: 'other' },
         {
           label: 'Tool usage',
           tokens: toolTokens,
@@ -291,8 +292,12 @@ const ContextUsage: React.FC<{ usage?: Usage }> = ({ usage }) => {
             aria-hidden="true"
             className={`about-context-segment about-context-${tone}`}
             key={tone}
-            style={{ width: `${usedFraction * share(tokens) * 100}%` }}
-            title={`${label}: ${formatContextTokens(tokens)} tokens · ${formatPercent(share(tokens) * 100)} of used`}
+            style={{ width: `${usedFraction * share(tokens ?? 0) * 100}%` }}
+            title={
+              tokens === null
+                ? `${label}: —`
+                : `${label}: ${formatContextTokens(tokens)} tokens · ${formatPercent(share(tokens) * 100)} of used`
+            }
           />
         ))
       ) : (
@@ -371,10 +376,16 @@ const ContextUsage: React.FC<{ usage?: Usage }> = ({ usage }) => {
                     {label}
                   </dt>
                   <dd className="about-context-values">
-                    <span>{formatContextTokens(tokens)} tokens</span>
-                    <span className="about-context-share">
-                      {formatPercent(share(tokens) * 100)}
-                    </span>
+                    {tokens === null ? (
+                      <span>—</span>
+                    ) : (
+                      <>
+                        <span>{formatContextTokens(tokens)} tokens</span>
+                        <span className="about-context-share">
+                          {formatPercent(share(tokens) * 100)}
+                        </span>
+                      </>
+                    )}
                   </dd>
                 </div>
               ))}

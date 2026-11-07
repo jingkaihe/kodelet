@@ -13,16 +13,23 @@ type Usage struct {
 	CurrentContextWindow     int               `json:"currentContextWindow"`       // Current context window size
 	MaxContextWindow         int               `json:"maxContextWindow"`           // Max context window size
 	ContextBreakdown         *ContextBreakdown `json:"contextBreakdown,omitempty"` // Estimated composition of the live model context
+	// Per-response thinking generated since the last context replacement. Kept
+	// separately from the estimate so message appends cannot discard the counts.
+	ContextThinkingByResponse map[string]int `json:"contextThinkingByResponse,omitempty"`
 }
 
 // ContextBreakdown estimates the current model-visible context, not cumulative
-// billed usage. It excludes archived history and opaque media/encrypted payloads;
-// its total is independent of the provider-reported context window size.
+// billed usage. It excludes archived history and opaque media/encrypted payloads.
+// ThinkingTokens sums provider-reported thinking generated since the last context
+// replacement. It estimates context contribution, not exact provider retention.
+// Nil means no thinking counts have been reported for this context.
+// Its total is independent of the provider-reported context window size.
 type ContextBreakdown struct {
 	SystemPromptTokens   int                `json:"systemPromptTokens"`
 	ToolDefinitionTokens int                `json:"toolDefinitionTokens"`
 	InputTextTokens      int                `json:"inputTextTokens"`
 	OutputTextTokens     int                `json:"outputTextTokens"`
+	ThinkingTokens       *int               `json:"thinkingTokens"`
 	OtherTokens          int                `json:"otherTokens"`
 	Tools                []ToolContextUsage `json:"tools"`
 	TotalTokens          int                `json:"totalTokens"`

@@ -356,13 +356,16 @@ func (t *Thread) SendMessage(
 		originalHistory := t.GetCompactionHistory()
 		originalResults := t.GetStructuredToolResults()
 		originalMetadata := t.GetMetadata()
-		originalBreakdown := t.GetUsage().ContextBreakdown
+		originalUsage := t.GetUsage()
 		defer func() {
 			t.messages = originalMessages
 			t.SetCompactionHistory(originalHistory)
 			t.SetStructuredToolResults(originalResults)
 			t.RestoreMessageMetadata(originalMetadata)
-			t.SetContextBreakdown(originalBreakdown)
+			t.Mu.Lock()
+			t.Usage.ContextThinkingByResponse = originalUsage.ContextThinkingByResponse
+			t.Mu.Unlock()
+			t.SetContextBreakdown(originalUsage.ContextBreakdown)
 		}()
 	}
 
@@ -719,12 +722,18 @@ func (t *Thread) processMessageExchange(
 			t.PublishCompaction(ctx, t, handler, previousMarkerID, false)
 		}
 	}
-	refreshContext := func() {
-		t.SetContextBreakdown(base.EstimateContextBreakdown(
+	refreshContext := func(response *anthropic.Message) {
+		breakdown := base.EstimateContextBreakdown(
 			messageParams.System, messageParams.Tools, t.messages, t.Config.EffectiveCodeMode(),
-		))
+		)
+		if response != nil && response.Usage.OutputTokensDetails.JSON.ThinkingTokens.Valid() {
+			// The same response is refreshed after tool results. Keying by ID
+			// preserves accumulation without counting that response twice.
+			t.RecordContextThinking(response.ID, int(response.Usage.OutputTokensDetails.ThinkingTokens))
+		}
+		t.SetContextBreakdown(breakdown)
 	}
-	refreshContext()
+	refreshContext(nil)
 
 	// Add a tracing event for API call start
 	telemetry.AddEvent(ctx, "api_call_start",
@@ -750,7 +759,7 @@ func (t *Thread) processMessageExchange(
 		}
 		t.messages = append(t.messages, response.ToParam())
 		t.updateUsage(response, model)
-		refreshContext()
+		refreshContext(response)
 		if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
 			usageHandler.HandleUsage(t.GetUsage())
 		}
@@ -823,7 +832,7 @@ func (t *Thread) processMessageExchange(
 	// Add all tool results as a single user message (required by Anthropic API)
 	if len(toolResultBlocks) > 0 {
 		t.messages = append(t.messages, anthropic.NewUserMessage(toolResultBlocks...))
-		refreshContext()
+		refreshContext(response)
 		if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
 			usageHandler.HandleUsage(t.GetUsage())
 		}
@@ -1346,6 +1355,9 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 		attribute.Int64("cache_creation_tokens", message.Usage.CacheCreationInputTokens),
 		attribute.Int64("cache_read_tokens", message.Usage.CacheReadInputTokens),
 	)
+	if message.Usage.OutputTokensDetails.JSON.ThinkingTokens.Valid() {
+		span.SetAttributes(attribute.Int64("gen_ai.usage.reasoning.output_tokens", message.Usage.OutputTokensDetails.ThinkingTokens))
+	}
 	return &message, nil
 }
 

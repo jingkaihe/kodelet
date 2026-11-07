@@ -2,6 +2,7 @@ package base
 
 import (
 	"encoding/json"
+	"maps"
 	"sort"
 	"strings"
 
@@ -14,6 +15,8 @@ import (
 // Text uses the same rough four-bytes-per-token heuristic as context compaction.
 // Media, signatures and encrypted reasoning have no useful character estimate
 // and are omitted rather than treating their base64 transport size as tokens.
+// Thinking text may only be a summary. Providers supply reported thinking usage
+// separately; neither summaries nor opaque payloads estimate the underlying work.
 func EstimateContextBreakdown(system, definitions, messages any, codeMode string) *llmtypes.ContextBreakdown {
 	if codeMode == "" {
 		codeMode = "off"
@@ -160,8 +163,8 @@ func (c *contextCounter) visit(value any, namesOnly bool) {
 			}
 		}
 		if !namesOnly {
-			// Text extraction does not traverse tool calls/results or reasoning,
-			// which were classified separately above.
+			// Tool calls/results are classified separately. Reasoning and its
+			// summaries are excluded rather than estimated from their text.
 			size := contextTextSize(content) + len(contextString(m["refusal"]))
 			switch role {
 			case "system", "developer":
@@ -171,16 +174,11 @@ func (c *contextCounter) visit(value any, namesOnly bool) {
 			default:
 				c.input += size
 			}
-			c.other += len(contextString(m["reasoning_content"]))
 		}
 		return
 	}
 	if !namesOnly {
 		switch kind {
-		case "thinking":
-			c.other += len(contextString(m["thinking"]))
-		case "reasoning":
-			c.other += contextTextSize(m["summary"]) + contextTextSize(m["content"])
 		case "compaction", "compaction_summary":
 			c.other += contextTextSize(m["content"])
 		}
@@ -242,6 +240,49 @@ func (t *Thread) SetContextBreakdown(breakdown *llmtypes.ContextBreakdown) {
 		t.Usage = &llmtypes.Usage{}
 	}
 	t.Usage.ContextBreakdown = cloneContextBreakdown(breakdown)
+	t.updateContextThinkingLocked()
+}
+
+// RecordContextThinking retains reported thinking independently of text estimates.
+// Response IDs make retries and repeated tool-result refreshes idempotent. Counts
+// belong to this inference window, not subagents or cumulative billed output.
+func (t *Thread) RecordContextThinking(responseID string, tokens int) {
+	if responseID == "" || tokens < 0 {
+		return
+	}
+	t.Mu.Lock()
+	defer t.Mu.Unlock()
+	if t.Usage == nil {
+		t.Usage = &llmtypes.Usage{}
+	}
+	if previous, ok := t.Usage.ContextThinkingByResponse[responseID]; ok && previous == tokens {
+		return
+	}
+	// Keep saved/forked snapshots immutable even when they share the old map.
+	counts := maps.Clone(t.Usage.ContextThinkingByResponse)
+	if counts == nil {
+		counts = make(map[string]int)
+	}
+	counts[responseID] = tokens
+	t.Usage.ContextThinkingByResponse = counts
+	t.updateContextThinkingLocked()
+}
+
+func (t *Thread) updateContextThinkingLocked() {
+	if t.Usage.ContextBreakdown == nil || len(t.Usage.ContextThinkingByResponse) == 0 {
+		return
+	}
+	breakdown := cloneContextBreakdown(t.Usage.ContextBreakdown)
+	if breakdown.ThinkingTokens != nil {
+		breakdown.TotalTokens -= *breakdown.ThinkingTokens
+	}
+	tokens := 0
+	for _, count := range t.Usage.ContextThinkingByResponse {
+		tokens += count
+	}
+	breakdown.ThinkingTokens = &tokens
+	breakdown.TotalTokens += tokens
+	t.Usage.ContextBreakdown = breakdown
 }
 
 func cloneContextBreakdown(breakdown *llmtypes.ContextBreakdown) *llmtypes.ContextBreakdown {
@@ -249,6 +290,10 @@ func cloneContextBreakdown(breakdown *llmtypes.ContextBreakdown) *llmtypes.Conte
 		return nil
 	}
 	clone := *breakdown
+	if breakdown.ThinkingTokens != nil {
+		tokens := *breakdown.ThinkingTokens
+		clone.ThinkingTokens = &tokens
+	}
 	clone.Tools = append([]llmtypes.ToolContextUsage{}, breakdown.Tools...)
 	return &clone
 }

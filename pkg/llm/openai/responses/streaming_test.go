@@ -247,6 +247,18 @@ func TestResponsesTracing(t *testing.T) {
 					return newStream(ctx, params)
 				}
 			}
+			bufferSearchText := false
+			thread.processStreamFunc = func(ctx context.Context, stream *ssestream.Stream[responses.ResponseStreamEventUnion], handler llmtypes.MessageHandler, model string, opt llmtypes.MessageOpt) (processStreamResult, error) {
+				result, err := thread.readStream(ctx, stream, handler, model, opt, &bufferSearchText)
+				if complete := result.complete; complete != nil && result.response != nil {
+					result.complete = func(ctx context.Context) (processStreamResult, error) {
+						assert.Equal(t, map[string]int{"response-1": 3}, thread.GetUsage().ContextThinkingByResponse,
+							"tool execution and forks must see this response's thinking")
+						return complete(ctx)
+					}
+				}
+				return result, err
+			}
 			ctx, invocation := thread.CreateMessageSpan(t.Context(), provider.Tracer("test"), "private", llmtypes.MessageOpt{})
 			_, toolsUsed, completed, err := thread.processMessageExchange(ctx, &captureStreamHandler{}, "weak", 100, "private system", llmtypes.MessageOpt{DisableUsageLog: true})
 			thread.FinalizeMessageSpan(invocation, err)
@@ -272,6 +284,7 @@ func TestResponsesTracing(t *testing.T) {
 				require.Error(t, err)
 				assert.Equal(t, codes.Error, model.Status().Code)
 				assert.Nil(t, tool)
+				assert.Nil(t, thread.GetUsage().ContextBreakdown.ThinkingTokens)
 			} else {
 				if tc.toolErr != nil {
 					require.ErrorIs(t, err, tc.toolErr)
@@ -291,6 +304,9 @@ func TestResponsesTracing(t *testing.T) {
 				assert.Contains(t, model.Attributes(), attribute.Int64("gen_ai.usage.output_tokens", 8))
 				assert.Contains(t, model.Attributes(), attribute.Int64("gen_ai.usage.cache_read.input_tokens", 7))
 				assert.Contains(t, model.Attributes(), attribute.Int64("gen_ai.usage.reasoning.output_tokens", 3))
+				thinking := thread.GetUsage().ContextBreakdown.ThinkingTokens
+				require.NotNil(t, thinking)
+				assert.Equal(t, 3, *thinking, "HTTP, websocket retries, and tool failures preserve reported thinking")
 				assert.Contains(t, model.Attributes(), attribute.String("gen_ai.response.model", "actual"))
 			}
 			if tc.retry {
