@@ -251,7 +251,8 @@ func (t *Thread) SetContextBreakdown(breakdown *llmtypes.ContextBreakdown) {
 }
 
 // RecordContextThinking retains reported thinking independently of text estimates.
-// Response IDs make retries and repeated tool-result refreshes idempotent. Counts
+// Repeated refreshes of the same response ID replace its count rather than add
+// it again. A retry with a new response ID contributes a separate count. Counts
 // belong to this inference window, not subagents or cumulative billed output.
 func (t *Thread) RecordContextThinking(responseID string, tokens int) {
 	if responseID == "" || tokens < 0 {
