@@ -17,6 +17,14 @@
   },
   "linter": {
     "rules": {
+      "correctness": {
+        "useExhaustiveDependencies": {
+          "level": "error",
+          "options": {
+            "hooks": [{ "name": "useRunStreams", "stableResult": true }]
+          }
+        }
+      },
       "suspicious": {
         "noUnknownAtRules": {
           "level": "error",

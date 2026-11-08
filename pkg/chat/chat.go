@@ -99,6 +99,7 @@ type ChatEvent struct {
 	ResourceReloadID  string                          `json:"resource_reload_id,omitempty"`
 	Kind              string                          `json:"kind"`
 	ConversationID    string                          `json:"conversation_id,omitempty"`
+	TurnID            string                          `json:"turn_id,omitempty"`
 	ConversationName  string                          `json:"conversation_name,omitempty"`
 	CWD               string                          `json:"cwd,omitempty"`
 	Role              string                          `json:"role,omitempty"`

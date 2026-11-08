@@ -35,12 +35,13 @@ import type {
   ToolInventoryTarget,
   TranscriptionCapabilities,
   TranscriptionResult,
+  TurnReceipt,
   UIInputResponseResult,
   UserLoginDecisionResponse,
   WorkspaceTarget,
 } from '../types';
-
-const STREAM_TEXT_UPDATE_INTERVAL_MS = 75;
+import { createChatEventDelivery } from './chatEventDelivery';
+import { type ChatEventLevel, ChatEventSocket } from './chatEvents';
 
 class ApiService {
   private baseUrl = '';
@@ -50,6 +51,8 @@ class ApiService {
     typeof globalThis.crypto?.randomUUID === 'function'
       ? globalThis.crypto.randomUUID()
       : `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  // One WebSocket for every conversation this page follows; see ChatEventSocket.
+  private chatEvents: ChatEventSocket | null = this.createChatEventSocket();
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const { headers, ...requestOptions } = options;
@@ -522,6 +525,44 @@ class ApiService {
     );
   }
 
+  async getTurnReceipt(conversationId: string, turnId: string): Promise<TurnReceipt> {
+    return this.request<TurnReceipt>(
+      `/api/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}`
+    );
+  }
+
+  /**
+   * Replaces the page's event socket. With null, each stream uses its own HTTP
+   * response, as it does when the socket cannot be opened.
+   */
+  setChatEventSocket(socket: ChatEventSocket | null): void {
+    if (this.chatEvents !== socket) this.chatEvents?.close();
+    this.chatEvents = socket;
+  }
+
+  private createChatEventSocket(): ChatEventSocket | null {
+    if (typeof window === 'undefined' || typeof WebSocket !== 'function') return null;
+    return new ChatEventSocket({
+      url: () => {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const clientId = encodeURIComponent(this.clientId);
+        return `${protocol}//${window.location.host}/api/chat/events?clientId=${clientId}`;
+      },
+      getTurnReceipt: (conversationId, turnId) => this.getTurnReceipt(conversationId, turnId),
+    });
+  }
+
+  /** Resolves to the page's event socket, or null to stream over HTTP instead. */
+  private async eventSocket(): Promise<ChatEventSocket | null> {
+    const socket = this.chatEvents;
+    return socket && (await socket.connect()) ? socket : null;
+  }
+
+  /**
+   * Submits a turn and delivers its events until it ends. With the page's event
+   * socket, the request returns once the turn starts and events arrive on the
+   * socket; otherwise they stream in the response.
+   */
   async streamChat(
     request: ChatRequest,
     options: {
@@ -529,6 +570,28 @@ class ApiService {
       onEvent: (event: ChatStreamEvent) => void;
     }
   ): Promise<void> {
+    const { conversationId } = request;
+    const socket = conversationId ? await this.eventSocket() : null;
+    if (socket && conversationId) {
+      return socket.submit(
+        { ...request, conversationId },
+        {
+          ...options,
+          post: (turnRequest, headers, signal) =>
+            fetch('/api/chat', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Kodelet-Client-ID': this.clientId,
+                ...this.getCSRFHeaders('POST'),
+                ...headers,
+              },
+              body: JSON.stringify(turnRequest),
+              signal,
+            }),
+        }
+      );
+    }
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: {
@@ -571,6 +634,8 @@ class ApiService {
     id: string,
     options: { signal: AbortSignal; onEvent: (event: RealtimeEvent) => void }
   ): Promise<void> {
+    const socket = await this.eventSocket();
+    if (socket) return socket.attachRealtime(id, options);
     const response = await fetch(`/api/realtime/${encodeURIComponent(id)}/events`, {
       headers: { 'X-Kodelet-Client-ID': this.clientId },
       signal: options.signal,
@@ -606,13 +671,23 @@ class ApiService {
     }
   }
 
+  /**
+   * Follows a conversation until aborted or ended by the server. Lifecycle
+   * level, for conversations the page is not showing, omits transcript detail
+   * when the page's event socket is available.
+   */
   async streamConversation(
     conversationId: string,
     options: {
       signal?: AbortSignal;
+      level?: ChatEventLevel;
       onEvent: (event: ChatStreamEvent) => void;
     }
   ): Promise<void> {
+    const socket = await this.eventSocket();
+    if (socket) {
+      return socket.watch(conversationId, { ...options, capabilities: 'interactive' });
+    }
     const response = await fetch(`/api/conversations/${conversationId}/stream`, {
       method: 'GET',
       headers: {
@@ -646,63 +721,18 @@ class ApiService {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    const pendingPrompts = new Map<string, string | undefined>();
-    let pendingDelta: ChatStreamEvent | undefined;
-    let deltaTimer: ReturnType<typeof setTimeout> | undefined;
-    let lastDeltaDelivery = Number.NEGATIVE_INFINITY;
     let deliveryFailure: { error: unknown } | undefined;
-    const flushDelta = () => {
-      clearTimeout(deltaTimer);
-      deltaTimer = undefined;
-      const event = pendingDelta;
-      pendingDelta = undefined;
-      if (event) {
-        lastDeltaDelivery = performance.now();
-        onEvent(event);
-      }
-    };
+    const delivery = createChatEventDelivery(onEvent, {
+      conversationId,
+      onDeferredError: (error) => {
+        // Wake the pending read so callback errors reject the stream just
+        // like synchronous delivery, rather than escaping from a timer.
+        deliveryFailure = { error };
+        void reader.cancel().catch(() => {});
+      },
+    });
     const deliver = (line: string) => {
-      const event = JSON.parse(line) as ChatStreamEvent;
-      conversationId = event.conversation_id || conversationId;
-      // Coalesce adjacent text updates, not the network stream. Event boundaries
-      // flush immediately so tools, prompts and completion never overtake text.
-      if (event.kind === 'text-delta' || event.kind === 'thinking-delta') {
-        if (
-          pendingDelta &&
-          (pendingDelta.kind !== event.kind ||
-            pendingDelta.conversation_id !== event.conversation_id)
-        ) {
-          flushDelta();
-        }
-        pendingDelta = pendingDelta
-          ? { ...event, delta: (pendingDelta.delta || '') + (event.delta || '') }
-          : event;
-        if (deltaTimer !== undefined) return;
-        // Show the first text of a burst at once, then at most one update per interval.
-        const wait = lastDeltaDelivery + STREAM_TEXT_UPDATE_INTERVAL_MS - performance.now();
-        if (wait <= 0) {
-          flushDelta();
-          return;
-        }
-        deltaTimer = setTimeout(() => {
-          try {
-            flushDelta();
-          } catch (error) {
-            // Wake the pending read so callback errors reject the stream just
-            // like synchronous delivery, rather than escaping from a timer.
-            deliveryFailure = { error };
-            void reader.cancel().catch(() => {});
-          }
-        }, wait);
-        return;
-      }
-      flushDelta();
-      const id = event.ui_input?.id || event.ui_confirm?.id || event.ui_select?.id;
-      if (id) pendingPrompts.set(id, conversationId);
-      if (event.kind === 'ui-request-end' && event.ui_request_id) {
-        pendingPrompts.delete(event.ui_request_id);
-      }
-      onEvent(event);
+      delivery.deliver(JSON.parse(line) as ChatStreamEvent);
     };
 
     try {
@@ -731,18 +761,8 @@ class ApiService {
         }
       }
     } finally {
-      // Also flush on EOF, cancellation or a failed read; do not lose the tail
-      // of an interrupted answer or leave callbacks alive after the stream ends.
       try {
-        flushDelta();
-        // A disconnected stream loses response authority, not execution ownership.
-        for (const [id, scope] of pendingPrompts) {
-          onEvent({
-            kind: 'ui-request-end',
-            conversation_id: scope,
-            ui_request_id: id,
-          });
-        }
+        delivery.close();
       } finally {
         await reader.cancel().catch(() => {});
         reader.releaseLock();

@@ -310,6 +310,8 @@ export interface ChatRequest {
   message: string;
   content?: ContentBlock[];
   conversationId?: string;
+  /** Identifies this turn; resubmitting the same turn never runs it twice. */
+  turnId?: string;
   runnerId?: string;
   environmentProfile?: string;
   profile?: string;
@@ -664,6 +666,8 @@ export interface ChatStreamEvent {
     | 'done'
     | 'error';
   conversation_id?: string;
+  /** Set on a server-owned run's conversation, done and error events. */
+  turn_id?: string;
   cwd?: string;
   role?: 'user' | 'assistant';
   delta?: string;
@@ -686,6 +690,28 @@ export interface ChatStreamEvent {
   ui_widget_revision?: string;
   cancelled?: boolean;
   error?: string;
+}
+
+/** A turn's saved status, which outlives the connection that submitted it. */
+export interface TurnReceipt {
+  conversationId: string;
+  turnId: string;
+  runId?: string;
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted' | string;
+  cancelRequested?: boolean;
+  result?: string;
+  error?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** The reply to a chat request whose events arrive on the page's event socket. */
+export interface ChatSubmissionResponse {
+  conversation_id: string;
+  turn_id: string;
+  /** False when the turn was already submitted; receipt then reports its status. */
+  accepted: boolean;
+  receipt?: TurnReceipt;
 }
 
 export interface UIStyle {

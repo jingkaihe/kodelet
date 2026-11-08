@@ -277,51 +277,71 @@ func (s *Server) handleRealtimeEvents(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "streaming is unavailable", nil)
 		return
 	}
-	call.mu.Lock()
-	if call.attached || call.closed {
-		call.mu.Unlock()
+	if !call.attach() {
 		s.writeErrorResponse(w, http.StatusConflict, "live voice event stream is already attached or closed", nil)
 		return
 	}
-	call.attached = true
-	call.mu.Unlock()
-	defer call.close()
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
 	controller := http.NewResponseController(w)
 	_ = controller.Flush()
-	ticker := time.NewTicker(conversationStreamKeepAliveInterval)
-	defer ticker.Stop()
-	for {
-		var event *realtimeEvent
-		select {
-		case value := <-call.events:
-			event = &value
-		case <-ticker.C:
-		case <-r.Context().Done():
-			return
-		case <-call.ctx.Done():
-			// Deliver queued events first: the last one usually explains why
-			// the call ended, and select would otherwise drop it at random.
-			select {
-			case value := <-call.events:
-				event = &value
-			default:
-				event = &realtimeEvent{Kind: "closed", ConversationID: call.chat.ConversationID}
-			}
-		}
+	call.pump(r.Context(), conversationStreamKeepAliveInterval, func(event *realtimeEvent) error {
 		_ = controller.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		defer func() { _ = controller.SetWriteDeadline(time.Time{}) }()
 		var err error
 		if event != nil {
 			err = json.NewEncoder(w).Encode(event)
 		} else {
 			_, err = w.Write([]byte("\n"))
 		}
-		if err != nil || controller.Flush() != nil {
+		if err != nil {
+			return err
+		}
+		return controller.Flush()
+	})
+}
+
+// attach claims the call's only event observer. A second attachment is refused
+// so reconnecting can never replay an execution instruction.
+func (c *realtimeCall) attach() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.attached || c.closed {
+		return false
+	}
+	c.attached = true
+	return true
+}
+
+// pump delivers the call's events until the call ends or ctx, the observer's
+// lifetime, is done. A nil event is a keepalive. The call cannot outlive its
+// observer, so pump closes it before returning.
+func (c *realtimeCall) pump(ctx context.Context, keepAlive time.Duration, deliver func(*realtimeEvent) error) {
+	defer c.close()
+	ticker := time.NewTicker(keepAlive)
+	defer ticker.Stop()
+	for {
+		var event *realtimeEvent
+		select {
+		case value := <-c.events:
+			event = &value
+		case <-ticker.C:
+		case <-ctx.Done():
+			return
+		case <-c.ctx.Done():
+			// Deliver queued events first: the last one usually explains why
+			// the call ended, and select would otherwise drop it at random.
+			select {
+			case value := <-c.events:
+				event = &value
+			default:
+				event = &realtimeEvent{Kind: "closed", ConversationID: c.chat.ConversationID}
+			}
+		}
+		if err := deliver(event); err != nil {
 			return
 		}
-		_ = controller.SetWriteDeadline(time.Time{})
 		if event != nil && event.Kind == "closed" {
 			return
 		}

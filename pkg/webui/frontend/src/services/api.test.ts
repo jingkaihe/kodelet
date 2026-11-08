@@ -8,6 +8,7 @@ import type {
   GitDiffResponse,
 } from '../types';
 import apiService from './api';
+import type { ChatEventSocket, SubmitChatRequest } from './chatEvents';
 
 // Mock fetch globally
 const mockFetch = vi.fn();
@@ -22,6 +23,8 @@ describe('ApiService', () => {
   it.each([{}, undefined])('initializes without secure-context crypto APIs: %s', async (crypto) => {
     vi.resetModules();
     vi.stubGlobal('crypto', crypto);
+    // Without WebSockets, the page streams each request over HTTP.
+    vi.stubGlobal('WebSocket', undefined);
     try {
       const { default: client } = await import('./api');
       mockFetch.mockResolvedValue({
@@ -80,6 +83,8 @@ describe('ApiService', () => {
   });
   beforeEach(() => {
     mockFetch.mockClear();
+    // These cases cover the HTTP streams used when the event socket is unavailable.
+    apiService.setChatEventSocket(null);
   });
 
   it('uses the same authenticated client for call allocation, NDJSON events and closing', async () => {
@@ -1853,6 +1858,99 @@ describe('ApiService', () => {
           body: JSON.stringify({ message: 'hello', cwd: '/workspace/project' }),
         })
       );
+    });
+  });
+
+  describe('event socket', () => {
+    const fakeSocket = (connectionId: string | null) => ({
+      connect: vi.fn(async () => connectionId),
+      submit: vi.fn(async () => {}),
+      watch: vi.fn(async () => {}),
+      attachRealtime: vi.fn(async () => {}),
+      close: vi.fn(),
+    });
+    afterEach(() => {
+      apiService.setChatEventSocket(null);
+    });
+
+    it('submits through the socket with a short request bound to it', async () => {
+      setTestCookie('kodelet_csrf=socket-csrf; Path=/');
+      const socket = fakeSocket('connection-1');
+      apiService.setChatEventSocket(socket as unknown as ChatEventSocket);
+      const onEvent = vi.fn();
+      await apiService.streamChat(
+        { message: 'hello', conversationId: 'conversation-1' },
+        { onEvent }
+      );
+      expect(socket.submit).toHaveBeenCalledOnce();
+      const [[request, options]] = socket.submit.mock.calls as unknown as [
+        [unknown, { onEvent: unknown; post: SubmitChatRequest }],
+      ];
+      expect(request).toEqual({ message: 'hello', conversationId: 'conversation-1' });
+      expect(options.onEvent).toBe(onEvent);
+
+      mockFetch.mockResolvedValueOnce(new Response('{}', { status: 202 }));
+      await options.post(
+        { message: 'hello', conversationId: 'conversation-1', turnId: 'turn-1' },
+        { 'X-Kodelet-Event-Connection': 'connection-1', 'X-Kodelet-Event-Subscription': 's1' }
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/chat',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            message: 'hello',
+            conversationId: 'conversation-1',
+            turnId: 'turn-1',
+          }),
+          headers: expect.objectContaining({
+            'X-CSRF-Token': 'socket-csrf',
+            'X-Kodelet-Client-ID': expect.any(String),
+            'X-Kodelet-Event-Connection': 'connection-1',
+            'X-Kodelet-Event-Subscription': 's1',
+          }),
+        })
+      );
+    });
+
+    it('follows conversations and calls through the socket', async () => {
+      const socket = fakeSocket('connection-1');
+      apiService.setChatEventSocket(socket as unknown as ChatEventSocket);
+      const onEvent = vi.fn();
+      const signal = new AbortController().signal;
+      await apiService.streamConversation('conversation-1', { onEvent, level: 'lifecycle' });
+      expect(socket.watch).toHaveBeenCalledWith('conversation-1', {
+        onEvent,
+        level: 'lifecycle',
+        capabilities: 'interactive',
+      });
+      await apiService.streamRealtime('call-1', { signal, onEvent });
+      expect(socket.attachRealtime).toHaveBeenCalledWith('call-1', { signal, onEvent });
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('streams over HTTP when the socket cannot be opened', async () => {
+      const socket = fakeSocket(null);
+      apiService.setChatEventSocket(socket as unknown as ChatEventSocket);
+      mockFetch.mockResolvedValue({
+        ok: true,
+        body: new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        }),
+      });
+      await apiService.streamChat(
+        { message: 'hello', conversationId: 'conversation-1' },
+        { onEvent: vi.fn() }
+      );
+      await apiService.streamConversation('conversation-1', { onEvent: vi.fn() });
+      expect(socket.submit).not.toHaveBeenCalled();
+      expect(socket.watch).not.toHaveBeenCalled();
+      expect(mockFetch.mock.calls.map(([url]) => url)).toEqual([
+        '/api/chat',
+        '/api/conversations/conversation-1/stream',
+      ]);
     });
   });
 });

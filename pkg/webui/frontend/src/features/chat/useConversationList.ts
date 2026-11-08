@@ -33,7 +33,8 @@ export const upsertConversationSummary = (
 };
 
 interface ConversationListOptions {
-  sendControllersRef: RefObject<Record<string, AbortController>>;
+  /** Whether this page is submitting a turn of the conversation. */
+  isSending: (id: string) => boolean;
   optimisticRemoteConversationRef: RefObject<{
     conversationId: string;
     confirmed: boolean;
@@ -41,7 +42,7 @@ interface ConversationListOptions {
 }
 
 export const useConversationList = ({
-  sendControllersRef,
+  isSending,
   optimisticRemoteConversationRef,
 }: ConversationListOptions) => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -98,16 +99,14 @@ export const useConversationList = ({
           const pendingConversations = currentConversations.filter(
             (conversation) =>
               !listedIds.has(conversation.id) &&
-              (sendControllersRef.current[conversation.id] ||
+              (isSending(conversation.id) ||
                 (optimisticConversation?.conversationId === conversation.id &&
                   !optimisticConversation.confirmed))
           );
           const mergedConversations = [
             ...pendingConversations,
             ...nextConversations.map((conversation) => {
-              const isRunning = sendControllersRef.current[conversation.id]
-                ? true
-                : runningUpdates[conversation.id];
+              const isRunning = isSending(conversation.id) ? true : runningUpdates[conversation.id];
               return isRunning === undefined ? conversation : { ...conversation, isRunning };
             }),
           ];
@@ -147,7 +146,7 @@ export const useConversationList = ({
         }
       }
     },
-    [optimisticRemoteConversationRef, sendControllersRef]
+    [optimisticRemoteConversationRef, isSending]
   );
 
   useEffect(() => {

@@ -34,10 +34,23 @@ import ProviderSettingsDialog from '../components/chat/ProviderSettingsDialog';
 import UIInputDialog from '../components/chat/UIInputDialog';
 import { discardTerminalPopOuts } from '../components/workspace/terminalPopOut';
 import {
+  buildConversationPreview,
+  generateConversationId,
+  mergeConversationUsage,
+  normalizeConversation,
+  reconcileStreamCWDForDisplay,
+} from '../features/chat/conversationModel';
+import {
+  abortRunStreams,
+  isBlockingUIRequestEvent,
+  useRunStreams,
+} from '../features/chat/runStreams';
+import {
   applyChatStreamEvent,
   applyRealtimeTranscript,
   conversationToChatMessages,
 } from '../features/chat/state';
+import { useBackgroundRunMonitors } from '../features/chat/useBackgroundRunMonitors';
 import { buildUserContent, useChatAttachments } from '../features/chat/useChatAttachments';
 import {
   MAX_SIDEBAR_WIDTH,
@@ -61,6 +74,7 @@ import { useExtensionWidgets } from '../features/chat/useExtensionWidgets';
 import { useRealtime } from '../features/chat/useRealtime';
 import { useSlashCommands } from '../features/chat/useSlashCommands';
 import { useTranscriptAutoScroll } from '../features/chat/useTranscriptAutoScroll';
+import { useUIRequestDialog } from '../features/chat/useUIRequestDialog';
 import { useWorkspaceResize } from '../features/chat/useWorkspaceResize';
 import apiService from '../services/api';
 import type {
@@ -72,139 +86,9 @@ import type {
   PendingImageAttachment,
   RealtimeEvent,
   Runner,
-  UIConfirmRequestEvent,
-  UIInputRequestEvent,
-  UISelectRequestEvent,
   WorkspaceTarget,
 } from '../types';
 import { cn, showToast } from '../utils';
-
-const normalizeConversation = (conversation: Conversation): Conversation => ({
-  ...conversation,
-  cwd:
-    typeof conversation.cwd === 'string' && conversation.cwd.trim()
-      ? conversation.cwd.trim()
-      : undefined,
-  profile:
-    typeof conversation.profile === 'string' && conversation.profile.trim()
-      ? conversation.profile.trim()
-      : undefined,
-  reasoningEffort:
-    typeof conversation.reasoningEffort === 'string' && conversation.reasoningEffort.trim()
-      ? conversation.reasoningEffort.trim().toLowerCase()
-      : undefined,
-  environmentProfile:
-    typeof conversation.environmentProfile === 'string' && conversation.environmentProfile.trim()
-      ? conversation.environmentProfile.trim()
-      : undefined,
-  messages: (conversation.messages || []).map((message) => ({
-    id: message.id,
-    anchor: message.anchor,
-    extensionId: message.extensionId,
-    role: message.role || 'user',
-    content: message.content || '',
-    kind: message.kind,
-    compaction: message.compaction,
-    resourceReloadId: message.resourceReloadId,
-    toolCalls: message.toolCalls || message.tool_calls || [],
-    thinkingText: message.thinkingText,
-    thinkingTexts: message.thinkingTexts || [],
-  })),
-  pendingSteer: (conversation.pendingSteer || []).map((message) => ({
-    role: message.role || 'user',
-    content: message.content || '',
-  })),
-  toolResults: conversation.toolResults || {},
-});
-
-const mergeConversationUsage = (
-  currentConversation: Conversation | null,
-  usage: Conversation['usage']
-): Conversation | null => {
-  if (!currentConversation || !usage) {
-    return currentConversation;
-  }
-
-  return {
-    ...currentConversation,
-    usage,
-  };
-};
-
-type UIRequestDialogState =
-  | { mode: 'input'; request: UIInputRequestEvent }
-  | { mode: 'confirm'; request: UIConfirmRequestEvent }
-  | { mode: 'select'; request: UISelectRequestEvent };
-const randomHex = (byteCount: number): string => {
-  const bytes = new Uint8Array(byteCount);
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    crypto.getRandomValues(bytes);
-  } else {
-    for (let index = 0; index < bytes.length; index += 1) {
-      bytes[index] = Math.floor(Math.random() * 256);
-    }
-  }
-
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-};
-
-const generateConversationId = (): string => {
-  const timestamp = new Date()
-    .toISOString()
-    .replace(/[-:]/g, '')
-    .replace(/\.\d{3}Z$/, '');
-  return `${timestamp}-${randomHex(8)}`;
-};
-
-const buildConversationPreview = (
-  prompt: string,
-  attachments: PendingImageAttachment[]
-): string => {
-  const trimmedPrompt = prompt.trim();
-  if (trimmedPrompt) {
-    return trimmedPrompt;
-  }
-
-  if (attachments.length === 1) {
-    return attachments[0].name || 'Image attachment';
-  }
-
-  if (attachments.length > 1) {
-    return `${attachments.length} image attachments`;
-  }
-
-  return 'Untitled conversation';
-};
-
-const reconcileStreamCWDForDisplay = (
-  canonicalCWD: string | undefined,
-  currentCWD: string,
-  isRemote: boolean
-): string => {
-  const canonical = canonicalCWD?.trim();
-  const current = currentCWD.trim();
-  if (!canonical) {
-    return current;
-  }
-
-  // Conversation APIs compact paths under the control-plane home directory. Preserve that
-  // display form when the live local stream confirms the equivalent absolute path.
-  if (
-    !isRemote &&
-    (current === '~' || current.startsWith('~/')) &&
-    (current === '~' || canonical.endsWith(current.slice(1)))
-  ) {
-    return current;
-  }
-
-  return canonical;
-};
-
-const isBlockingUIRequestEvent = (event: ChatStreamEvent): boolean =>
-  event.kind === 'ui-input-request' ||
-  event.kind === 'ui-confirm-request' ||
-  event.kind === 'ui-select-request' ||
-  event.kind === 'ui-request-end';
 
 interface QueuedCommand {
   prompt: string;
@@ -301,18 +185,11 @@ const ChatPage: React.FC = () => {
   const [providerSettingsOpen, setProviderSettingsOpen] = useState(false);
   const [infoDialog, setInfoDialog] = useState<'about' | 'shortcuts' | null>(null);
   const [composerFocusRequested, setComposerFocusRequested] = useState(false);
-  const [uiRequestDialog, setUIRequestDialog] = useState<UIRequestDialogState | null>(null);
-  const [uiInputSubmitting, setUIInputSubmitting] = useState(false);
   const loadedConversationId = conversation?.id ?? null;
   const { followTranscript, resetTranscriptScroll, transcriptScrollProps } =
     useTranscriptAutoScroll();
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const sendControllersRef = useRef<Record<string, AbortController>>({});
-  const runningSubscriptionControllersRef = useRef<Record<string, AbortController>>({});
-  const observedRunControllersRef = useRef<Record<string, AbortController>>({});
-  const commandObserversRef = useRef<Record<string, AbortController>>({});
-  const resumeControllerRef = useRef<AbortController | null>(null);
-  const resumeStreamRef = useRef(0);
+  const runStreams = useRunStreams();
+  const isSending = useCallback((id: string) => Boolean(runStreams.sends[id]), []);
   const gitDiffRequestRef = useRef(0);
   const workspaceTargetKeyRef = useRef('');
   const viewedConversationIdRef = useRef<string | null>(conversationId);
@@ -403,7 +280,7 @@ const ChatPage: React.FC = () => {
     loading: sidebarLoading,
     refresh: refreshConversations,
     setRunning,
-  } = useConversationList({ sendControllersRef, optimisticRemoteConversationRef });
+  } = useConversationList({ isSending, optimisticRemoteConversationRef });
   const conversationSearch = useConversationSearch({
     conversations,
     total: conversationTotal,
@@ -412,6 +289,14 @@ const ChatPage: React.FC = () => {
     setCWDOptions: setConversationCWDOptions,
   });
   const { isOpen: sidebarSearchOpen, close: handleCloseConversationSearch } = conversationSearch;
+  const uiRequest = useUIRequestDialog({
+    fallbackConversationId: activeConversationId || conversationId,
+    onBlockingRequest: () => {
+      contextSettings.interruptDialog();
+      handleCloseConversationSearch();
+    },
+  });
+  const uiRequestDialog = uiRequest.dialog;
   const higherPriorityDialogOpen =
     uiRequestDialog !== null ||
     newChatDialogOpen ||
@@ -489,7 +374,7 @@ const ChatPage: React.FC = () => {
         return;
       }
 
-      sendControllersRef.current[id] = controller;
+      runStreams.sends[id] = controller;
     },
     []
   );
@@ -500,8 +385,8 @@ const ChatPage: React.FC = () => {
         return;
       }
 
-      if (sendControllersRef.current[id] === controller) {
-        delete sendControllersRef.current[id];
+      if (runStreams.sends[id] === controller) {
+        delete runStreams.sends[id];
         clearRunningConversation(id);
       }
     },
@@ -520,9 +405,9 @@ const ChatPage: React.FC = () => {
     (id: string, reason: string) => {
       if (!queuedCommandsRef.current[id]?.length) return;
       replaceQueuedCommands(id, []);
-      const observer = commandObserversRef.current[id];
-      if (observer && observer !== resumeControllerRef.current) observer.abort();
-      delete commandObserversRef.current[id];
+      const observer = runStreams.commandObservers[id];
+      if (observer && observer !== runStreams.viewed) observer.abort();
+      delete runStreams.commandObservers[id];
       showToast(`Queued commands for ${id} were discarded: ${reason}`, 'info');
     },
     [replaceQueuedCommands]
@@ -563,24 +448,9 @@ const ChatPage: React.FC = () => {
 
   useEffect(() => {
     return () => {
-      resumeStreamRef.current += 1;
       conversationRunVersion.current += 1;
-      abortControllerRef.current?.abort();
-      Object.values(sendControllersRef.current).forEach((controller) => {
-        controller.abort();
-      });
-      sendControllersRef.current = {};
       queuedCommandsRef.current = {};
-      Object.values(runningSubscriptionControllersRef.current).forEach((controller) => {
-        controller.abort();
-      });
-      runningSubscriptionControllersRef.current = {};
-      Object.values(commandObserversRef.current).forEach((controller) => {
-        controller.abort();
-      });
-      commandObserversRef.current = {};
-      observedRunControllersRef.current = {};
-      resumeControllerRef.current?.abort();
+      abortRunStreams(runStreams);
     };
   }, []);
 
@@ -592,9 +462,7 @@ const ChatPage: React.FC = () => {
     return Array.from(new Set([...runningIds, ...locallyRunningConversationIds]));
   }, [conversations, locallyRunningConversationIds]);
 
-  const onStreamUIInputRequest = useEffectEvent((event: ChatStreamEvent) =>
-    handleUIInputRequest(event)
-  );
+  const onStreamUIInputRequest = useEffectEvent(uiRequest.handleEvent);
 
   // Flags a run that finished while its tab was open but not shown.
   const noteBackgroundRunFinished = useCallback((id: string, activity: TabActivity) => {
@@ -608,133 +476,32 @@ const ChatPage: React.FC = () => {
     if (conversationId) setTabActivity((current) => withoutKey(current, conversationId));
   }, [conversationId]);
 
-  const onObservedRunFinished = useEffectEvent(
-    (id: string, event: ChatStreamEvent, controller: AbortController) => {
-      const owner = commandObserversRef.current[id];
-      if (owner && owner !== controller) return;
-      if (event.kind === 'error') noteBackgroundRunFinished(id, 'error');
-      else if (!event.cancelled) noteBackgroundRunFinished(id, 'unread');
-      if (observedRunControllersRef.current[id] === controller) {
-        delete observedRunControllersRef.current[id];
-      }
-      clearRunningConversation(id);
-      if (event.kind === 'done' && !event.cancelled) runNextQueuedCommand(id);
-      else discardQueuedCommands(id, 'the run failed or was cancelled');
+  // Ends a run this page saw start, then runs or discards its queued commands.
+  const finishObservedRun = (id: string, event: ChatStreamEvent, controller: AbortController) => {
+    const owner = runStreams.commandObservers[id];
+    if (owner && owner !== controller) return;
+    if (event.kind === 'error') noteBackgroundRunFinished(id, 'error');
+    else if (!event.cancelled) noteBackgroundRunFinished(id, 'unread');
+    if (runStreams.observers[id] === controller) {
+      delete runStreams.observers[id];
     }
-  );
+    clearRunningConversation(id);
+    if (event.kind === 'done' && !event.cancelled) runNextQueuedCommand(id);
+    else discardQueuedCommands(id, 'the run failed or was cancelled');
+  };
+  const onObservedRunFinished = useEffectEvent(finishObservedRun);
 
-  useEffect(() => {
-    const runningIds = new Set(runningConversationIds);
-
-    Object.entries(runningSubscriptionControllersRef.current).forEach(([runningId, controller]) => {
-      if (
-        commandObserversRef.current[runningId] !== controller &&
-        (!runningIds.has(runningId) ||
-          runningId === conversationId ||
-          sendControllersRef.current[runningId])
-      ) {
-        controller.abort();
-        delete runningSubscriptionControllersRef.current[runningId];
-      }
-    });
-
-    runningConversationIds.forEach((runningId) => {
-      if (
-        runningId === conversationId ||
-        sendControllersRef.current[runningId] ||
-        commandObserversRef.current[runningId] ||
-        runningSubscriptionControllersRef.current[runningId]
-      ) {
-        return;
-      }
-
-      const controller = new AbortController();
-      runningSubscriptionControllersRef.current[runningId] = controller;
-      let terminalSeen = false;
-
-      void apiService
-        .streamConversation(runningId, {
-          signal: controller.signal,
-          onEvent: (event: ChatStreamEvent) => {
-            if (
-              (controller.signal.aborted && !isBlockingUIRequestEvent(event)) ||
-              sendControllersRef.current[runningId]
-            )
-              return;
-            if (event.conversation_id && event.conversation_id !== runningId) {
-              return;
-            }
-
-            const eventForConversation = event.conversation_id
-              ? event
-              : { ...event, conversation_id: runningId };
-
-            if (event.kind === 'conversation') {
-              terminalSeen = false;
-              observedRunControllersRef.current[runningId] = controller;
-              markConversationRunning(runningId);
-              return;
-            }
-
-            handleResourcesReloaded(event, runningId);
-
-            if (isBlockingUIRequestEvent(event) && onStreamUIInputRequest(eventForConversation)) {
-              return;
-            }
-
-            if (event.kind === 'done' || event.kind === 'error') {
-              if (terminalSeen) return;
-              terminalSeen = true;
-              onObservedRunFinished(runningId, event, controller);
-            }
-          },
-        })
-        .catch((error) => {
-          if (controller.signal.aborted) {
-            return;
-          }
-
-          const message =
-            error instanceof Error ? error.message : 'Failed to monitor conversation stream';
-          if (message !== 'conversation is not actively streaming') {
-            console.error('Failed to monitor conversation stream', error);
-          }
-        })
-        .finally(() => {
-          if (observedRunControllersRef.current[runningId] === controller) {
-            delete observedRunControllersRef.current[runningId];
-          }
-          if (runningSubscriptionControllersRef.current[runningId] === controller) {
-            delete runningSubscriptionControllersRef.current[runningId];
-          }
-
-          if (
-            !controller.signal.aborted &&
-            !sendControllersRef.current[runningId] &&
-            (!commandObserversRef.current[runningId] ||
-              commandObserversRef.current[runningId] === controller)
-          ) {
-            if (!terminalSeen) {
-              discardQueuedCommands(
-                runningId,
-                'the connection ended before completion was confirmed'
-              );
-            }
-            const activeObserver = observedRunControllersRef.current[runningId];
-            if (!activeObserver || activeObserver.signal.aborted) {
-              clearRunningConversation(runningId);
-            }
-          }
-        });
-    });
-  }, [
-    clearRunningConversation,
-    conversationId,
-    discardQueuedCommands,
-    handleResourcesReloaded,
-    markConversationRunning,
+  useBackgroundRunMonitors({
+    streams: runStreams,
     runningConversationIds,
-  ]);
+    viewedConversationId: conversationId,
+    markRunning: markConversationRunning,
+    clearRunning: clearRunningConversation,
+    onResourcesReloaded: handleResourcesReloaded,
+    onUIRequest: uiRequest.handleEvent,
+    onRunFinished: finishObservedRun,
+    discardQueuedCommands,
+  });
 
   const selectedConversationId = conversationId || activeConversationId;
   const activeRunningConversationId =
@@ -852,19 +619,19 @@ const ChatPage: React.FC = () => {
     conversationPathOverrideRef.current = null;
     resetTranscriptScroll();
 
-    resumeStreamRef.current += 1;
+    runStreams.viewedGeneration += 1;
     setActiveConversationId(conversationId);
     resetExtensionWidgets();
     setSteering(false);
     setStreamError(null);
 
     if (
-      resumeControllerRef.current &&
-      !Object.values(commandObserversRef.current).includes(resumeControllerRef.current)
+      runStreams.viewed &&
+      !Object.values(runStreams.commandObservers).includes(runStreams.viewed)
     ) {
-      resumeControllerRef.current.abort();
+      runStreams.viewed.abort();
     }
-    resumeControllerRef.current = null;
+    runStreams.viewed = null;
 
     if (!conversationId) {
       setConversation(null);
@@ -900,15 +667,15 @@ const ChatPage: React.FC = () => {
       !conversationId ||
       conversationLoading ||
       loadedConversationId !== conversationId ||
-      sendControllersRef.current[conversationId]
+      runStreams.sends[conversationId]
     ) {
       return;
     }
 
-    const streamInstance = resumeStreamRef.current + 1;
-    resumeStreamRef.current = streamInstance;
+    const streamInstance = runStreams.viewedGeneration + 1;
+    runStreams.viewedGeneration = streamInstance;
     const controller = new AbortController();
-    resumeControllerRef.current = controller;
+    runStreams.viewed = controller;
     let sawEvent = false;
     let watchedTurn = 0;
     let terminalSeen = false;
@@ -921,7 +688,7 @@ const ChatPage: React.FC = () => {
           if (event.conversation_id && event.conversation_id !== conversationId) {
             return;
           }
-          if (sendControllersRef.current[conversationId]) {
+          if (runStreams.sends[conversationId]) {
             return;
           }
 
@@ -937,8 +704,8 @@ const ChatPage: React.FC = () => {
           // A queued command keeps its original completion subscription alive
           // across navigation. The server does not replay missed terminal events.
           if (
-            commandObserversRef.current[conversationId] === controller &&
-            resumeStreamRef.current !== streamInstance
+            runStreams.commandObservers[conversationId] === controller &&
+            runStreams.viewedGeneration !== streamInstance
           ) {
             handleResourcesReloaded(event, conversationId);
             if (!terminalSeen && (event.kind === 'done' || event.kind === 'error')) {
@@ -949,7 +716,7 @@ const ChatPage: React.FC = () => {
           }
 
           if (
-            resumeStreamRef.current !== streamInstance ||
+            runStreams.viewedGeneration !== streamInstance ||
             viewedConversationIdRef.current !== conversationId
           ) {
             return;
@@ -963,7 +730,7 @@ const ChatPage: React.FC = () => {
             conversationRunVersion.current += 1;
             watchedTurn += 1;
             terminalSeen = false;
-            observedRunControllersRef.current[conversationId] = controller;
+            runStreams.observers[conversationId] = controller;
             setActiveConversationId(event.conversation_id);
             markConversationRunning(event.conversation_id);
             return;
@@ -988,9 +755,9 @@ const ChatPage: React.FC = () => {
               conversationId,
               () =>
                 !controller.signal.aborted &&
-                resumeStreamRef.current === streamInstance &&
+                runStreams.viewedGeneration === streamInstance &&
                 viewedConversationIdRef.current === conversationId &&
-                !sendControllersRef.current[conversationId] &&
+                !runStreams.sends[conversationId] &&
                 completedTurn === watchedTurn &&
                 conversationRunVersion.current === runVersion
             );
@@ -1025,7 +792,7 @@ const ChatPage: React.FC = () => {
         }
 
         if (
-          resumeStreamRef.current !== streamInstance ||
+          runStreams.viewedGeneration !== streamInstance ||
           viewedConversationIdRef.current !== conversationId
         ) {
           return;
@@ -1034,7 +801,7 @@ const ChatPage: React.FC = () => {
         const message =
           error instanceof Error ? error.message : 'Failed to resume conversation stream';
         if (message === 'conversation is not actively streaming') {
-          if (!sendControllersRef.current[conversationId]) {
+          if (!runStreams.sends[conversationId]) {
             clearRunningConversation(conversationId);
           }
           return;
@@ -1044,38 +811,35 @@ const ChatPage: React.FC = () => {
         setStreamError(message);
       })
       .finally(() => {
-        if (observedRunControllersRef.current[conversationId] === controller) {
-          delete observedRunControllersRef.current[conversationId];
+        if (runStreams.observers[conversationId] === controller) {
+          delete runStreams.observers[conversationId];
         }
-        const activeObserver = observedRunControllersRef.current[conversationId];
-        if (commandObserversRef.current[conversationId] === controller && !terminalSeen) {
+        const activeObserver = runStreams.observers[conversationId];
+        if (runStreams.commandObservers[conversationId] === controller && !terminalSeen) {
           discardQueuedCommands(
             conversationId,
             'the connection ended before completion was confirmed'
           );
           if (
-            !sendControllersRef.current[conversationId] &&
+            !runStreams.sends[conversationId] &&
             (!activeObserver || activeObserver.signal.aborted)
           ) {
             clearRunningConversation(conversationId);
           }
         }
-        if (resumeControllerRef.current === controller) {
-          resumeControllerRef.current = null;
+        if (runStreams.viewed === controller) {
+          runStreams.viewed = null;
         }
 
         if (
           controller.signal.aborted ||
-          resumeStreamRef.current !== streamInstance ||
+          runStreams.viewedGeneration !== streamInstance ||
           viewedConversationIdRef.current !== conversationId
         ) {
           return;
         }
 
-        if (
-          !sendControllersRef.current[conversationId] &&
-          !commandObserversRef.current[conversationId]
-        ) {
+        if (!runStreams.sends[conversationId] && !runStreams.commandObservers[conversationId]) {
           if (!terminalSeen) {
             discardQueuedCommands(
               conversationId,
@@ -1089,9 +853,9 @@ const ChatPage: React.FC = () => {
       });
 
     return () => {
-      if (commandObserversRef.current[conversationId] !== controller) controller.abort();
-      if (resumeControllerRef.current === controller) {
-        resumeControllerRef.current = null;
+      if (runStreams.commandObservers[conversationId] !== controller) controller.abort();
+      if (runStreams.viewed === controller) {
+        runStreams.viewed = null;
       }
     };
   }, [
@@ -1273,15 +1037,15 @@ const ChatPage: React.FC = () => {
         if (optimisticRemoteConversationRef.current?.conversationId === targetConversationId) {
           optimisticRemoteConversationRef.current = null;
         }
-        const sendController = sendControllersRef.current[targetConversationId];
+        const sendController = runStreams.sends[targetConversationId];
         if (sendController) {
           sendController.abort();
-          delete sendControllersRef.current[targetConversationId];
-          if (abortControllerRef.current === sendController) {
-            abortControllerRef.current = null;
+          delete runStreams.sends[targetConversationId];
+          if (runStreams.viewedSend === sendController) {
+            runStreams.viewedSend = null;
           }
         }
-        resumeControllerRef.current?.abort();
+        runStreams.viewed?.abort();
         setConversation(null);
         setActiveConversationId(null);
         setMessages([]);
@@ -1318,97 +1082,7 @@ const ChatPage: React.FC = () => {
     });
   };
 
-  const handleUIInputRequest = (event: ChatStreamEvent) => {
-    if (event.kind === 'ui-request-end') {
-      setUIRequestDialog((current) =>
-        current &&
-        current.request.id === event.ui_request_id &&
-        current.request.conversationId === event.conversation_id
-          ? null
-          : current
-      );
-      return true;
-    }
-    if (event.kind === 'ui-notification' && event.ui_notify) {
-      showToast(event.ui_notify.message, 'info', event.ui_notify.title);
-      return true;
-    }
-    if (isBlockingUIRequestEvent(event)) {
-      contextSettings.interruptDialog();
-      handleCloseConversationSearch();
-    }
-
-    if (event.kind === 'ui-input-request' && event.ui_input) {
-      setUIRequestDialog({
-        mode: 'input',
-        request: {
-          ...event.ui_input,
-          conversationId: event.conversation_id,
-        },
-      });
-      setUIInputSubmitting(false);
-      return true;
-    }
-
-    if (event.kind === 'ui-confirm-request' && event.ui_confirm) {
-      setUIRequestDialog({
-        mode: 'confirm',
-        request: {
-          ...event.ui_confirm,
-          conversationId: event.conversation_id,
-        },
-      });
-      setUIInputSubmitting(false);
-      return true;
-    }
-
-    if (event.kind === 'ui-select-request' && event.ui_select) {
-      setUIRequestDialog({
-        mode: 'select',
-        request: {
-          ...event.ui_select,
-          conversationId: event.conversation_id,
-        },
-      });
-      setUIInputSubmitting(false);
-      return true;
-    }
-
-    return false;
-  };
-
-  const respondToUIRequest = async (
-    dialog: UIRequestDialogState,
-    response: { status: 'submitted' | 'dismissed'; value?: string }
-  ) => {
-    const request = dialog.request;
-    let payload = response;
-    if (dialog.mode === 'confirm' && response.status === 'submitted') {
-      payload = { ...response, value: 'true' };
-    }
-    if (dialog.mode === 'confirm' && response.status === 'dismissed') {
-      payload = { ...response, value: 'false' };
-    }
-
-    const targetConversationId = request.conversationId || activeConversationId || conversationId;
-    if (!targetConversationId) {
-      showToast('Cannot answer extension prompt before conversation starts', 'error');
-      return;
-    }
-
-    setUIInputSubmitting(true);
-    try {
-      await apiService.respondToUIInput(targetConversationId, request.id, payload);
-      setUIRequestDialog((currentDialog) =>
-        currentDialog?.request.id === request.id ? null : currentDialog
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to answer extension prompt';
-      showToast(message, 'error');
-    } finally {
-      setUIInputSubmitting(false);
-    }
-  };
+  const handleUIInputRequest = uiRequest.handleEvent;
 
   const handleSubmit = async () => {
     const prompt = draft.trim();
@@ -1450,10 +1124,10 @@ const ChatPage: React.FC = () => {
 
       if (isQueueableCommand(prompt)) {
         if (
-          !sendControllersRef.current[targetConversationId] &&
-          !commandObserversRef.current[targetConversationId]
+          !runStreams.sends[targetConversationId] &&
+          !runStreams.commandObservers[targetConversationId]
         ) {
-          const observer = observedRunControllersRef.current[targetConversationId];
+          const observer = runStreams.observers[targetConversationId];
           if (!observer || observer.signal.aborted) {
             showToast(
               'Wait for the active conversation stream to connect before queueing commands',
@@ -1461,7 +1135,7 @@ const ChatPage: React.FC = () => {
             );
             return;
           }
-          commandObserversRef.current[targetConversationId] = observer;
+          runStreams.commandObservers[targetConversationId] = observer;
         }
         replaceQueuedCommands(targetConversationId, [
           ...(queuedCommandsRef.current[targetConversationId] || []),
@@ -1566,16 +1240,16 @@ const ChatPage: React.FC = () => {
     }
 
     const controller = new AbortController();
-    if (isTargetViewed()) abortControllerRef.current = controller;
+    if (isTargetViewed()) runStreams.viewedSend = controller;
     registerSendController(targetConversationId, controller);
-    commandObserversRef.current[targetConversationId]?.abort();
-    delete commandObserversRef.current[targetConversationId];
-    delete observedRunControllersRef.current[targetConversationId];
+    runStreams.commandObservers[targetConversationId]?.abort();
+    delete runStreams.commandObservers[targetConversationId];
+    delete runStreams.observers[targetConversationId];
     // Only the submitting stream may complete this run. Retire any observers
     // before starting it so stale events cannot drain a second queued command.
-    runningSubscriptionControllersRef.current[targetConversationId]?.abort();
-    delete runningSubscriptionControllersRef.current[targetConversationId];
-    if (isTargetViewed()) resumeControllerRef.current?.abort();
+    runStreams.monitors[targetConversationId]?.abort();
+    delete runStreams.monitors[targetConversationId];
+    if (isTargetViewed()) runStreams.viewed?.abort();
     markConversationRunning(targetConversationId);
     const userPreview = buildConversationPreview(prompt, attachmentsForSend);
     if (isNewConversation) {
@@ -1698,9 +1372,9 @@ const ChatPage: React.FC = () => {
               if (
                 previousStreamedId &&
                 previousStreamedId !== streamedId &&
-                sendControllersRef.current[previousStreamedId] === controller
+                runStreams.sends[previousStreamedId] === controller
               ) {
-                delete sendControllersRef.current[previousStreamedId];
+                delete runStreams.sends[previousStreamedId];
                 const pending = queuedCommandsRef.current[previousStreamedId];
                 if (pending) {
                   replaceQueuedCommands(previousStreamedId, []);
@@ -1887,9 +1561,9 @@ const ChatPage: React.FC = () => {
         showToast(message, 'error');
       }
     } finally {
-      const ownsRun = sendControllersRef.current[streamedConversationId] === controller;
-      if (abortControllerRef.current === controller) {
-        abortControllerRef.current = null;
+      const ownsRun = runStreams.sends[streamedConversationId] === controller;
+      if (runStreams.viewedSend === controller) {
+        runStreams.viewedSend = null;
       }
       clearRunningConversationForController(streamedConversationId, controller);
       setConversationStreamVersion((currentVersion) => currentVersion + 1);
@@ -1904,7 +1578,7 @@ const ChatPage: React.FC = () => {
   };
 
   const runNextQueuedCommand = (id: string) => {
-    if (sendControllersRef.current[id]) return;
+    if (runStreams.sends[id]) return;
     const pending = queuedCommandsRef.current[id];
     if (!pending?.length) return;
     const [command, ...remaining] = pending;
@@ -1921,19 +1595,19 @@ const ChatPage: React.FC = () => {
     }
 
     discardQueuedCommands(conversationToStop, 'the run was stopped');
-    const sendController = sendControllersRef.current[conversationToStop];
+    const sendController = runStreams.sends[conversationToStop];
     if (sendController) {
       sendController.abort();
-      delete sendControllersRef.current[conversationToStop];
-      if (abortControllerRef.current === sendController) {
-        abortControllerRef.current = null;
+      delete runStreams.sends[conversationToStop];
+      if (runStreams.viewedSend === sendController) {
+        runStreams.viewedSend = null;
       }
     } else {
-      resumeControllerRef.current?.abort();
+      runStreams.viewed?.abort();
     }
     setSteering(false);
     clearRunningConversation(conversationToStop);
-    setUIRequestDialog(null);
+    uiRequest.close();
     void apiService.stopConversation(conversationToStop).catch((error) => {
       console.error('Failed to stop conversation', error);
     });
@@ -2165,8 +1839,8 @@ const ChatPage: React.FC = () => {
         // Healthy idle watchers already observe future turns. Reuse the normal
         // attachment effect only when that observer has actually gone away.
         if (
-          (!resumeControllerRef.current || resumeControllerRef.current.signal.aborted) &&
-          !sendControllersRef.current[event.conversationId]
+          (!runStreams.viewed || runStreams.viewed.signal.aborted) &&
+          !runStreams.sends[event.conversationId]
         ) {
           setStreamError(null);
           setConversationStreamVersion((version) => version + 1);
@@ -2184,7 +1858,7 @@ const ChatPage: React.FC = () => {
           () =>
             viewedConversationIdRef.current === id &&
             conversationRunVersion.current === runVersion &&
-            !sendControllersRef.current[id]
+            !runStreams.sends[id]
         );
       }
     },
@@ -2666,12 +2340,12 @@ const ChatPage: React.FC = () => {
         <UIInputDialog
           mode={uiRequestDialog.mode}
           request={uiRequestDialog.request}
-          submitting={uiInputSubmitting}
+          submitting={uiRequest.submitting}
           onCancel={() => {
-            void respondToUIRequest(uiRequestDialog, { status: 'dismissed' });
+            void uiRequest.respond(uiRequestDialog, { status: 'dismissed' });
           }}
           onSubmit={(value) => {
-            void respondToUIRequest(uiRequestDialog, {
+            void uiRequest.respond(uiRequestDialog, {
               status: 'submitted',
               value,
             });

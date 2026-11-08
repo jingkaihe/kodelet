@@ -155,6 +155,45 @@ describe('ChatPage streaming, steering, and navigation', () => {
     expect(screen.getAllByText('Focus on tests')).toHaveLength(2);
   });
 
+  it('follows running conversations it is not showing without their transcript detail', async () => {
+    setRouteParams({ id: 'conv-123' });
+    const summary = (id: string) => ({
+      id,
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+      messageCount: 1,
+      summary: id,
+      isRunning: true,
+    });
+    mockGetConversations.mockResolvedValue({
+      conversations: [summary('conv-123'), summary('conv-background')],
+      hasMore: false,
+      total: 2,
+      limit: 100,
+      offset: 0,
+    });
+    mockGetConversation.mockResolvedValue({
+      ...summary('conv-123'),
+      messages: [],
+      toolResults: {},
+    });
+    mockStreamConversation.mockImplementation(() => new Promise<void>(() => undefined));
+
+    render(<ChatPage />);
+
+    await waitFor(() =>
+      expect(mockStreamConversation).toHaveBeenCalledWith(
+        'conv-background',
+        expect.objectContaining({ level: 'lifecycle' })
+      )
+    );
+    await waitFor(() =>
+      expect(mockStreamConversation).toHaveBeenCalledWith('conv-123', expect.any(Object))
+    );
+    const shown = mockStreamConversation.mock.calls.find(([id]) => id === 'conv-123');
+    expect(shown?.[1]).not.toHaveProperty('level');
+  });
+
   it('keeps healthy watchers and recovers voice turns after an observer disconnects', async () => {
     setRouteParams({ id: 'conv-123' });
     mockGetConversation

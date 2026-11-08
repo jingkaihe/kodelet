@@ -113,21 +113,24 @@ type Server struct {
 	activeChatsMu         sync.Mutex
 	chatSubscribers       map[string]map[*subscriberEventSink]struct{}
 	chatSubscribersMu     sync.Mutex
-	publicAuthRates       map[string]publicAuthRateEntry
-	publicAuthRatesMu     sync.Mutex
-	codexAuth             codexProviderAuthService
-	codexDeviceLogin      *codexDeviceLoginSession
-	codexDeviceLoginMu    sync.Mutex
-	copilotAuth           copilotProviderAuthService
-	copilotDeviceLogin    *copilotDeviceLoginSession
-	copilotDeviceLoginMu  sync.Mutex
-	anthropicAuth         anthropicProviderAuthService
-	anthropicOAuthLogin   *anthropicOAuthLoginSession
-	anthropicOAuthLoginMu sync.Mutex
-	shutdownTimeout       time.Duration
-	stopping              bool
-	embeddedMu            sync.Mutex
-	embeddedStatus        EmbeddedRunnerStatus
+	// chatEventConnections holds each Web UI page's event socket by connection ID.
+	chatEventConnections   map[string]*chatEventConnection
+	chatEventConnectionsMu sync.Mutex
+	publicAuthRates        map[string]publicAuthRateEntry
+	publicAuthRatesMu      sync.Mutex
+	codexAuth              codexProviderAuthService
+	codexDeviceLogin       *codexDeviceLoginSession
+	codexDeviceLoginMu     sync.Mutex
+	copilotAuth            copilotProviderAuthService
+	copilotDeviceLogin     *copilotDeviceLoginSession
+	copilotDeviceLoginMu   sync.Mutex
+	anthropicAuth          anthropicProviderAuthService
+	anthropicOAuthLogin    *anthropicOAuthLoginSession
+	anthropicOAuthLoginMu  sync.Mutex
+	shutdownTimeout        time.Duration
+	stopping               bool
+	embeddedMu             sync.Mutex
+	embeddedStatus         EmbeddedRunnerStatus
 }
 
 type activeChatRun struct {
@@ -490,6 +493,7 @@ func (s *Server) setupRoutes() {
 	).Methods("GET", "HEAD")
 	api.HandleFunc("/conversations/{id}", s.handleDeleteConversation).Methods("DELETE")
 	api.HandleFunc("/chat", s.handleChat).Methods("POST")
+	api.HandleFunc("/chat/events", s.handleChatEventsWebsocket).Methods("GET")
 
 	// A frontend is composed by the caller and mounted after every control-plane
 	// route so API ownership stays independent from the browser implementation.
@@ -1181,6 +1185,40 @@ func (s *Server) emitExtensionUIEvent(conversationID string, event chat.ChatEven
 		}
 	}
 	s.broadcastChatEvent(conversationID, event)
+}
+
+// conversationStreamPreamble describes a conversation to a new subscriber,
+// which is registered first so no later event can be missed: its active run, if
+// any, then its extension widgets.
+func (s *Server) conversationStreamPreamble(conversationID string, active bool) []chat.ChatEvent {
+	var events []chat.ChatEvent
+	if active {
+		events = append(events, chat.ChatEvent{
+			Kind:           "conversation",
+			ConversationID: conversationID,
+			TurnID:         s.activeChatTurnID(conversationID),
+			Role:           "assistant",
+		})
+	}
+	if s.extensionUI != nil {
+		revision, widgets := s.extensionUI.Snapshot(conversationID)
+		events = append(events, chat.ChatEvent{
+			Kind:             "ui-widgets",
+			ConversationID:   conversationID,
+			UIWidgets:        widgets,
+			UIWidgetRevision: revision,
+		})
+	}
+	return events
+}
+
+func (s *Server) activeChatTurnID(conversationID string) string {
+	s.activeChatsMu.Lock()
+	defer s.activeChatsMu.Unlock()
+	if run := s.activeChats[conversationID]; run != nil {
+		return run.turnID
+	}
+	return ""
 }
 
 func (s *Server) closeChatSubscribers(conversationID string) {
@@ -2212,22 +2250,11 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
 	}
-	if active {
-		_ = sink.Send(chat.ChatEvent{
-			Kind:           "conversation",
-			ConversationID: conversationID,
-			Role:           "assistant",
-		})
+	preamble := s.conversationStreamPreamble(conversationID, active)
+	for _, event := range preamble {
+		_ = sink.Send(event)
 	}
-	if s.extensionUI != nil {
-		revision, widgets := s.extensionUI.Snapshot(conversationID)
-		_ = sink.Send(chat.ChatEvent{
-			Kind:             "ui-widgets",
-			ConversationID:   conversationID,
-			UIWidgets:        widgets,
-			UIWidgetRevision: revision,
-		})
-	} else if !active {
+	if len(preamble) == 0 {
 		_ = sink.KeepAlive()
 	}
 	keepAlive := time.NewTicker(conversationStreamKeepAliveInterval)

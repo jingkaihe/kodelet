@@ -149,7 +149,7 @@ cli.command
          └─ chat <model>
 ```
 
-Interactive chat creates bounded traces per submission, not a single process-lifetime trace. Long-lived event subscriptions and WebSocket connections are not trace roots. Missing or invalid incoming context starts an independent server trace. Runner RPC context is carried on individual requests, including reverse calls, rather than on the shared connection; older peers can ignore the optional `traceContext` envelope field.
+Interactive chat creates bounded traces per submission, not a single process-lifetime trace. Long-lived event subscriptions and WebSocket connections are not trace roots. A Web UI turn submitted on its page's event socket ends its `POST /api/chat` server span once the turn starts; the run's spans keep that trace and parent. Missing or invalid incoming context starts an independent server trace. Runner RPC context is carried on individual requests, including reverse calls, rather than on the shared connection; older peers can ignore the optional `traceContext` envelope field.
 
 The daemon preserves trace parentage when it detaches execution from an HTTP observer's cancellation. The runner preserves request parentage while also honoring run cancellation. Logical tool spans include extension hooks and remote execution; lower-level runner spans show where the actual implementation ran.
 

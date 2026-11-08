@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
@@ -286,8 +287,12 @@ type subscriberEventSink struct {
 	ownerID      string
 	clientID     string
 	capabilities chat.ChatClientCapabilities
-	mu           sync.RWMutex
-	closed       bool
+	// accept, when set, filters events before they are buffered, so dropped
+	// transcript detail cannot fill a background subscriber's buffer.
+	accept     func(chat.ChatEvent) bool
+	overflowed atomic.Bool
+	mu         sync.RWMutex
+	closed     bool
 }
 
 func newNDJSONEventSink(w http.ResponseWriter) (*ndjsonEventSink, error) {
@@ -349,10 +354,17 @@ func (s *ndjsonEventSink) Close() {
 }
 
 func newSubscriberEventSink() *subscriberEventSink {
-	return &subscriberEventSink{ch: make(chan chat.ChatEvent, 128)}
+	return newSizedSubscriberEventSink(128)
+}
+
+func newSizedSubscriberEventSink(size int) *subscriberEventSink {
+	return &subscriberEventSink{ch: make(chan chat.ChatEvent, size)}
 }
 
 func (s *subscriberEventSink) Send(event chat.ChatEvent) error {
+	if s.accept != nil && !s.accept(event) {
+		return nil
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.closed {
@@ -362,6 +374,7 @@ func (s *subscriberEventSink) Send(event chat.ChatEvent) error {
 	case s.ch <- event:
 		return nil
 	default:
+		s.overflowed.Store(true)
 		return errors.New("subscriber buffer full")
 	}
 }
@@ -413,17 +426,29 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sink, err := newNDJSONEventSink(w)
+	// A Web UI page that names its event socket receives the run's events
+	// there, so this request returns once the turn starts.
+	binding, err := s.reserveChatEventSubmission(r, clientID)
 	if err != nil {
-		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to initialize chat stream", err)
+		s.writeChatEventBindingError(w, err)
 		return
 	}
-	defer sink.Close()
+	var sink *ndjsonEventSink
+	if binding != nil {
+		defer binding.release()
+	} else {
+		sink, err = newNDJSONEventSink(w)
+		if err != nil {
+			s.writeErrorResponse(w, http.StatusInternalServerError, "failed to initialize chat stream", err)
+			return
+		}
+		defer sink.Close()
 
-	w.Header().Set("Content-Type", "application/x-ndjson")
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+	}
 
 	conversationID := strings.TrimSpace(req.ConversationID)
 	if conversationID == "" {
@@ -463,11 +488,19 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			span.SetAttributes(attribute.String("kodelet.run.id", receipt.RunID))
 		}
 		if !admitted {
+			if binding != nil {
+				s.replyChatSubmission(w, req, &receipt)
+				return
+			}
 			s.replyTurnReceipt(w, sink, receipt)
 			return
 		}
 		w.Header().Set("X-Kodelet-Conversation-ID", conversationID)
 		w.Header().Set("X-Kodelet-Turn-ID", req.TurnID)
+	}
+	if binding != nil {
+		s.runChatForEventSubscription(w, r, req, clientID, attachment, receipt, binding)
+		return
 	}
 
 	if replay, err := s.runAdmittedChat(requestCtx, req, sink, clientID, attachment, receipt); err != nil {
@@ -481,12 +514,43 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// chatRunObserver describes the client that submitted a server-owned run.
+type chatRunObserver struct {
+	// sink receives every event of the run. Nil discards them, for submitters
+	// that already follow the conversation as a broadcast subscriber.
+	sink chat.ChatEventSink
+	// ownerCtx bounds interactive UI ownership; it defaults to the request context.
+	ownerCtx context.Context
+	// ownerSink receives owner-only UI such as prompts; it defaults to sink.
+	ownerSink chat.ChatEventSink
+	// started is called once the turn is registered and started, before any of
+	// its events are sent.
+	started func()
+}
+
 // runAdmittedChat is shared by typed chat and live voice. Execution belongs to
 // the server; losing either observer must not cancel accepted coding work.
 // A nil receipt means execution streamed normally, rather than receipt replay.
+func (s *Server) runAdmittedChat(requestCtx context.Context, req chat.ChatRequest, sink chat.ChatEventSink, clientID string, attachment *sessionExtensionAttachment, receipt chat.TurnReceipt) (*chat.TurnReceipt, error) {
+	return s.runObservedChat(requestCtx, req, chatRunObserver{sink: sink}, clientID, attachment, receipt)
+}
+
+// runObservedChat runs an admitted turn for the observer that submitted it.
 //
 //nolint:nilnil // Both nil signals normal streamed completion, not missing data.
-func (s *Server) runAdmittedChat(requestCtx context.Context, req chat.ChatRequest, sink chat.ChatEventSink, clientID string, attachment *sessionExtensionAttachment, receipt chat.TurnReceipt) (*chat.TurnReceipt, error) {
+func (s *Server) runObservedChat(requestCtx context.Context, req chat.ChatRequest, observer chatRunObserver, clientID string, attachment *sessionExtensionAttachment, receipt chat.TurnReceipt) (*chat.TurnReceipt, error) {
+	sink := observer.sink
+	if sink == nil {
+		sink = discardChatEventSink{}
+	}
+	ownerSink := observer.ownerSink
+	if ownerSink == nil {
+		ownerSink = sink
+	}
+	ownerCtx := observer.ownerCtx
+	if ownerCtx == nil {
+		ownerCtx = requestCtx
+	}
 	conversationID := req.ConversationID
 	registeredConversationID := conversationID
 	span := trace.SpanFromContext(requestCtx)
@@ -507,9 +571,9 @@ func (s *Server) runAdmittedChat(requestCtx context.Context, req chat.ChatReques
 	run := newActiveChatRun(cancel)
 	run.turnID = strings.TrimSpace(req.TurnID)
 	run.eventSink = sink
-	run.uiInput = newWebUIInputBroker(conversationID, sink)
+	run.uiInput = newWebUIInputBroker(conversationID, ownerSink)
 	if chatSupportsInteractiveUI(req) {
-		detach := run.uiInput.setOwner(withNativeCapabilities(requestCtx, req.ClientCapabilities), clientID, sink)
+		detach := run.uiInput.setOwner(withNativeCapabilities(ownerCtx, req.ClientCapabilities), clientID, ownerSink)
 		defer detach()
 	}
 	defer run.uiInput.close()
@@ -545,6 +609,9 @@ func (s *Server) runAdmittedChat(requestCtx context.Context, req chat.ChatReques
 			return &receipt, nil
 		}
 	}
+	if observer.started != nil {
+		observer.started()
+	}
 
 	broadcastingSink := &broadcastingEventSink{
 		primary: sink,
@@ -558,6 +625,7 @@ func (s *Server) runAdmittedChat(requestCtx context.Context, req chat.ChatReques
 	s.broadcastChatEvent(conversationID, chat.ChatEvent{
 		Kind:           "conversation",
 		ConversationID: conversationID,
+		TurnID:         req.TurnID,
 		Role:           "assistant",
 	})
 	var userContent any = message
@@ -592,6 +660,7 @@ func (s *Server) runAdmittedChat(requestCtx context.Context, req chat.ChatReques
 			completionEvent := chat.ChatEvent{
 				Kind:           "done",
 				ConversationID: conversationID,
+				TurnID:         req.TurnID,
 				Role:           "assistant",
 				Cancelled:      true,
 			}
@@ -603,33 +672,35 @@ func (s *Server) runAdmittedChat(requestCtx context.Context, req chat.ChatReques
 
 		logger.G(ctx).WithError(runErr).Error("chat request failed")
 		s.unregisterActiveChat(registeredConversationID, run)
-		s.broadcastChatEvent(conversationID, chat.ChatEvent{
+		failureEvent := chat.ChatEvent{
 			Kind:           "error",
 			ConversationID: conversationID,
+			TurnID:         req.TurnID,
 			Role:           "assistant",
 			Error:          runErr.Error(),
-		})
-		_ = sink.Send(chat.ChatEvent{
-			Kind:           "error",
-			ConversationID: conversationID,
-			Role:           "assistant",
-			Error:          runErr.Error(),
-		})
+		}
+		s.broadcastChatEvent(conversationID, failureEvent)
+		_ = sink.Send(failureEvent)
 		return nil, nil
 	}
 
 	s.unregisterActiveChat(registeredConversationID, run)
-	s.broadcastChatEvent(conversationID, chat.ChatEvent{
+	completionEvent := chat.ChatEvent{
 		Kind:           "done",
 		ConversationID: conversationID,
+		TurnID:         req.TurnID,
 		Role:           "assistant",
-	})
-	_ = sink.Send(chat.ChatEvent{
-		Kind:           "done",
-		ConversationID: conversationID,
-		Role:           "assistant",
-	})
+	}
+	s.broadcastChatEvent(conversationID, completionEvent)
+	_ = sink.Send(completionEvent)
 	return nil, nil
+}
+
+// discardChatEventSink drops events that a submitter receives in another way.
+type discardChatEventSink struct{}
+
+func (discardChatEventSink) Send(chat.ChatEvent) error {
+	return nil
 }
 
 type broadcastingEventSink struct {
