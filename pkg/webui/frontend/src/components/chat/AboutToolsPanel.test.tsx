@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { sampleToolInventory } from '../../stories/toolInventoryFixtures';
@@ -102,7 +102,7 @@ describe('AboutToolsPanel', () => {
   it('supports tree keyboard navigation', async () => {
     const user = userEvent.setup();
     render(<AboutToolsPanel inventory={sampleToolInventory} />);
-    row('Built-in tools').focus();
+    act(() => row('Built-in tools').focus());
 
     await user.keyboard('{ArrowLeft}');
     expect(row('Built-in tools')).toHaveAttribute('aria-expanded', 'false');
