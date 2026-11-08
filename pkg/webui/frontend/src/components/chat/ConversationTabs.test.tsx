@@ -141,7 +141,7 @@ describe('ConversationTabs', () => {
       within(menu)
         .getAllByRole('menuitem')
         .map((item) => item.textContent)
-    ).toEqual(['Copy conversation ID', 'Close tabDel']);
+    ).toEqual(['Copy conversation ID', 'Close tab']);
     expect(within(menu).getByRole('menuitem', { name: 'Copy conversation ID' })).toHaveFocus();
 
     await user.keyboard('{ArrowDown}');
@@ -190,7 +190,7 @@ describe('ConversationTabs', () => {
       within(menu)
         .getAllByRole('menuitem')
         .map((item) => item.textContent)
-    ).toEqual(['Config', 'Close tabDel']);
+    ).toEqual(['Config', 'Close tab']);
 
     await user.click(within(menu).getByRole('menuitem', { name: 'Config' }));
     expect(onConfigOpen).toHaveBeenCalledExactlyOnceWith('new');

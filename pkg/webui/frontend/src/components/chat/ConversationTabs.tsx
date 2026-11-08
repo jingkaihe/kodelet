@@ -357,10 +357,9 @@ const ConversationTabs = ({
     label: string,
     icon: ReactNode,
     onActivate: () => void,
-    options: { shortcut?: string; restoreFocus?: boolean } = {}
+    options: { restoreFocus?: boolean } = {}
   ) => (
     <button
-      aria-keyshortcuts={options.shortcut}
       className="chat-tab-menu-item"
       onClick={() => {
         dismissTabMenu(options.restoreFocus ?? true);
@@ -372,11 +371,6 @@ const ConversationTabs = ({
     >
       {icon}
       <span className="chat-tab-menu-label">{label}</span>
-      {options.shortcut ? (
-        <span aria-hidden="true" className="chat-tab-menu-shortcut">
-          Del
-        </span>
-      ) : null}
     </button>
   );
 
@@ -418,7 +412,6 @@ const ConversationTabs = ({
             )}
         <hr className="chat-tab-menu-separator" />
         {menuItem('Close tab', <X aria-hidden="true" size={14} />, () => closeTab(menuTab.id), {
-          shortcut: 'Delete',
           restoreFocus: false,
         })}
       </div>

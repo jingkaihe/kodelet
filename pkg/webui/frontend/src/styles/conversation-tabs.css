@@ -295,12 +295,6 @@
   min-width: 0;
 }
 
-.chat-tab-menu-shortcut {
-  color: var(--kodelet-muted);
-  font-family: inherit;
-  font-size: 0.66rem;
-}
-
 .chat-tab-menu-separator {
   margin: 0.25rem 0;
   border: 0;
