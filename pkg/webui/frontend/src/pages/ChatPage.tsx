@@ -373,12 +373,24 @@ const ChatPage: React.FC = () => {
     setDraft(restored?.draft ?? '');
     setAttachments((current) => restored?.attachments ?? (current.length > 0 ? [] : current));
   }, [tabKey, setAttachments]);
-  /** Clears what was sent from its tab, which may no longer be the one shown. */
-  const clearTabComposer = (key: string) => {
+  /**
+   * Clears a sent draft from its tab, which may no longer be the one shown. A tab
+   * that now holds something else keeps it.
+   */
+  const clearTabComposer = (
+    key: string,
+    sent: { draft: string; attachments: PendingImageAttachment[] }
+  ) => {
+    const holdsSent = (state?: { draft: string; attachments: PendingImageAttachment[] }) =>
+      state?.draft === sent.draft &&
+      state.attachments.length === sent.attachments.length &&
+      state.attachments.every((attachment, index) => attachment.id === sent.attachments[index].id);
     if (composerTabKeyRef.current === key) {
-      setDraft('');
-      setAttachments([]);
-    } else {
+      if (holdsSent(composerStateRef.current)) {
+        setDraft('');
+        setAttachments([]);
+      }
+    } else if (holdsSent(tabComposerRef.current.get(key))) {
       tabComposerRef.current.delete(key);
     }
   };
@@ -1466,6 +1478,7 @@ const ChatPage: React.FC = () => {
       setSteering(true);
       setStreamError(null);
       const steeringTabKey = composerTabKeyRef.current;
+      const steeringDraft = { draft, attachments: attachmentsForSend };
 
       try {
         const queuedContent = buildUserContent(prompt, attachmentsForSend);
@@ -1482,7 +1495,7 @@ const ChatPage: React.FC = () => {
               }
             : currentConversation
         );
-        clearTabComposer(steeringTabKey);
+        clearTabComposer(steeringTabKey, steeringDraft);
         showToast('Steering queued for the active conversation', 'success');
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to steer conversation';

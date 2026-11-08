@@ -274,6 +274,37 @@ describe('ChatPage conversation tabs', () => {
     expect(composer()).toHaveValue('');
   });
 
+  it.each([
+    ['from another tab', true],
+    ['in its own tab', false],
+  ])('keeps text typed after a steering message is sent when it finishes %s', async (_where, switchAway) => {
+    useConversations(['conv-a']);
+    streamListeners();
+    let finishSteer = () => {};
+    mockSteerConversation.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishSteer = () => resolve({ success: true, conversation_id: 'conv-a', queued: true });
+        })
+    );
+    const { rerender } = await visit('conv-b', 'conv-a');
+    const composer = () => screen.getByTestId('composer-textarea');
+    fireEvent.change(composer(), { target: { value: 'First steer' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Steer' }));
+    await waitFor(() => expect(mockSteerConversation).toHaveBeenCalledOnce());
+
+    // Switching away and back makes the composer editable again before the request finishes.
+    await revisit(rerender, 'conv-b');
+    await revisit(rerender, 'conv-a');
+    expect(composer()).toBeEnabled();
+    fireEvent.change(composer(), { target: { value: 'A newer thought' } });
+    if (switchAway) await revisit(rerender, 'conv-b');
+    await act(async () => finishSteer());
+
+    if (switchAway) await revisit(rerender, 'conv-a');
+    expect(composer()).toHaveValue('A newer thought');
+  });
+
   it('cycles tabs with Alt+[ and Alt+]', async () => {
     useConversations();
     await visit('conv-a', 'conv-b', 'conv-c', 'conv-b');
