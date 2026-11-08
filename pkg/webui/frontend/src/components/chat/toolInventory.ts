@@ -153,7 +153,8 @@ export const buildInventoryTree = (inventory: ToolInventory): InventoryNode[] =>
   const builtinEnabled = inventory.builtinTools.filter((tool) => tool.enabled !== false);
   const builtinOff = inventory.builtinTools.filter((tool) => tool.enabled === false);
   const plugins = byName(inventory.plugins).map((plugin): InventoryNode => {
-    const id = `plugin:${plugin.name}`;
+    // A repo and a global copy of one plugin can both contribute items.
+    const id = `plugin:${plugin.scope}:${plugin.name}`;
     return {
       id,
       kind: 'plugin',

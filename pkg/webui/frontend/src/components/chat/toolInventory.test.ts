@@ -102,6 +102,18 @@ describe('tool inventory tree', () => {
     });
   });
 
+  it('keeps repo and global copies of a plugin apart', () => {
+    const plugin = sampleToolInventory.plugins[0];
+    const [, plugins] = buildInventoryTree({
+      ...sampleToolInventory,
+      plugins: [plugin, { ...plugin, scope: 'repo', path: '.kodelet/plugins/jingkaihe@kodelet' }],
+    });
+    const ids = plugins.children.map((node) => node.id);
+
+    expect(new Set(ids).size).toBe(2);
+    expect(plugins.children.map((node) => node.scope)).toEqual(['global', 'repo']);
+  });
+
   it('describes failed extensions with an error detail row', () => {
     const standalone = buildInventoryTree(toolInventoryWithIssues)[2];
     const failed = standalone.children.find((node) => node.label === 'drawing-board');
