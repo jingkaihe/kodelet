@@ -174,6 +174,15 @@ func (r *configuredChatRunner) ExecuteWorkspaceShortcut(ctx context.Context, req
 	return r.Client.ExecuteWorkspaceShortcut(ctx, request)
 }
 
+// ToolInventory keeps this session's tool restrictions, so the list matches what its runs load.
+func (r *configuredChatRunner) ToolInventory(ctx context.Context, target chatpkg.WorkspaceTarget) (protocol.WorkspaceInventoryResult, error) {
+	target, err := r.discoveryTarget(ctx, target)
+	if err != nil {
+		return protocol.WorkspaceInventoryResult{}, err
+	}
+	return r.Client.ToolInventory(ctx, target)
+}
+
 func (r *configuredChatRunner) WorkspaceCWDSuggestions(ctx context.Context, target chatpkg.WorkspaceTarget, query string) (protocol.WorkspaceCWDHintsResult, error) {
 	target, err := r.discoveryTarget(ctx, target)
 	if err != nil {

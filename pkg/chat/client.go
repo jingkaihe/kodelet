@@ -926,6 +926,14 @@ func (r *Client) WorkspaceCWDSuggestions(ctx context.Context, target WorkspaceTa
 	return result, err
 }
 
+// ToolInventory lists the built-in tools, plugins, extensions and skills a run
+// would load for the target, without starting a model turn.
+func (r *Client) ToolInventory(ctx context.Context, target WorkspaceTarget) (protocol.WorkspaceInventoryResult, error) {
+	var result protocol.WorkspaceInventoryResult
+	err := r.workspaceDiscovery(ctx, "tool-inventory", target, "", &result)
+	return result, err
+}
+
 func (r *Client) workspaceDiscovery(ctx context.Context, endpoint string, target WorkspaceTarget, query string, result any) error {
 	if target.RunnerID == "" && target.ConversationID == "" {
 		target.RunnerID = r.runnerID

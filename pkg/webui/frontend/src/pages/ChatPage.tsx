@@ -2439,6 +2439,17 @@ const ChatPage: React.FC = () => {
           onClose={() => setInfoDialog(null)}
           runner={runners.find((runner) => runner.id === currentRunnerID)}
           terminalAuthorized={terminalAuthorized}
+          toolInventoryTarget={
+            isRemoteConversation && runnerWorkspaceAvailable
+              ? {
+                  runnerId: currentRunnerID,
+                  conversationId: remoteWorkspaceConversationID,
+                  cwd: remoteWorkspaceConversationID ? undefined : currentCWDLabel || undefined,
+                  environmentProfile: currentEnvironmentProfile,
+                  profile: discoveryProfile,
+                }
+              : undefined
+          }
           usage={conversation?.id === selectedConversationId ? conversation?.usage : undefined}
         />
       ) : null}

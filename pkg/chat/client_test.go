@@ -282,7 +282,7 @@ func TestWorkspaceTargetQueryValues(t *testing.T) {
 }
 
 func TestControlPlaneWorkspaceDiscoveryEncodesModelProfile(t *testing.T) {
-	for _, endpoint := range []string{"slash-commands", "cwd-suggestions"} {
+	for _, endpoint := range []string{"slash-commands", "cwd-suggestions", "tool-inventory"} {
 		for _, target := range []WorkspaceTarget{
 			{RunnerID: "runner", CWD: "~/project with spaces", EnvironmentProfile: "environment"},
 			{RunnerID: "runner", Profile: "default", EnvironmentProfile: "environment"},
@@ -315,10 +315,14 @@ func TestControlPlaneWorkspaceDiscoveryEncodesModelProfile(t *testing.T) {
 						require.NoError(t, err)
 						assert.JSONEq(t, string(data), query.Get("options"))
 					}
-					if endpoint == "cwd-suggestions" {
+					switch endpoint {
+					case "cwd-suggestions":
 						assert.Equal(t, "../other", query.Get("q"))
 						require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceCWDHintsResult{}))
-					} else {
+					case "tool-inventory":
+						assert.False(t, query.Has("q"))
+						require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceInventoryResult{CWD: "/runner"}))
+					default:
 						assert.False(t, query.Has("q"))
 						require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceDiscoverResult{}))
 					}
@@ -326,9 +330,14 @@ func TestControlPlaneWorkspaceDiscoveryEncodesModelProfile(t *testing.T) {
 				t.Cleanup(server.Close)
 				runner, err := NewClient(server.URL+"/base", "client-token", "default-runner")
 				require.NoError(t, err)
-				if endpoint == "cwd-suggestions" {
+				switch endpoint {
+				case "cwd-suggestions":
 					_, err = runner.WorkspaceCWDSuggestions(t.Context(), target, "../other")
-				} else {
+				case "tool-inventory":
+					var inventory protocol.WorkspaceInventoryResult
+					inventory, err = runner.ToolInventory(t.Context(), target)
+					assert.Equal(t, "/runner", inventory.CWD)
+				default:
 					_, err = runner.DiscoverWorkspace(t.Context(), target)
 				}
 				require.NoError(t, err)

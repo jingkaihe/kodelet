@@ -467,6 +467,16 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 			},
 			Profiles: manifest.Profiles,
 		}, err)
+	case protocol.MethodWorkspaceInventory:
+		value, rpcErr := decodeParams[protocol.WorkspaceInventoryParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		if err := value.Validate(); err != nil {
+			return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: err.Error()}
+		}
+		result, err := s.workspaceInventory(ctx, value)
+		return rpcResult(result, err)
 	case protocol.MethodWorkspaceCWDHints:
 		value, rpcErr := decodeParams[protocol.WorkspaceCWDHintsParams](params)
 		if rpcErr != nil {
@@ -1356,97 +1366,14 @@ func (s *Service) probeManifestLocked(ctx context.Context, cwd, environmentProfi
 	return s.probeManifestWithOptionsLocked(ctx, cwd, "", environmentProfile, nil)
 }
 
-func (s *Service) probeManifestWithOptionsLocked(ctx context.Context, cwd, modelProfile, environmentProfile string, options *llmtypes.ExecutionOptions) (result runnerpayload.Manifest, probeErr error) {
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return runnerpayload.Manifest{}, errors.New("runner service is closed")
-	}
-	runnerID := s.runnerID
-	generation := s.generation
-	codeExecution := s.codeExecution
-	s.mu.Unlock()
-	resolvedCWD, err := s.instanceProvider.ResolveWorkingDirectory(ctx, cwd)
-	if err != nil {
-		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to resolve runner manifest probe working directory")
-	}
-	resolvedCWD = strings.TrimSpace(resolvedCWD)
-	if resolvedCWD == "" {
-		return runnerpayload.Manifest{}, errors.New("runner manifest probe instance provider resolved an empty working directory")
-	}
-	instance, err := s.instanceProvider.Create(ctx, ExecutionInstanceSpec{
-		RunID:          "runner-manifest-probe",
-		ConversationID: "runner-manifest-probe",
-		CWD:            resolvedCWD,
-		Probe:          true,
+func (s *Service) probeManifestWithOptionsLocked(ctx context.Context, cwd, modelProfile, environmentProfile string, options *llmtypes.ExecutionOptions) (runnerpayload.Manifest, error) {
+	var wire runnerpayload.Manifest
+	err := s.probeEnvironmentLocked(ctx, cwd, modelProfile, environmentProfile, options, false, func(probe environmentProbe) error {
+		var err error
+		wire, err = buildWireManifest(probe.manifest, probe.config, probe.runtime, probe.runnerID, "runner-manifest-probe", probe.generation, nil)
+		return err
 	})
 	if err != nil {
-		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to create runner manifest probe instance")
-	}
-	if instance == nil {
-		return runnerpayload.Manifest{}, errors.New("runner manifest probe instance provider returned nil")
-	}
-	workingDirectory := strings.TrimSpace(instance.WorkingDirectory())
-	if workingDirectory == "" {
-		return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.New("runner manifest probe instance returned an empty working directory"))
-	}
-	if workingDirectory != resolvedCWD {
-		return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.Errorf("runner manifest probe instance returned working directory %q, expected %q", workingDirectory, resolvedCWD))
-	}
-
-	config, err := s.loadConfig(workingDirectory, modelProfile, environmentProfile)
-	if err != nil {
-		return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.Wrap(err, "failed to load runner configuration"))
-	}
-	config, err = llmtypes.ApplyEnvironmentOptions(config, options)
-	if err != nil {
-		return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.Wrap(err, "failed to apply runner discovery options"))
-	}
-	config.WorkingDirectory = workingDirectory
-	settleCodeMode(&config)
-	if !codeExecution {
-		if config.CodeMode == "only" {
-			return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.New("code_mode only requires code execution support from the daemon; upgrade the daemon or use code_mode on/off"))
-		}
-		config.CodeMode = ""
-	}
-	extensionConfig, err := extensions.LoadConfigFromSettings(config.ExtensionSettings)
-	if err != nil {
-		return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.Wrap(err, "failed to load runner extension configuration"))
-	}
-	probeCtx := s.decorateRunContext(ctx, "runner-manifest-probe", "runner-manifest-probe")
-	capabilities := extensions.RuntimeCapabilitiesFromContext(probeCtx)
-	capabilities.BackgroundTasks = false
-	probeCtx = extensions.ContextWithRuntimeCapabilities(probeCtx, capabilities)
-	probeCtx, cancelProbe := context.WithCancel(probeCtx)
-	defer cancelProbe()
-	runtime, release, err := s.inspectionRuntime(probeCtx, workingDirectory, environmentProfile, config, extensionConfig)
-	if release != nil {
-		defer func() {
-			probeErr = combineCleanupErrors(probeErr, runBoundedCleanup(context.WithoutCancel(probeCtx), s.cleanupTimeout, "runner discovery runtime", func(context.Context) error { return release() }))
-		}()
-	}
-	if err != nil {
-		return runnerpayload.Manifest{}, s.closeProbeResources(probeCtx, nil, instance, errors.Wrap(err, "failed to initialize runner extensions"))
-	}
-	config.Extensions = runtime
-	environment := s.environmentFactory(workingDirectory, runtime)
-	if environment == nil {
-		return runnerpayload.Manifest{}, s.closeProbeResources(probeCtx, nil, instance, errors.New("runner environment factory returned nil"))
-	}
-	manifest, err := environment.Open(probeCtx, agentenv.RunSpec{
-		ConversationID: "runner-manifest-probe",
-		Config:         config,
-		InvokedBy:      "runner.manifest",
-	})
-	if err != nil {
-		return runnerpayload.Manifest{}, s.closeProbeResources(probeCtx, environment, instance, errors.Wrap(err, "failed to probe runner environment"))
-	}
-	wire, err := buildWireManifest(manifest, config, runtime, runnerID, "runner-manifest-probe", generation, nil)
-	if err != nil {
-		return runnerpayload.Manifest{}, s.closeProbeResources(probeCtx, environment, instance, err)
-	}
-	if err := s.closeProbeResources(probeCtx, environment, instance, nil); err != nil {
 		return runnerpayload.Manifest{}, err
 	}
 	if options == nil && cwd == "" && modelProfile == "" && normalizeEnvironmentProfile(environmentProfile) == "" {
@@ -1455,6 +1382,111 @@ func (s *Service) probeManifestWithOptionsLocked(ctx context.Context, cwd, model
 		s.mu.Unlock()
 	}
 	return wire, nil
+}
+
+// environmentProbe is a workspace environment opened as a run would open it,
+// without starting a model turn.
+type environmentProbe struct {
+	manifest   agentenv.Manifest
+	config     llmtypes.Config
+	runtime    *extensions.Runtime
+	runnerID   string
+	generation int64
+}
+
+// probeEnvironmentLocked opens the workspace environment for inspection and
+// releases every probe resource after inspect returns. listBackgroundTools lets
+// extensions register background-only tools while refusing background work.
+func (s *Service) probeEnvironmentLocked(ctx context.Context, cwd, modelProfile, environmentProfile string, options *llmtypes.ExecutionOptions, listBackgroundTools bool, inspect func(environmentProbe) error) (probeErr error) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return errors.New("runner service is closed")
+	}
+	runnerID := s.runnerID
+	generation := s.generation
+	codeExecution := s.codeExecution
+	s.mu.Unlock()
+	resolvedCWD, err := s.instanceProvider.ResolveWorkingDirectory(ctx, cwd)
+	if err != nil {
+		return errors.Wrap(err, "failed to resolve runner manifest probe working directory")
+	}
+	resolvedCWD = strings.TrimSpace(resolvedCWD)
+	if resolvedCWD == "" {
+		return errors.New("runner manifest probe instance provider resolved an empty working directory")
+	}
+	instance, err := s.instanceProvider.Create(ctx, ExecutionInstanceSpec{
+		RunID:          "runner-manifest-probe",
+		ConversationID: "runner-manifest-probe",
+		CWD:            resolvedCWD,
+		Probe:          true,
+	})
+	if err != nil {
+		return errors.Wrap(err, "failed to create runner manifest probe instance")
+	}
+	if instance == nil {
+		return errors.New("runner manifest probe instance provider returned nil")
+	}
+	workingDirectory := strings.TrimSpace(instance.WorkingDirectory())
+	if workingDirectory == "" {
+		return s.closeProbeResources(ctx, nil, instance, errors.New("runner manifest probe instance returned an empty working directory"))
+	}
+	if workingDirectory != resolvedCWD {
+		return s.closeProbeResources(ctx, nil, instance, errors.Errorf("runner manifest probe instance returned working directory %q, expected %q", workingDirectory, resolvedCWD))
+	}
+
+	config, err := s.loadConfig(workingDirectory, modelProfile, environmentProfile)
+	if err != nil {
+		return s.closeProbeResources(ctx, nil, instance, errors.Wrap(err, "failed to load runner configuration"))
+	}
+	config, err = llmtypes.ApplyEnvironmentOptions(config, options)
+	if err != nil {
+		return s.closeProbeResources(ctx, nil, instance, errors.Wrap(err, "failed to apply runner discovery options"))
+	}
+	config.WorkingDirectory = workingDirectory
+	settleCodeMode(&config)
+	if !codeExecution {
+		if config.CodeMode == "only" {
+			return s.closeProbeResources(ctx, nil, instance, errors.New("code_mode only requires code execution support from the daemon; upgrade the daemon or use code_mode on/off"))
+		}
+		config.CodeMode = ""
+	}
+	extensionConfig, err := extensions.LoadConfigFromSettings(config.ExtensionSettings)
+	if err != nil {
+		return s.closeProbeResources(ctx, nil, instance, errors.Wrap(err, "failed to load runner extension configuration"))
+	}
+	probeCtx := s.decorateRunContext(ctx, "runner-manifest-probe", "runner-manifest-probe")
+	capabilities := extensions.RuntimeCapabilitiesFromContext(probeCtx)
+	capabilities.BackgroundTasks = false
+	probeCtx = extensions.ContextWithRuntimeCapabilities(probeCtx, capabilities)
+	probeCtx, cancelProbe := context.WithCancel(probeCtx)
+	defer cancelProbe()
+	runtime, release, err := s.inspectionRuntime(probeCtx, workingDirectory, environmentProfile, config, extensionConfig, listBackgroundTools)
+	if release != nil {
+		defer func() {
+			probeErr = combineCleanupErrors(probeErr, runBoundedCleanup(context.WithoutCancel(probeCtx), s.cleanupTimeout, "runner discovery runtime", func(context.Context) error { return release() }))
+		}()
+	}
+	if err != nil {
+		return s.closeProbeResources(probeCtx, nil, instance, errors.Wrap(err, "failed to initialize runner extensions"))
+	}
+	config.Extensions = runtime
+	environment := s.environmentFactory(workingDirectory, runtime)
+	if environment == nil {
+		return s.closeProbeResources(probeCtx, nil, instance, errors.New("runner environment factory returned nil"))
+	}
+	manifest, err := environment.Open(probeCtx, agentenv.RunSpec{
+		ConversationID: "runner-manifest-probe",
+		Config:         config,
+		InvokedBy:      "runner.manifest",
+	})
+	if err != nil {
+		return s.closeProbeResources(probeCtx, environment, instance, errors.Wrap(err, "failed to probe runner environment"))
+	}
+	if err := inspect(environmentProbe{manifest: manifest, config: config, runtime: runtime, runnerID: runnerID, generation: generation}); err != nil {
+		return s.closeProbeResources(probeCtx, environment, instance, err)
+	}
+	return s.closeProbeResources(probeCtx, environment, instance, nil)
 }
 
 // HeartbeatSnapshot returns the legacy singular-run heartbeat shape.

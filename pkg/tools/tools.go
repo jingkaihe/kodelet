@@ -6,6 +6,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/invopop/jsonschema"
@@ -74,6 +75,17 @@ var defaultMainTools = []string{
 	"web_fetch",
 	"view_image",
 	"skill",
+}
+
+// BuiltinToolNames returns the executable built-in tool names in name order.
+// Provider-native virtual tools are excluded.
+func BuiltinToolNames() []string {
+	names := make([]string, 0, len(toolRegistry))
+	for name := range toolRegistry {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // getAvailableToolNames returns a list of all available tool names

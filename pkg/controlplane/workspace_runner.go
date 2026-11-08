@@ -306,8 +306,8 @@ func (s *Server) missingEmbeddedModelProfile(runnerID, profile string) bool {
 func (s *Server) handleRunnerDiscovery(w http.ResponseWriter, r *http.Request, method string) {
 	var options *llmtypes.ExecutionOptions
 	if values, present := r.URL.Query()["options"]; present {
-		if method != protocol.MethodWorkspaceDiscover {
-			s.writeErrorResponse(w, http.StatusBadRequest, "options are only supported for command discovery", nil)
+		if method != protocol.MethodWorkspaceDiscover && method != protocol.MethodWorkspaceInventory {
+			s.writeErrorResponse(w, http.StatusBadRequest, "options are only supported for command and tool discovery", nil)
 			return
 		}
 		if len(values) != 1 || len(values[0]) > 16*1024 {
@@ -363,7 +363,8 @@ func (s *Server) handleRunnerDiscovery(w http.ResponseWriter, r *http.Request, m
 	defer cancel()
 	var result any
 	var err error
-	if method == protocol.MethodWorkspaceDiscover {
+	switch method {
+	case protocol.MethodWorkspaceDiscover:
 		result, err = s.discoverWorkspace(ctx, target.Runner, protocol.WorkspaceDiscoverParams{
 			CWD: target.CWD, Profile: target.Profile, EnvironmentProfile: target.EnvironmentProfile, Options: options,
 		})
@@ -373,17 +374,26 @@ func (s *Server) handleRunnerDiscovery(w http.ResponseWriter, r *http.Request, m
 				return
 			}
 		}
-	} else {
+	case protocol.MethodWorkspaceInventory:
+		inventory := &protocol.WorkspaceInventoryResult{}
+		params := protocol.WorkspaceInventoryParams{CWD: target.CWD, Profile: target.Profile, EnvironmentProfile: target.EnvironmentProfile, Options: options}
+		err = s.runnerRegistry.CallRunner(ctx, target.Runner.ID, target.Runner.Generation, method, params, inventory)
+		result = inventory
+	default:
 		result = &protocol.WorkspaceCWDHintsResult{}
 		params := protocol.WorkspaceCWDHintsParams{CWD: target.CWD, Profile: target.Profile, EnvironmentProfile: target.EnvironmentProfile, Query: r.URL.Query().Get("q")}
 		err = s.runnerRegistry.CallRunner(ctx, target.Runner.ID, target.Runner.Generation, method, params, result)
 	}
 	if err != nil {
-		status := http.StatusBadGateway
 		if errors.Is(err, runnerregistry.ErrRunnerCapabilityUnsupported) {
-			status = http.StatusNotImplemented
+			message := "could not load the runner's available commands and tools"
+			if method == protocol.MethodWorkspaceInventory {
+				message = "listing tools requires a newer runner; upgrade and restart the selected runner"
+			}
+			s.writeErrorResponse(w, http.StatusNotImplemented, message, err)
+			return
 		}
-		s.writeErrorResponse(w, status, "could not load the runner's available commands and tools", err)
+		s.writeErrorResponse(w, http.StatusBadGateway, "could not load the runner's available commands and tools", err)
 		return
 	}
 	s.writeJSONResponse(w, result)

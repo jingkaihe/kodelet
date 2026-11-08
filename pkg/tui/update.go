@@ -733,6 +733,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyRunnerStatus(msg)
 		return m, nil
 
+	case toolInventoryMsg:
+		m.applyToolInventory(msg)
+		return m, nil
+
 	case tea.PasteMsg:
 		if m.infoDialogOpen() {
 			return m, nil

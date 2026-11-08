@@ -355,6 +355,7 @@ export interface Runner {
   workspaceBrowser?: boolean;
   workspaceDiscovery?: boolean;
   workspaceCwd?: boolean;
+  workspaceInventory?: boolean;
   activeRunId?: string;
   activeRunIds?: string[];
   generation: number;
@@ -418,6 +419,64 @@ export interface RunnerDiscoveryTarget {
   conversationId?: string;
   environmentProfile?: string;
   profile?: string;
+}
+
+/** Selects the runner workspace whose tools to list; conversations use their saved directory. */
+export interface ToolInventoryTarget extends RunnerDiscoveryTarget {
+  cwd?: string;
+}
+
+/** Where an inventory item was installed. */
+export type InventoryScope = 'repo' | 'global' | 'path' | 'session';
+
+export interface InventoryTool {
+  name: string;
+  description: string;
+  /** False when configuration or the active profile excludes the tool. */
+  enabled?: boolean;
+}
+
+export interface InventoryExtension {
+  id: string;
+  name: string;
+  version?: string;
+  scope: InventoryScope;
+  path: string;
+  status: 'ready' | 'failed';
+  error?: string;
+  tools: InventoryTool[];
+  commands?: string[];
+  shortcuts?: string[];
+  hooks?: string[];
+}
+
+export interface InventorySkill {
+  name: string;
+  description: string;
+  scope: InventoryScope;
+  path: string;
+  /** False when configuration excludes the skill. */
+  enabled?: boolean;
+}
+
+export interface InventoryPlugin {
+  name: string;
+  scope: InventoryScope;
+  path: string;
+  extensions: InventoryExtension[];
+  skills: InventorySkill[];
+}
+
+/** The built-in tools, plugins, extensions and skills a run in the workspace would load. */
+export interface ToolInventory {
+  cwd?: string;
+  environmentProfile?: string;
+  builtinTools: InventoryTool[];
+  plugins: InventoryPlugin[];
+  /** Extensions installed outside a plugin. */
+  extensions: InventoryExtension[];
+  /** Skills installed outside a plugin. */
+  skills: InventorySkill[];
 }
 
 export interface TranscriptionCapabilities {

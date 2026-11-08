@@ -57,6 +57,7 @@ const (
 	MethodWorkspaceInspect           = "workspace.inspect"
 	MethodWorkspaceMessageHistory    = "workspace.messageHistory"
 	MethodWorkspaceCWDHints          = "workspace.cwdHints"
+	MethodWorkspaceInventory         = "workspace.inventory"
 	MethodWorkspaceTerminalOpen      = "workspace.terminal.open"
 	MethodWorkspaceTerminalClose     = "workspace.terminal.close"
 	MethodWorkspaceTerminalRead      = "workspace.terminal.read"
@@ -232,6 +233,7 @@ type RunnerCapabilities struct {
 	WorkspaceInspection     bool `json:"workspaceInspection,omitempty"`
 	WorkspaceMessageHistory bool `json:"workspaceMessageHistory,omitempty"`
 	WorkspaceCWD            bool `json:"workspaceCwd,omitempty"`
+	WorkspaceInventory      bool `json:"workspaceInventory,omitempty"`
 }
 
 // RegisterParams is the first request sent by a runner connection.

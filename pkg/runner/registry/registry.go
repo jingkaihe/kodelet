@@ -123,6 +123,7 @@ type Runner struct {
 	WorkspaceInspection     bool               `json:"workspaceInspection"`
 	WorkspaceMessageHistory bool               `json:"workspaceMessageHistory"`
 	WorkspaceCWD            bool               `json:"workspaceCwd"`
+	WorkspaceInventory      bool               `json:"workspaceInventory"`
 	RunCheckpoint           bool               `json:"runCheckpoint"`
 	SessionExtensions       bool               `json:"sessionExtensions"`
 	Reload                  bool               `json:"reload"`
@@ -643,6 +644,7 @@ func (r *Registry) register(params protocol.RegisterParams, link Link, principal
 	entry.WorkspaceInspection = params.Capabilities.WorkspaceInspection
 	entry.WorkspaceMessageHistory = params.Capabilities.WorkspaceMessageHistory
 	entry.WorkspaceCWD = params.Capabilities.WorkspaceCWD
+	entry.WorkspaceInventory = params.Capabilities.WorkspaceInventory
 	entry.RunCheckpoint = params.Capabilities.RunCheckpoint
 	entry.SessionExtensions = params.Capabilities.SessionExtensions
 	entry.Reload = params.Capabilities.Reload
@@ -781,6 +783,7 @@ func (r *Registry) recordIncompatibleLocked(params protocol.RegisterParams, iden
 	entry.WorkspaceInspection = params.Capabilities.WorkspaceInspection
 	entry.WorkspaceMessageHistory = params.Capabilities.WorkspaceMessageHistory
 	entry.WorkspaceCWD = params.Capabilities.WorkspaceCWD
+	entry.WorkspaceInventory = params.Capabilities.WorkspaceInventory
 	entry.RunCheckpoint = params.Capabilities.RunCheckpoint
 	entry.SessionExtensions = params.Capabilities.SessionExtensions
 	entry.Reload = params.Capabilities.Reload
@@ -1501,6 +1504,8 @@ func runnerSupportsWorkspaceMethod(entry *runnerEntry, method string) bool {
 		return entry.WorkspaceMessageHistory
 	case protocol.MethodWorkspaceDiscover, protocol.MethodWorkspaceCWDHints:
 		return entry.WorkspaceDiscovery
+	case protocol.MethodWorkspaceInventory:
+		return entry.WorkspaceInventory
 	case protocol.MethodWorkspaceGitDiff:
 		return entry.WorkspaceGitDiff
 	case protocol.MethodWorkspaceGitPrepare, protocol.MethodWorkspaceGitCommit:

@@ -31,6 +31,8 @@ import type {
   SlashCommandsResponse,
   SteerConversationResponse,
   StopConversationResponse,
+  ToolInventory,
+  ToolInventoryTarget,
   TranscriptionCapabilities,
   TranscriptionResult,
   UIInputResponseResult,
@@ -342,6 +344,17 @@ class ApiService {
     return this.request<SlashCommandsResponse>(
       `/api/chat/slash-commands${suffix ? `?${suffix}` : ''}`
     );
+  }
+
+  async getToolInventory(target: ToolInventoryTarget): Promise<ToolInventory> {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(target)) {
+      if (key === 'profile' && (!value?.trim() || target.conversationId)) continue;
+      if (key === 'cwd' && (!value || target.conversationId)) continue;
+      if (value !== undefined) params.append(key, value);
+    }
+    const suffix = params.toString();
+    return this.request<ToolInventory>(`/api/chat/tool-inventory${suffix ? `?${suffix}` : ''}`);
   }
 
   async getCWDHints(query: string, target?: RunnerDiscoveryTarget): Promise<CWDHintsResponse> {

@@ -2,6 +2,8 @@ package extensions
 
 import (
 	"context"
+
+	"github.com/pkg/errors"
 )
 
 const (
@@ -49,6 +51,20 @@ type BackgroundTaskHost interface {
 	ReleaseBackgroundTask(ctx context.Context, source UIExtensionSource, request BackgroundTaskReleaseRequest) (BackgroundTaskReleaseResponse, error)
 	CleanupBackgroundTasks(owner UIExtensionOwner)
 }
+
+// refusedBackgroundTasks lets extensions register background tools without
+// letting them start background work.
+type refusedBackgroundTasks struct{}
+
+func (refusedBackgroundTasks) AcquireBackgroundTask(context.Context, UIExtensionSource, BackgroundTaskAcquireRequest) (BackgroundTaskAcquireResponse, error) {
+	return BackgroundTaskAcquireResponse{}, errors.New("background tasks are not available while listing tools")
+}
+
+func (refusedBackgroundTasks) ReleaseBackgroundTask(context.Context, UIExtensionSource, BackgroundTaskReleaseRequest) (BackgroundTaskReleaseResponse, error) {
+	return BackgroundTaskReleaseResponse{}, nil
+}
+
+func (refusedBackgroundTasks) CleanupBackgroundTasks(UIExtensionOwner) {}
 
 type backgroundTaskHostContextKey struct{}
 

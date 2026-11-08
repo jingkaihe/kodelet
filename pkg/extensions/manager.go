@@ -116,6 +116,17 @@ func (m *RuntimeManager) RuntimeForCommandDiscoveryWithIsolatedLease(ctx context
 	return m.isolatedRuntime(ctx, ctx, cwd, config, false, ExtensionCallContext{})
 }
 
+// RuntimeForToolListingWithIsolatedLease starts an isolated runtime that tells
+// extensions background tasks are supported, so they register background-only
+// tools, while refusing every lease so listing tools never starts background work.
+func (m *RuntimeManager) RuntimeForToolListingWithIsolatedLease(ctx context.Context, cwd, _ string, config Config) (*Runtime, func() error, error) {
+	capabilities := RuntimeCapabilitiesFromContext(ctx)
+	capabilities.BackgroundTasks = true
+	ctx = ContextWithRuntimeCapabilities(ctx, capabilities)
+	ctx = ContextWithBackgroundTaskHost(ctx, refusedBackgroundTasks{})
+	return m.isolatedRuntime(ctx, ctx, cwd, config, false, ExtensionCallContext{})
+}
+
 func (m *RuntimeManager) isolatedRuntime(ctx, leaseCtx context.Context, cwd string, config Config, startLifecycle bool, callContext ExtensionCallContext, attachments ...Attachment) (result *Runtime, releaseResult func() error, resultErr error) {
 	defer func() {
 		if resultErr != nil {

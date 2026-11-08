@@ -765,7 +765,7 @@ func startRPCTrace(ctx context.Context, method string, kind trace.SpanKind) (con
 		MethodRunOpen, MethodRunCheckpoint, MethodRunClose, MethodRunCancel, MethodRunEnvironmentError,
 		MethodCommandExecute, MethodShortcutExecute, MethodLifecycleDispatch, MethodToolExecute, MethodToolUpdate,
 		MethodConversationFork, MethodWorkspaceGitDiff, MethodWorkspaceGitPrepare, MethodWorkspaceGitCommit,
-		MethodWorkspaceDiscover, MethodWorkspaceInspect, MethodWorkspaceMessageHistory, MethodWorkspaceCWDHints,
+		MethodWorkspaceDiscover, MethodWorkspaceInspect, MethodWorkspaceMessageHistory, MethodWorkspaceCWDHints, MethodWorkspaceInventory,
 		MethodWorkspaceTerminalOpen, MethodWorkspaceTerminalClose, MethodWorkspaceTerminalRead, MethodWorkspaceTerminalInput, MethodWorkspaceTerminalResize,
 		MethodWorkspaceBrowserOpen, MethodWorkspaceBrowserConnect, MethodWorkspaceBrowserStop, MethodWorkspaceBrowserAsset,
 		MethodUIInput, MethodUIConfirm, MethodUISelect, MethodUINotify, MethodUIWidgetSet, MethodUIWidgetFrame,

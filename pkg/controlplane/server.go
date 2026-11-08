@@ -454,6 +454,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/chat/slash-commands", s.handleGetSlashCommands).Methods("GET")
 	api.HandleFunc("/chat/shortcuts", s.requireRole(RoleUser, s.handleWorkspaceShortcut)).Methods("POST")
 	api.HandleFunc("/chat/cwd-suggestions", s.handleGetCWDHints).Methods("GET")
+	api.HandleFunc("/chat/tool-inventory", s.requireRole(RoleUser, s.handleGetToolInventory)).Methods("GET")
 	api.HandleFunc("/git/diff", s.handleGetGitDiff).Methods("GET")
 	api.HandleFunc("/git/commit", s.requireRole(RoleUser, s.handleWorkspaceCommit)).Methods("GET", "POST")
 	api.HandleFunc("/workspace/draft", s.requireRole(RoleTerminal, s.handleDiscardDraftWorkspace)).Methods("DELETE")
@@ -1609,6 +1610,12 @@ func (s *Server) handleGetSlashCommands(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleGetCWDHints(w http.ResponseWriter, r *http.Request) {
 	s.handleRunnerDiscovery(w, r, protocol.MethodWorkspaceCWDHints)
+}
+
+// handleGetToolInventory lists the built-in tools, plugins, extensions and
+// skills a run would load for the selected runner, conversation or workspace.
+func (s *Server) handleGetToolInventory(w http.ResponseWriter, r *http.Request) {
+	s.handleRunnerDiscovery(w, r, protocol.MethodWorkspaceInventory)
 }
 
 // handleGetConversation handles GET /api/conversations/{id}

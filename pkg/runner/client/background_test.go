@@ -737,6 +737,30 @@ func TestBackgroundDiscoveryDoesNotRetainWorkers(t *testing.T) {
 	_, err = os.Stat(filepath.Join(workspace, "runner-manifest-probe.json"))
 	assert.ErrorIs(t, err, os.ErrNotExist, "discovery must not dispatch session.start")
 	assert.Empty(t, service.backgroundLeases)
+	for _, tool := range manifest.Tools {
+		assert.NotEqual(t, "background_only", tool.Name, "discovery does not advertise background tasks")
+	}
+}
+
+func TestBackgroundInventoryListsBackgroundToolsWithoutLeases(t *testing.T) {
+	service, workspace := newBackgroundTestService(t, "probe")
+	result := callService[protocol.WorkspaceInventoryResult](t, service, protocol.MethodWorkspaceInventory, protocol.WorkspaceInventoryParams{CWD: workspace})
+	require.Len(t, result.Extensions, 1)
+	var names []string
+	for _, tool := range result.Extensions[0].Tools {
+		names = append(names, tool.Name)
+	}
+	assert.Equal(t, []string{"background_only", "lifetime"}, names, "background-only tools are part of what a run loads")
+	data, err := os.ReadFile(filepath.Join(workspace, "probe.json"))
+	require.NoError(t, err)
+	var state backgroundHelperState
+	require.NoError(t, json.Unmarshal(data, &state))
+	assert.Contains(t, state.Error, "not available while listing tools")
+	assert.Empty(t, state.LeaseID)
+	assertBackgroundProcessStopped(t, state.PID)
+	_, err = os.Stat(filepath.Join(workspace, "runner-manifest-probe.json"))
+	assert.ErrorIs(t, err, os.ErrNotExist, "listing tools must not dispatch session.start")
+	assert.Empty(t, service.backgroundLeases)
 }
 
 func TestBackgroundShutdownBoundsSessionEnd(t *testing.T) {
@@ -897,6 +921,11 @@ func runBackgroundExtensionHelper() {
 					DataDir string         `json:"dataDir"`
 					Config  map[string]any `json:"config"`
 				} `json:"extension"`
+				Capabilities struct {
+					Runtime struct {
+						BackgroundTasks bool `json:"backgroundTasks"`
+					} `json:"runtime"`
+				} `json:"capabilities"`
 			}
 			_ = json.Unmarshal(request.Params, &params)
 			cwd, state.DataDir = params.Extension.CWD, params.Extension.DataDir
@@ -941,10 +970,14 @@ func runBackgroundExtensionHelper() {
 					extensions.Subscription{Event: extensions.EventAgentFinished, TimeoutInSec: &finishedTimeout},
 				)
 			}
+			tools := []extensions.ToolRegistration{{Name: toolName, Description: "Inspect and release extension lifetime", InputSchema: schema}}
+			if mode == "probe" && params.Capabilities.Runtime.BackgroundTasks {
+				tools = append(tools, extensions.ToolRegistration{Name: "background_only", Description: "Needs background tasks", InputSchema: schema})
+			}
 			result = extensions.InitializeResult{
 				Name: "lifetime", Version: "1",
 				Profiles:      profiles,
-				Tools:         []extensions.ToolRegistration{{Name: toolName, Description: "Inspect and release extension lifetime", InputSchema: schema}},
+				Tools:         tools,
 				Subscriptions: subscriptions,
 			}
 		case "extension.event.handle":

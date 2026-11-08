@@ -359,6 +359,7 @@ func (r *Runner) runConnection(ctx context.Context) (bool, error) {
 			WorkspaceInspection:     true,
 			WorkspaceMessageHistory: true,
 			WorkspaceCWD:            true,
+			WorkspaceInventory:      true,
 			RunCheckpoint:           true,
 		},
 		DisplayName: r.config.DisplayName,

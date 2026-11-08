@@ -1,14 +1,16 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ContextBreakdown, Runner, ServerStatus } from '../../types';
+import type { ContextBreakdown, Runner, ServerStatus, ToolInventory } from '../../types';
 import AboutKodeletDialog from './AboutKodeletDialog';
 
 const mockGetServerStatus = vi.fn();
+const mockGetToolInventory = vi.fn();
 
 vi.mock('../../services/api', () => ({
   default: {
     getServerStatus: (...args: unknown[]) => mockGetServerStatus(...args),
+    getToolInventory: (...args: unknown[]) => mockGetToolInventory(...args),
   },
 }));
 
@@ -73,9 +75,122 @@ const expectCapability = (label: string, state: string) => {
   expect(definition).toHaveTextContent(state);
 };
 
+const toolInventory: ToolInventory = {
+  builtinTools: [{ name: 'bash', description: 'Run a bash command.', enabled: true }],
+  plugins: [
+    {
+      name: 'acme@kit',
+      scope: 'global',
+      path: '/home/user/.kodelet/plugins/acme@kit',
+      extensions: [],
+      skills: [
+        {
+          name: 'helper',
+          description: 'Help with kits.',
+          scope: 'global',
+          path: '/home/user/.kodelet/plugins/acme@kit/skills/helper',
+          enabled: true,
+        },
+      ],
+    },
+  ],
+  extensions: [],
+  skills: [],
+};
+
+const toolTarget = { runnerId: 'runner-1', cwd: '/workspace/kodelet' };
+
 describe('AboutKodeletDialog', () => {
   beforeEach(() => {
     mockGetServerStatus.mockReset().mockResolvedValue(serverStatus);
+    mockGetToolInventory.mockReset().mockResolvedValue(toolInventory);
+  });
+
+  describe('tools tab', () => {
+    it('is hidden without a workspace target', () => {
+      render(<AboutKodeletDialog onClose={vi.fn()} runner={makeRunner()} terminalAuthorized />);
+      expect(screen.queryByRole('tab', { name: 'Tools' })).not.toBeInTheDocument();
+    });
+
+    it('loads the tool list when first opened and keeps it across tab switches', async () => {
+      const user = userEvent.setup();
+      let resolveInventory: (value: ToolInventory) => void = () => {};
+      mockGetToolInventory.mockImplementationOnce(
+        () =>
+          new Promise<ToolInventory>((resolve) => {
+            resolveInventory = resolve;
+          })
+      );
+      render(
+        <AboutKodeletDialog
+          onClose={vi.fn()}
+          runner={makeRunner({ workspaceInventory: true })}
+          terminalAuthorized
+          toolInventoryTarget={toolTarget}
+        />
+      );
+      expect(mockGetToolInventory).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole('tab', { name: 'Tools' }));
+      expect(screen.getByText('Loading tools…')).toBeInTheDocument();
+      await act(async () => resolveInventory(toolInventory));
+      expect(await screen.findByRole('treeitem', { name: /^acme@kit/ })).toBeInTheDocument();
+      expect(mockGetToolInventory).toHaveBeenCalledExactlyOnceWith(toolTarget);
+      expect(screen.getByRole('tree').closest('.about-tools-panel')).toHaveTextContent(
+        '1 tool · 0 extensions · 1 skill'
+      );
+
+      await user.click(screen.getByRole('tab', { name: 'About' }));
+      await user.click(screen.getByRole('tab', { name: 'Tools' }));
+      expect(screen.getByRole('treeitem', { name: /^acme@kit/ })).toBeInTheDocument();
+      expect(mockGetToolInventory).toHaveBeenCalledOnce();
+    });
+
+    it('explains runners that cannot list tools without calling them', () => {
+      const { rerender } = render(
+        <AboutKodeletDialog
+          initialTab="tools"
+          onClose={vi.fn()}
+          runner={makeRunner()}
+          terminalAuthorized
+          toolInventoryTarget={toolTarget}
+        />
+      );
+      expect(screen.getByText(/does not list its tools/)).toBeInTheDocument();
+
+      rerender(
+        <AboutKodeletDialog
+          initialTab="tools"
+          onClose={vi.fn()}
+          runner={makeRunner({ workspaceInventory: true, connected: false, status: 'offline' })}
+          terminalAuthorized
+          toolInventoryTarget={toolTarget}
+        />
+      );
+      expect(screen.getByText(/This runner is not ready/)).toBeInTheDocument();
+      expect(mockGetToolInventory).not.toHaveBeenCalled();
+    });
+
+    it('reports load failures and retries', async () => {
+      const user = userEvent.setup();
+      mockGetToolInventory.mockRejectedValueOnce(new Error('the runner is offline'));
+      render(
+        <AboutKodeletDialog
+          initialTab="tools"
+          onClose={vi.fn()}
+          runner={makeRunner({ workspaceInventory: true })}
+          terminalAuthorized
+          toolInventoryTarget={toolTarget}
+        />
+      );
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'Could not load tools: the runner is offline'
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Try again' }));
+      expect(await screen.findByRole('treeitem', { name: /^acme@kit/ })).toBeInTheDocument();
+      expect(mockGetToolInventory).toHaveBeenCalledTimes(2);
+    });
   });
 
   it('loads the server version separately from the runner version and shows live capabilities', async () => {

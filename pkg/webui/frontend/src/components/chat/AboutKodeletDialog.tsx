@@ -2,15 +2,23 @@ import { Check, X } from 'lucide-react';
 import React from 'react';
 import { useDialogFocus } from '../../features/chat/useDialogFocus';
 import apiService from '../../services/api';
-import type { Runner, ServerStatus, Usage } from '../../types';
+import type { Runner, ServerStatus, ToolInventory, ToolInventoryTarget, Usage } from '../../types';
 import KodeletBrand from '../KodeletBrand';
 import Spinner from '../Spinner';
+import AboutToolsPanel from './AboutToolsPanel';
+
+type AboutTab = 'about' | 'context' | 'tools';
+
+const tabLabels: Record<AboutTab, string> = { about: 'About', context: 'Context', tools: 'Tools' };
 
 interface AboutKodeletDialogProps {
   onClose: () => void;
   runner?: Runner;
   terminalAuthorized: boolean;
   usage?: Usage;
+  /** The workspace whose tools the tools tab lists; the tab is hidden without one. */
+  toolInventoryTarget?: ToolInventoryTarget;
+  initialTab?: AboutTab;
 }
 
 const AboutKodeletDialog: React.FC<AboutKodeletDialogProps> = ({
@@ -18,8 +26,13 @@ const AboutKodeletDialog: React.FC<AboutKodeletDialogProps> = ({
   runner,
   terminalAuthorized,
   usage,
+  toolInventoryTarget,
+  initialTab = 'about',
 }) => {
-  const [tab, setTab] = React.useState<'about' | 'context'>('about');
+  const tabs: AboutTab[] = toolInventoryTarget
+    ? ['about', 'context', 'tools']
+    : ['about', 'context'];
+  const [tab, setTab] = React.useState<AboutTab>(tabs.includes(initialTab) ? initialTab : 'about');
   const [status, setStatus] = React.useState<ServerStatus | null>(null);
   const [error, setError] = React.useState(false);
   const [attempt, setAttempt] = React.useState(0);
@@ -47,6 +60,37 @@ const AboutKodeletDialog: React.FC<AboutKodeletDialogProps> = ({
   const runnerAvailable = Boolean(
     runner?.connected && (runner.status === 'idle' || runner.status === 'busy')
   );
+  const inventoryKey = toolInventoryTarget ? JSON.stringify(toolInventoryTarget) : '';
+  const inventoryAvailable = Boolean(runnerAvailable && runner?.workspaceInventory);
+  const [inventory, setInventory] = React.useState<{ key: string; data: ToolInventory } | null>(
+    null
+  );
+  const [inventoryError, setInventoryError] = React.useState<string | null>(null);
+  const [inventoryAttempt, setInventoryAttempt] = React.useState(0);
+  const inventoryLoaded = inventory?.key === inventoryKey;
+
+  // Listing tools starts the workspace's extensions, so load it only when the tab is opened.
+  // biome-ignore lint/correctness/useExhaustiveDependencies(inventoryAttempt): Retry reloads the list.
+  React.useEffect(() => {
+    if (tab !== 'tools' || !inventoryKey || !inventoryAvailable || inventoryLoaded) return;
+    let disposed = false;
+    setInventoryError(null);
+    // The key is the serialized target, so a new target object with the same fields is not a reload.
+    const target = JSON.parse(inventoryKey) as ToolInventoryTarget;
+    void apiService.getToolInventory(target).then(
+      (data) => {
+        if (!disposed) setInventory({ key: inventoryKey, data });
+      },
+      (reason: unknown) => {
+        if (!disposed) {
+          setInventoryError(reason instanceof Error ? reason.message : 'Unknown error');
+        }
+      }
+    );
+    return () => {
+      disposed = true;
+    };
+  }, [tab, inventoryKey, inventoryAvailable, inventoryLoaded, inventoryAttempt]);
   const capabilities = [
     { label: 'Git diffs', enabled: runner?.workspaceGitDiff },
     { label: 'Terminal', enabled: runner?.workspaceTerminal && terminalAuthorized },
@@ -81,7 +125,7 @@ const AboutKodeletDialog: React.FC<AboutKodeletDialogProps> = ({
         </header>
 
         <div aria-label="About Kodelet tabs" className="about-kodelet-tabs" role="tablist">
-          {(['about', 'context'] as const).map((view) => (
+          {tabs.map((view) => (
             <button
               aria-controls="about-kodelet-panel"
               aria-selected={tab === view}
@@ -89,17 +133,20 @@ const AboutKodeletDialog: React.FC<AboutKodeletDialogProps> = ({
               key={view}
               onClick={() => setTab(view)}
               onKeyDown={(event) => {
-                let next: typeof tab;
+                const index = tabs.indexOf(tab);
+                let next: AboutTab;
                 switch (event.key) {
                   case 'ArrowLeft':
+                    next = tabs[(index - 1 + tabs.length) % tabs.length];
+                    break;
                   case 'ArrowRight':
-                    next = tab === 'about' ? 'context' : 'about';
+                    next = tabs[(index + 1) % tabs.length];
                     break;
                   case 'Home':
-                    next = 'about';
+                    next = tabs[0];
                     break;
                   case 'End':
-                    next = 'context';
+                    next = tabs[tabs.length - 1];
                     break;
                   default:
                     return;
@@ -114,13 +161,14 @@ const AboutKodeletDialog: React.FC<AboutKodeletDialogProps> = ({
               tabIndex={tab === view ? 0 : -1}
               type="button"
             >
-              {view === 'about' ? 'About' : 'Context'}
+              {tabLabels[view]}
             </button>
           ))}
         </div>
         <div
           aria-labelledby={`about-kodelet-tab-${tab}`}
           className="about-kodelet-content"
+          data-tab={tab}
           id="about-kodelet-panel"
           key={tab}
           role="tabpanel"
@@ -129,6 +177,38 @@ const AboutKodeletDialog: React.FC<AboutKodeletDialogProps> = ({
         >
           {tab === 'context' ? (
             <ContextUsage usage={usage} />
+          ) : tab === 'tools' ? (
+            !runner ? (
+              <p className="about-kodelet-description">Select a workspace to see its tools.</p>
+            ) : !runnerAvailable ? (
+              <p className="about-kodelet-description">
+                This runner is not ready. Its tools are unavailable until it reconnects.
+              </p>
+            ) : !runner.workspaceInventory ? (
+              <p className="about-kodelet-description">
+                This runner does not list its tools. Upgrade and restart it to see them here.
+              </p>
+            ) : inventoryLoaded && inventory ? (
+              <AboutToolsPanel inventory={inventory.data} key={inventoryKey} />
+            ) : inventoryError ? (
+              <div className="about-kodelet-error">
+                <p role="alert">Could not load tools: {inventoryError}</p>
+                <button
+                  className="panel-action-button"
+                  onClick={() => {
+                    setInventoryError(null);
+                    setInventoryAttempt((current) => current + 1);
+                  }}
+                  type="button"
+                >
+                  Try again
+                </button>
+              </div>
+            ) : (
+              <output className="about-kodelet-loading about-tools-status">
+                <Spinner /> Loading tools…
+              </output>
+            )
           ) : (
             <>
               <section aria-label="Instance details">

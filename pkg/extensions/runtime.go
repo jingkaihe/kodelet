@@ -5,6 +5,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -44,6 +45,27 @@ type Runtime struct {
 	lifecycleCallCtx    ExtensionCallContext
 	sessionExtensions   bool
 	initializationError error
+	statuses            []ExtensionStatus
+}
+
+// ExtensionTool is a tool an extension registered. Enabled is false when
+// extension configuration turned the tool off.
+type ExtensionTool struct {
+	Name        string
+	Description string
+	Enabled     bool
+}
+
+// ExtensionStatus describes one discovered extension and what it registered.
+// Err is set when the extension failed to start or initialize.
+type ExtensionStatus struct {
+	Extension Extension
+	Version   string
+	Tools     []ExtensionTool
+	Commands  []string
+	Shortcuts []string
+	Hooks     []string
+	Err       error
 }
 
 // Command is an extension command registration bound to its process.
@@ -134,6 +156,7 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 		process *Process
 		result  *InitializeResult
 		err     error
+		cause   error
 	}, len(extensions))
 	var group errgroup.Group
 	group.SetLimit(maxConcurrentExtensionInitializations)
@@ -149,6 +172,7 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 				}
 				logger.G(ctx).WithError(err).WithField("extension", ext.ID).Warn("failed to start extension; disabling for this process")
 				initialized[i].err = errors.Wrapf(err, "failed to start extension %s", ext.ID)
+				initialized[i].cause = err
 				return nil
 			}
 			initCtx, cancel := context.WithTimeout(ctx, extensionInitializeTimeout)
@@ -161,6 +185,11 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 				}
 				logger.G(ctx).WithError(err).WithField("extension", ext.ID).Warn("failed to initialize extension; disabling for this process")
 				initialized[i].err = errors.Wrapf(err, "failed to initialize extension %s", ext.ID)
+				// The extension's own stderr usually explains a failed handshake.
+				if output := proc.recentStderr(); output != "" {
+					err = errors.Wrap(err, output)
+				}
+				initialized[i].cause = err
 				return nil
 			}
 			initialized[i].process = proc
@@ -181,9 +210,13 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 		return err
 	}
 	// Completion order must not change shortcut precedence or event ordering.
-	for _, init := range initialized {
+	for i, init := range initialized {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if init.cause != nil {
+			r.statuses = append(r.statuses, ExtensionStatus{Extension: extensions[i], Err: init.cause})
+			continue
 		}
 		if init.process != nil {
 			if err := r.register(ctx, init.process, init.result); err != nil {
@@ -320,8 +353,10 @@ func (r *Runtime) register(ctx context.Context, proc *Process, result *Initializ
 		}
 		profiles[profile.Name] = profile
 	}
+	status := ExtensionStatus{Extension: proc.Extension, Version: result.Version}
 	for _, registration := range result.Tools {
 		if !r.toolEnabled(registration.Name) {
+			status.Tools = append(status.Tools, ExtensionTool{Name: registration.Name, Description: registration.Description})
 			continue
 		}
 		if _, exists := r.tools[registration.Name]; exists {
@@ -332,6 +367,7 @@ func (r *Runtime) register(ctx context.Context, proc *Process, result *Initializ
 			return errors.Wrapf(err, "failed to register extension tool %s", registration.Name)
 		}
 		r.tools[registration.Name] = tool
+		status.Tools = append(status.Tools, ExtensionTool{Name: registration.Name, Description: registration.Description, Enabled: true})
 	}
 	for _, command := range result.Commands {
 		if err := validateCommandRegistration(command); err != nil {
@@ -355,6 +391,7 @@ func (r *Runtime) register(ctx context.Context, proc *Process, result *Initializ
 			}
 		}
 		r.commands = append(r.commands, Command{ExtensionID: proc.Extension.ID, Process: proc, Registration: command})
+		status.Commands = append(status.Commands, primaryName)
 	}
 	for _, registration := range result.Shortcuts {
 		key, err := NormalizeShortcutKey(registration.Key)
@@ -384,8 +421,12 @@ func (r *Runtime) register(ctx context.Context, proc *Process, result *Initializ
 			},
 			process: proc,
 		}
+		status.Shortcuts = append(status.Shortcuts, key)
 	}
 	for _, subscription := range result.Subscriptions {
+		if !slices.Contains(status.Hooks, subscription.Event) {
+			status.Hooks = append(status.Hooks, subscription.Event)
+		}
 		r.subs = append(r.subs, subscription)
 		r.eventHandlersByName[subscription.Event] = append(r.eventHandlersByName[subscription.Event], eventHandler{
 			process: proc,
@@ -396,7 +437,27 @@ func (r *Runtime) register(ctx context.Context, proc *Process, result *Initializ
 	for name, profile := range profiles {
 		r.profiles[name] = profile
 	}
+	r.statuses = append(r.statuses, status)
 	return nil
+}
+
+// ExtensionStatuses returns every discovered extension in discovery order,
+// including extensions that failed to start or initialize.
+func (r *Runtime) ExtensionStatuses() []ExtensionStatus {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	statuses := make([]ExtensionStatus, len(r.statuses))
+	for i, status := range r.statuses {
+		status.Tools = slices.Clone(status.Tools)
+		status.Commands = slices.Clone(status.Commands)
+		status.Shortcuts = slices.Clone(status.Shortcuts)
+		status.Hooks = slices.Clone(status.Hooks)
+		statuses[i] = status
+	}
+	return statuses
 }
 
 func (r *Runtime) reportShortcutDiagnostic(ctx context.Context, extensionID, message string) {

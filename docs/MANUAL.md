@@ -211,7 +211,7 @@ Extension shortcuts use the selected runner. During a turn, only the client hand
 
 Use `/sessions` or `Ctrl+L` to search and switch conversations, or `/new [PATH]` to start one. Drafts and scroll positions are preserved. Different conversations can run in parallel, and the picker highlights those waiting for extension input.
 
-Use `/about` to show the TUI's version, build commit, and build date alongside the connected server's address, version, and build details.
+Use `/about` to show the TUI's version, build commit, and build date alongside the connected server's address, version, and build details; its **Tools** tab lists the built-in tools, plugins, extensions, and skills the workspace loads.
 
 #### Reloading extensions
 

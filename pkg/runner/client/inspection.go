@@ -11,8 +11,17 @@ import (
 	"github.com/pkg/errors"
 )
 
-func (s *Service) inspectionRuntime(ctx context.Context, cwd, environmentProfile string, config llmtypes.Config, extensionConfig extensions.Config) (*extensions.Runtime, func() error, error) {
+// isolatedRuntimeListingProvider starts runtimes that list background-only tools
+// without granting background work.
+type isolatedRuntimeListingProvider interface {
+	RuntimeForToolListingWithIsolatedLease(ctx context.Context, cwd, variant string, config extensions.Config) (*extensions.Runtime, func() error, error)
+}
+
+func (s *Service) inspectionRuntime(ctx context.Context, cwd, environmentProfile string, config llmtypes.Config, extensionConfig extensions.Config, listBackgroundTools bool) (*extensions.Runtime, func() error, error) {
 	variant := normalizeEnvironmentProfile(environmentProfile)
+	if provider, ok := s.runtimeProvider.(isolatedRuntimeListingProvider); ok && listBackgroundTools {
+		return provider.RuntimeForToolListingWithIsolatedLease(ctx, cwd, variant, extensionConfig)
+	}
 	if provider, ok := s.runtimeProvider.(isolatedRuntimeDiscoveryProvider); ok {
 		return provider.RuntimeForCommandDiscoveryWithIsolatedLease(ctx, cwd, variant, extensionConfig)
 	}
@@ -112,7 +121,7 @@ func (s *Service) inspectWorkspace(ctx context.Context, params protocol.Workspac
 	probeCtx = extensions.ContextWithRuntimeCapabilities(probeCtx, capabilities)
 	probeCtx, cancel := context.WithCancel(probeCtx)
 	defer cancel()
-	runtime, release, err := s.inspectionRuntime(probeCtx, cwd, params.EnvironmentProfile, config, extensionConfig)
+	runtime, release, err := s.inspectionRuntime(probeCtx, cwd, params.EnvironmentProfile, config, extensionConfig, false)
 	if release != nil {
 		defer func() {
 			inspectErr = combineCleanupErrors(inspectErr, runBoundedCleanup(context.WithoutCancel(probeCtx), s.cleanupTimeout, "recipe discovery", func(context.Context) error { return release() }))

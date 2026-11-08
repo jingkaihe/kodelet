@@ -478,17 +478,17 @@ func TestAboutDialogTabNavigationResetsScroll(t *testing.T) {
 		keyPress(tea.KeyRight),
 		keyPress(tea.KeyLeft),
 	} {
-		wasContext := m.aboutDialog.contextTab
+		wasContext := m.aboutDialog.tab == aboutTabContext
 		m.updateAboutDialogKey("end")
 		require.Positive(t, m.aboutDialog.scrollOffset)
 		updated, cmd := m.Update(key)
 		*m = updated.(model)
 		assert.Nil(t, cmd)
-		assert.Equal(t, !wasContext, m.aboutDialog.contextTab)
+		assert.Equal(t, !wasContext, m.aboutDialog.tab == aboutTabContext)
 		assert.Zero(t, m.aboutDialog.scrollOffset)
 		view := xansi.Strip(m.renderAboutDialog())
 		assert.Contains(t, view, "Tab/←/→")
-		if m.aboutDialog.contextTab {
+		if m.aboutDialog.tab == aboutTabContext {
 			assert.Contains(t, view, "[Context]")
 			assert.Contains(t, view, "Context window")
 		} else {
@@ -499,7 +499,7 @@ func TestAboutDialogTabNavigationResetsScroll(t *testing.T) {
 	m.updateAboutDialogKey("tab")
 	m.dismissInfoDialogs()
 	m.openAboutDialog()
-	assert.False(t, m.aboutDialog.contextTab, "reopening starts on About")
+	assert.Equal(t, aboutTabAbout, m.aboutDialog.tab, "reopening starts on About")
 }
 
 func TestAboutDialogRetryPreservesContextTab(t *testing.T) {
@@ -514,11 +514,11 @@ func TestAboutDialogRetryPreservesContextTab(t *testing.T) {
 	runner.status = chat.ServerStatus{Version: "retried-version"}
 	cmd := m.updateAboutDialogKey("r")
 	require.NotNil(t, cmd)
-	assert.True(t, m.aboutDialog.contextTab)
+	assert.Equal(t, aboutTabContext, m.aboutDialog.tab)
 	assert.Zero(t, m.aboutDialog.scrollOffset)
 	m.applyServerStatus(serverStatusMsgFromCmd(t, cmd))
-	assert.True(t, m.aboutDialog.contextTab)
-	m.updateAboutDialogKey("tab")
+	assert.Equal(t, aboutTabContext, m.aboutDialog.tab)
+	m.updateAboutDialogKey("shift+tab")
 	lines, _ := m.aboutDialogContent()
 	assert.Contains(t, xansi.Strip(strings.Join(lines, "\n")), "retried-version")
 }
@@ -705,8 +705,11 @@ func TestAboutContextStaysBoundedOnSmallTerminals(t *testing.T) {
 			t.Run(fmt.Sprintf("%dx%d", width, height), func(t *testing.T) {
 				m.width, m.height = width, height
 				m.resize()
-				for _, contextTab := range []bool{false, true} {
-					m.aboutDialog.contextTab = contextTab
+				for tab := aboutTabAbout; tab < aboutTabCount; tab++ {
+					m.aboutDialog.tab = tab
+					if tab == aboutTabTools {
+						m.aboutDialog.tools = loadedAboutToolsState(sampleToolInventory())
+					}
 					for _, key := range []string{"home", "end"} {
 						m.updateAboutDialogKey(key)
 						view := m.renderAboutDialog()

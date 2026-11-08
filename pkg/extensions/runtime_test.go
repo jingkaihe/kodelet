@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -88,6 +89,15 @@ func TestRuntimeExtensionCountUsesInitializedProcessesNotRegistrations(t *testin
 	assert.Len(t, runtime.Commands(), 2)
 	assert.NotEmpty(t, runtime.Subscriptions())
 	assert.Equal(t, 1, runtime.ExtensionCount())
+	statuses := runtime.ExtensionStatuses()
+	require.Len(t, statuses, 1)
+	assert.Equal(t, "weather", statuses[0].Extension.ID)
+	assert.NoError(t, statuses[0].Err)
+	require.Len(t, statuses[0].Tools, 1)
+	assert.Equal(t, "get_weather", statuses[0].Tools[0].Name)
+	assert.False(t, statuses[0].Tools[0].Enabled, "configuration turned the tool off")
+	assert.Len(t, statuses[0].Commands, 2)
+	assert.NotEmpty(t, statuses[0].Hooks)
 	require.NoError(t, runtime.Close())
 	assert.Zero(t, runtime.ExtensionCount())
 }
@@ -850,12 +860,47 @@ func TestRuntimeInitializationIsolatesUnavailableExtensions(t *testing.T) {
 			assert.Contains(t, runtime.tools, ids[0])
 			assert.Contains(t, runtime.tools, ids[2])
 			assert.NotContains(t, runtime.tools, ids[1])
+			statuses := runtime.ExtensionStatuses()
+			require.Len(t, statuses, 3, "failed extensions keep their place in discovery order")
+			for i, status := range statuses {
+				assert.Equal(t, ids[i], status.Extension.ID)
+			}
+			assert.NoError(t, statuses[0].Err)
+			assert.Error(t, statuses[1].Err)
+			assert.NotContains(t, statuses[1].Err.Error(), "failed to "+failure+" extension "+ids[1], "the cause omits the redundant extension prefix")
+			assert.Empty(t, statuses[1].Tools)
+			assert.Equal(t, []ExtensionTool{{Name: ids[2], Description: statuses[2].Tools[0].Description, Enabled: true}}, statuses[2].Tools)
 			if failure == "initialize" {
 				pid := waitForExtensionInitialization(t, rootDir, ids[1])
 				assert.Eventually(t, func() bool { return syscall.Kill(pid, 0) == syscall.ESRCH }, 5*time.Second, 5*time.Millisecond)
 			}
 		})
 	}
+}
+
+func TestRuntimeStatusExplainsFailuresWithRecentStderr(t *testing.T) {
+	rootDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	writeExecutable(t, filepath.Join(rootDir, "broken", "kodelet-extension-broken"), "#!/bin/sh\necho 'loading plugin' >&2\necho 'boom: missing dependency' >&2\nexit 1\n")
+	runtime, err := NewRuntime(t.Context(), WithConfig(DefaultConfig()), WithWorkingDir(rootDir), WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone}))
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, runtime.Close()) })
+
+	statuses := runtime.ExtensionStatuses()
+	require.Len(t, statuses, 1)
+	require.Error(t, statuses[0].Err)
+	assert.Contains(t, statuses[0].Err.Error(), "loading plugin; boom: missing dependency: ", "stderr leads the handshake error")
+	assert.ErrorContains(t, runtime.InitializationError(), "failed to initialize extension broken")
+}
+
+func TestExtensionStderrKeepsRecentPlainLines(t *testing.T) {
+	writer := newExtensionStderrWriter(t.Context(), "example", io.Discard)
+	_, err := writer.Write([]byte("one\n{\"level\":\"warn\"}\ntwo\nthree\nfour\npartial"))
+	require.NoError(t, err)
+	assert.Equal(t, "two; three; four", writer.recentOutput(), "structured diagnostics and partial lines are skipped")
+	_, err = writer.Write([]byte("\n" + strings.Repeat("x", 400) + "\n"))
+	require.NoError(t, err)
+	assert.Equal(t, "four; partial; "+strings.Repeat("x", maxRecentStderrLineBytes)+"…", writer.recentOutput(), "long lines are bounded")
 }
 
 func gatedRuntimeExtensions(t *testing.T, count int) (string, []string) {

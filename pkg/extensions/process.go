@@ -46,6 +46,16 @@ type Process struct {
 	failures     int
 	uiHost       ExtensionUIHost
 	uiSource     *processExtensionUISource
+	stderr       *extensionStderrWriter
+}
+
+// recentStderr returns the extension's last plain stderr lines. Read it after
+// Close, which waits for the process and its stderr copy to finish.
+func (p *Process) recentStderr() string {
+	if p == nil {
+		return ""
+	}
+	return p.stderr.recentOutput()
 }
 
 // RuntimeCapabilities describes host capabilities available to an extension process.
@@ -155,7 +165,8 @@ func (p *Process) start() error {
 	cmd.Env = extensionProcessEnv(p.workspaceCWD)
 	// Keep extension diagnostics on the host's configured log sink so a
 	// full-screen UI can redirect them without replacing the process stderr.
-	cmd.Stderr = newExtensionStderrWriter(runtimeCtx, p.Extension.ID, logger.G(runtimeCtx).Logger.Out)
+	p.stderr = newExtensionStderrWriter(runtimeCtx, p.Extension.ID, logger.G(runtimeCtx).Logger.Out)
+	cmd.Stderr = p.stderr
 	osutil.SetProcessGroup(cmd)
 	cmd.WaitDelay = extensionProcessWaitDelay
 

@@ -9,7 +9,12 @@ import (
 	"sync"
 )
 
-const maxExtensionDiagnosticBuffer = 64 * 1024
+const (
+	maxExtensionDiagnosticBuffer = 64 * 1024
+	// Startup failures report the last few plain stderr lines, each bounded.
+	maxRecentStderrLines     = 3
+	maxRecentStderrLineBytes = 300
+)
 
 // extensionStderrWriter deliberately hides an underlying *os.File from
 // os/exec. This makes os/exec give the child a pipe while still forwarding
@@ -23,6 +28,7 @@ type extensionStderrWriter struct {
 
 	mu      sync.Mutex
 	pending []byte
+	recent  []string
 }
 
 func newExtensionStderrWriter(ctx context.Context, extensionID string, output io.Writer) *extensionStderrWriter {
@@ -63,6 +69,20 @@ func (w *extensionStderrWriter) captureDiagnostics(payload []byte) {
 	if len(w.pending) > maxExtensionDiagnosticBuffer {
 		w.pending = nil
 	}
+	for _, line := range lines {
+		// Structured diagnostics are reported separately; keep plain output.
+		if bytes.HasPrefix(line, []byte("{")) {
+			continue
+		}
+		text := string(line)
+		if len(text) > maxRecentStderrLineBytes {
+			text = strings.ToValidUTF8(text[:maxRecentStderrLineBytes], "") + "…"
+		}
+		w.recent = append(w.recent, text)
+		if len(w.recent) > maxRecentStderrLines {
+			w.recent = w.recent[len(w.recent)-maxRecentStderrLines:]
+		}
+	}
 	w.mu.Unlock()
 
 	sink, ok := DiagnosticSinkFromContext(w.ctx)
@@ -74,6 +94,16 @@ func (w *extensionStderrWriter) captureDiagnostics(payload []byte) {
 			sink.ReportDiagnostic(w.ctx, diagnostic)
 		}
 	}
+}
+
+// recentOutput returns the last plain stderr lines, oldest first.
+func (w *extensionStderrWriter) recentOutput() string {
+	if w == nil {
+		return ""
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return strings.Join(w.recent, "; ")
 }
 
 func parseExtensionDiagnostic(line []byte, fallbackExtensionID string) (Diagnostic, bool) {

@@ -1558,6 +1558,307 @@
   }
 }
 
+/* Keep the dialog height stable while the tree is filtered or folded. */
+.about-kodelet-dialog:has([data-tab="tools"]) {
+  height: min(46rem, calc(100% - 2rem));
+}
+
+.about-kodelet-dialog:has([data-tab="tools"]) .about-kodelet-content {
+  flex: 1 1 auto;
+}
+
+.about-kodelet-loading.about-tools-status {
+  justify-content: flex-start;
+}
+
+.about-tools-panel {
+  container-type: inline-size;
+}
+
+.about-tools-total {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.about-tools-total span {
+  color: var(--kodelet-muted);
+}
+
+.about-tools-alert {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.65rem 0 0;
+  color: var(--kodelet-error);
+  font-size: 0.72rem;
+}
+
+.about-tools-toolbar {
+  position: sticky;
+  top: -1.25rem;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem -1.25rem 0;
+  padding: 0.75rem 1.25rem 0.5rem;
+  background: var(--sidebar-surface-opaque);
+}
+
+.about-tools-filter {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  color: var(--kodelet-muted);
+}
+
+.about-tools-filter svg {
+  position: absolute;
+  left: 0.6rem;
+  pointer-events: none;
+}
+
+.about-tools-filter input {
+  width: 100%;
+  min-height: 2.25rem;
+  border: 1px solid color-mix(in srgb, var(--kodelet-muted) 30%, transparent);
+  border-radius: 2px;
+  padding: 0.4rem 0.6rem 0.4rem 1.9rem;
+  background: transparent;
+  color: var(--sidebar-surface-ink);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.about-tools-filter input::placeholder {
+  color: var(--kodelet-muted);
+}
+
+.about-tools-filter input:focus-visible,
+.about-tools-row:focus-visible {
+  outline: 2px solid var(--kodelet-link);
+  outline-offset: -2px;
+}
+
+.about-tools-expand {
+  display: inline-flex;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--kodelet-muted) 30%, transparent);
+  border-radius: 2px;
+  color: var(--kodelet-muted);
+  cursor: pointer;
+}
+
+.about-tools-expand:hover {
+  border-color: var(--kodelet-link);
+  color: var(--kodelet-link);
+}
+
+.about-tools-tree {
+  margin: 0.25rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Indentation lives inside the row so hover and selection shade one full-width block. */
+.about-tools-row {
+  --tree-indent: calc((var(--tree-level) - 1) * 1.1rem);
+  border-radius: 2px;
+  cursor: default;
+}
+
+.about-tools-row:is(.is-section, .is-plugin, .is-extension) {
+  cursor: pointer;
+}
+
+.about-tools-row.is-section:not(:first-child) {
+  margin-top: 0.6rem;
+}
+
+.about-tools-line {
+  display: flex;
+  min-width: 0;
+  min-height: 2rem;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0 0.4rem 0 calc(0.4rem + var(--tree-indent));
+}
+
+.about-tools-row:hover {
+  background: color-mix(in srgb, var(--kodelet-muted) 7%, transparent);
+}
+
+.about-tools-row[aria-selected="true"] {
+  background: color-mix(in srgb, var(--kodelet-link) 8%, transparent);
+}
+
+.about-tools-chevron {
+  display: inline-flex;
+  width: 0.875rem;
+  flex: none;
+  color: var(--kodelet-muted);
+  transition: transform 120ms ease;
+}
+
+.about-tools-row[aria-expanded="true"] > .about-tools-line .about-tools-chevron {
+  transform: rotate(90deg);
+}
+
+.about-tools-icon {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex: none;
+}
+
+.is-plugin .about-tools-icon {
+  color: var(--kodelet-orange);
+}
+
+.is-extension .about-tools-icon {
+  color: var(--kodelet-blue);
+}
+
+.is-skill .about-tools-icon {
+  color: var(--kodelet-syntax-number);
+}
+
+.is-tool .about-tools-icon {
+  color: var(--kodelet-muted);
+}
+
+.about-tools-label {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.is-section .about-tools-label,
+.is-plugin .about-tools-label {
+  font-weight: 600;
+}
+
+/* Align leaf descriptions in a column, as the TUI does. */
+.about-tools-row:is(.is-tool, .is-skill, .is-detail) .about-tools-label {
+  min-width: 15ch;
+  margin-right: 0.35rem;
+}
+
+.is-detail .about-tools-label {
+  color: var(--kodelet-muted);
+}
+
+.about-tools-description,
+.about-tools-meta {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--kodelet-muted);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.about-tools-meta {
+  text-align: right;
+}
+
+.is-detail .about-tools-description {
+  color: var(--sidebar-surface-ink);
+}
+
+.is-detail.is-failed .about-tools-description,
+.is-extension.is-failed .about-tools-meta {
+  color: var(--kodelet-error);
+}
+
+.is-detail.is-failed .about-tools-description {
+  white-space: normal;
+}
+
+.about-tools-version {
+  flex: none;
+  color: var(--kodelet-muted);
+  font-size: 0.68rem;
+}
+
+.about-tools-badge {
+  flex: none;
+  border: 1px solid var(--sidebar-stroke-strong);
+  border-radius: 2px;
+  padding: 0 0.3rem;
+  color: var(--kodelet-muted);
+  font-size: 0.65rem;
+  line-height: 1.5;
+}
+
+.about-tools-badge.is-failed {
+  border-color: color-mix(in srgb, var(--kodelet-error) 45%, transparent);
+  color: var(--kodelet-error);
+}
+
+.about-tools-row.is-off .about-tools-label,
+.about-tools-row.is-off .about-tools-icon {
+  color: var(--kodelet-muted);
+}
+
+.about-tools-row mark {
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--kodelet-warning) 22%, transparent);
+  color: var(--sidebar-surface-ink);
+}
+
+/* Align with the label: indent, chevron, gap, icon, gap. */
+.about-tools-details {
+  padding: 0 0.6rem 0.55rem calc(0.4rem + var(--tree-indent) + 2.55rem);
+  font-size: 0.72rem;
+}
+
+.about-tools-details p {
+  margin: 0;
+}
+
+.about-tools-details code {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--kodelet-muted);
+  font-size: 0.68rem;
+  overflow-wrap: anywhere;
+}
+
+.about-tools-empty {
+  margin-top: 1rem;
+}
+
+/* Narrow panes: counts and descriptions wrap below the name. */
+@container (max-width: 26rem) {
+  .about-tools-line {
+    flex-wrap: wrap;
+    padding-block: 0.3rem;
+  }
+
+  .about-tools-description,
+  .about-tools-meta {
+    flex-basis: 100%;
+    padding-left: 1.275rem;
+    text-align: left;
+  }
+
+  .about-tools-description:empty {
+    display: none;
+  }
+
+  .about-tools-row:is(.is-tool, .is-skill, .is-detail) .about-tools-label {
+    min-width: 0;
+  }
+}
+
 .keyboard-shortcuts-list {
   margin: 0.65rem 0 0;
 }

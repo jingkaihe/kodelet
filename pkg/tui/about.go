@@ -32,10 +32,22 @@ type runnerStatusProvider interface {
 	RunnerStatus(context.Context, chat.WorkspaceTarget) (chat.RunnerStatus, error)
 }
 
+type aboutTab int
+
+const (
+	aboutTabAbout aboutTab = iota
+	aboutTabContext
+	aboutTabTools
+	aboutTabCount
+)
+
+var aboutTabLabels = [aboutTabCount]string{"About", "Context", "Tools"}
+
 type aboutDialogState struct {
 	requestID       int
 	scrollOffset    int
-	contextTab      bool
+	tab             aboutTab
+	tools           *aboutToolsState
 	loading         bool
 	unsupported     bool
 	status          chat.ServerStatus
@@ -105,7 +117,7 @@ func (m *model) reloadServerStatus() tea.Cmd {
 	}
 	m.nextAboutRequestID++
 	requestID := m.nextAboutRequestID
-	*m.aboutDialog = aboutDialogState{requestID: requestID, contextTab: m.aboutDialog.contextTab}
+	*m.aboutDialog = aboutDialogState{requestID: requestID, tab: m.aboutDialog.tab, tools: m.aboutDialog.tools}
 	var cmds []tea.Cmd
 	provider, ok := m.runner.(serverStatusProvider)
 	if ok {
@@ -155,7 +167,26 @@ func (m *model) applyRunnerStatus(msg runnerStatusMsg) {
 	m.aboutDialog.runnerErr = msg.err
 }
 
+// setAboutTab switches tabs and loads the tool list the first time it is shown.
+func (m *model) setAboutTab(tab aboutTab) tea.Cmd {
+	m.aboutDialog.tab = (tab + aboutTabCount) % aboutTabCount
+	m.aboutDialog.scrollOffset = 0
+	if m.aboutDialog.tab == aboutTabTools && m.aboutDialog.tools == nil {
+		return m.loadToolInventory()
+	}
+	return nil
+}
+
 func (m *model) updateAboutDialogKey(key string) tea.Cmd {
+	if m.aboutDialog != nil && m.aboutDialog.tab == aboutTabTools {
+		// The tools tab uses ←/→ to fold, Enter to toggle, and Esc to clear its filter.
+		if cmd, handled := m.updateAboutToolsKey(key); handled {
+			return cmd
+		}
+		if key == "left" || key == "right" || key == "enter" && m.aboutDialog.tools != nil && m.aboutDialog.tools.tree != nil {
+			return nil
+		}
+	}
 	switch key {
 	case "esc", "enter", "q", "Q", "ctrl+c", "ctrl+d":
 		return m.dismissInfoDialogs()
@@ -163,9 +194,10 @@ func (m *model) updateAboutDialogKey(key string) tea.Cmd {
 		if m.aboutDialog != nil && (m.aboutDialog.err != nil || m.aboutDialog.runnerErr != nil) {
 			return m.reloadServerStatus()
 		}
-	case "tab", "shift+tab", "left", "right":
-		m.aboutDialog.contextTab = !m.aboutDialog.contextTab
-		m.aboutDialog.scrollOffset = 0
+	case "tab", "right":
+		return m.setAboutTab(m.aboutDialog.tab + 1)
+	case "shift+tab", "left":
+		return m.setAboutTab(m.aboutDialog.tab - 1)
 	case "up", "down", "pgup", "pgdown", "home", "end":
 		lines, _ := m.aboutDialogContent()
 		height := max(1, m.height-5) // Reserve the borders, title, tabs, and footer.
@@ -209,8 +241,11 @@ func (m model) renderAboutDialog() string {
 	}
 	if scrollable || contentWidth < 40 {
 		footer = "Esc close"
-		if m.aboutDialog.err != nil || m.aboutDialog.runnerErr != nil {
+		if m.aboutRetryable() {
 			footer = "r retry · " + footer
+		}
+		if m.aboutDialog.tab == aboutTabTools && m.aboutDialog.tools != nil && m.aboutDialog.tools.filtering {
+			footer = "Enter done · Esc clear"
 		}
 		if scrollable && m.height >= 5 {
 			footer = "↑/↓ scroll · " + footer
@@ -241,26 +276,31 @@ func (m model) renderAboutDialog() string {
 	return renderDialogBox(width, content)
 }
 
+// aboutRetryable reports whether r reloads anything on the current tab.
+func (m model) aboutRetryable() bool {
+	if m.aboutDialog.tab == aboutTabTools {
+		return m.aboutDialog.tools != nil && m.aboutDialog.tools.err != nil
+	}
+	return m.aboutDialog.err != nil || m.aboutDialog.runnerErr != nil
+}
+
 func (m model) aboutDialogTabs(width int) string {
-	labels := []string{"About", "Context"}
 	var tabs []string
-	for i, label := range labels {
-		if (i == 1) == m.aboutDialog.contextTab {
+	for i, label := range aboutTabLabels {
+		if aboutTab(i) == m.aboutDialog.tab {
 			tabs = append(tabs, renderPersistentStyle(uiDialogSelectedStyle, "["+label+"]"))
 		} else {
 			tabs = append(tabs, renderPersistentStyle(uiDialogMutedStyle, label))
 		}
 	}
 	text := strings.Join(tabs, "  ")
+	// On the tools tab, ←/→ fold the tree instead of switching tabs.
 	hint := " · Tab/←/→"
-	if lipgloss.Width(text+hint) > width {
+	if m.aboutDialog.tab == aboutTabTools || lipgloss.Width(text+hint) > width {
 		hint = " · Tab"
 	}
 	if lipgloss.Width(text+hint) > width {
-		active := "About"
-		if m.aboutDialog.contextTab {
-			active = "Context"
-		}
+		active := aboutTabLabels[m.aboutDialog.tab]
 		return renderPersistentStyle(uiDialogSelectedStyle, fitVisible("["+active+"] · Tab", width))
 	}
 	return text + renderPersistentStyle(uiDialogMutedStyle, hint)
@@ -272,8 +312,11 @@ func (m model) aboutDialogContent() ([]string, string) {
 	if about.err != nil || about.runnerErr != nil {
 		footer = "Press r to try again, or Esc to close."
 	}
-	if about.contextTab {
+	switch about.tab {
+	case aboutTabContext:
 		return m.contextDialogContent(), footer
+	case aboutTabTools:
+		return m.aboutToolsContent()
 	}
 	contentWidth := max(1, m.uiDialogWidth()-4)
 	labelWidth := min(aboutLabelWidth, max(1, contentWidth/2))

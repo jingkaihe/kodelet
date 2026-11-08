@@ -1512,6 +1512,7 @@ func TestServer_ControlPlaneWorkspaceEndpointsDisabled(t *testing.T) {
 	}{
 		{name: "slash commands", path: "/api/chat/slash-commands", handler: server.handleGetSlashCommands},
 		{name: "cwd suggestions", path: "/api/chat/cwd-suggestions", handler: server.handleGetCWDHints},
+		{name: "tool inventory", path: "/api/chat/tool-inventory", handler: server.handleGetToolInventory},
 		{name: "git diff", path: "/api/git/diff", handler: server.handleGetGitDiff},
 		{name: "terminal", path: "/api/terminal/ws", handler: server.handleTerminalWebsocket},
 	}
@@ -1583,6 +1584,18 @@ func TestDefaultRunnerWorkspaceDiscoveryAndSettings(t *testing.T) {
 		assert.Contains(t, discovery.Commands, command)
 	}
 
+	assert.True(t, runner.WorkspaceInventory, "embedded runners report their tools")
+	inventory := httptest.NewRecorder()
+	server.handleGetToolInventory(inventory, httptest.NewRequest(http.MethodGet, "/api/chat/tool-inventory", nil))
+	require.Equal(t, http.StatusOK, inventory.Code, inventory.Body.String())
+	var tools protocol.WorkspaceInventoryResult
+	require.NoError(t, json.Unmarshal(inventory.Body.Bytes(), &tools))
+	assert.Equal(t, runner.Workspace.Path, tools.CWD)
+	assert.NotEmpty(t, tools.BuiltinTools)
+	assert.NotNil(t, tools.Plugins)
+	assert.NotNil(t, tools.Extensions)
+	assert.NotNil(t, tools.Skills)
+
 	hints := httptest.NewRecorder()
 	server.handleGetCWDHints(hints, httptest.NewRequest(http.MethodGet, "/api/chat/cwd-suggestions?q=runner-child", nil))
 	require.Equal(t, http.StatusOK, hints.Code, hints.Body.String())
@@ -1614,6 +1627,68 @@ func TestDefaultRunnerWorkspaceDiscoveryAndSettings(t *testing.T) {
 	commands = httptest.NewRecorder()
 	server.handleGetSlashCommands(commands, httptest.NewRequest(http.MethodGet, "/api/chat/slash-commands", nil))
 	assert.Equal(t, http.StatusServiceUnavailable, commands.Code)
+}
+
+func TestToolInventoryCallsTheSelectedRunner(t *testing.T) {
+	server := newRunnerTestServer(t, "")
+	register := func(name string, capabilities protocol.RunnerCapabilities, call func(context.Context, string, any, any) error) string {
+		link := newRunnerAPITestLink()
+		link.call = call
+		registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+			ProtocolVersions: []int{protocol.Version},
+			Host:             protocol.Host{InstanceID: name, Hostname: name, OS: "linux", Arch: "amd64"},
+			Workspace:        protocol.Workspace{Path: "/runner/" + name, Name: name},
+			Capabilities:     capabilities,
+		}, link)
+		require.NoError(t, err)
+		require.NoError(t, server.runnerRegistry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{RunnerID: registration.RunnerID, Generation: registration.Generation, State: protocol.RunnerStateIdle}))
+		return registration.RunnerID
+	}
+	var received []protocol.WorkspaceInventoryParams
+	current := register("current", protocol.RunnerCapabilities{WorkspaceInventory: true}, func(_ context.Context, method string, params, result any) error {
+		assert.Equal(t, protocol.MethodWorkspaceInventory, method)
+		value := params.(protocol.WorkspaceInventoryParams)
+		received = append(received, value)
+		*result.(*protocol.WorkspaceInventoryResult) = protocol.WorkspaceInventoryResult{
+			CWD:          value.CWD,
+			BuiltinTools: []protocol.InventoryTool{{Name: "bash", Description: "Run a bash command.", Enabled: true}},
+		}
+		return nil
+	})
+	older := register("older", protocol.RunnerCapabilities{WorkspaceDiscovery: true}, func(context.Context, string, any, any) error {
+		t.Error("runners without the capability must not be called")
+		return nil
+	})
+	request := func(query url.Values) *httptest.ResponseRecorder {
+		t.Helper()
+		response := httptest.NewRecorder()
+		server.handleGetToolInventory(response, httptest.NewRequest(http.MethodGet, "/api/chat/tool-inventory?"+query.Encode(), nil))
+		return response
+	}
+
+	response := request(url.Values{
+		"runnerId":           {current},
+		"cwd":                {"/runner/current"},
+		"environmentProfile": {"review"},
+		"options":            {`{"allowedTools":["bash"]}`},
+	})
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var result protocol.WorkspaceInventoryResult
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &result))
+	assert.Equal(t, "/runner/current", result.CWD)
+	assert.Equal(t, []protocol.InventoryTool{{Name: "bash", Description: "Run a bash command.", Enabled: true}}, result.BuiltinTools)
+	require.Len(t, received, 1)
+	assert.Equal(t, "/runner/current", received[0].CWD)
+	assert.Equal(t, "review", received[0].EnvironmentProfile)
+	require.NotNil(t, received[0].Options)
+	assert.Equal(t, &[]string{"bash"}, received[0].Options.AllowedTools)
+
+	response = request(url.Values{"runnerId": {current}, "options": {`{"maxTurns":3}`}})
+	assert.Equal(t, http.StatusBadRequest, response.Code, "only environment restrictions are accepted")
+
+	response = request(url.Values{"runnerId": {older}})
+	assert.Equal(t, http.StatusNotImplemented, response.Code)
+	assert.Contains(t, response.Body.String(), "listing tools requires a newer runner")
 }
 
 func TestDefaultRunnerWorkspaceNeverFallsBackToAnotherRunner(t *testing.T) {
