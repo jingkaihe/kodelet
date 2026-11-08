@@ -183,8 +183,11 @@ func (m *model) updateAboutDialogKey(key string) tea.Cmd {
 		if cmd, handled := m.updateAboutToolsKey(key); handled {
 			return cmd
 		}
-		if key == "left" || key == "right" || key == "enter" && m.aboutDialog.tools != nil && m.aboutDialog.tools.tree != nil {
-			return nil
+		if key == "left" || key == "right" {
+			return nil // ←/→ fold the tree here, never switch tabs.
+		}
+		if key == "enter" && m.aboutDialog.tools != nil && m.aboutDialog.tools.tree != nil {
+			return nil // Enter toggles rows once the list has loaded.
 		}
 	}
 	switch key {
