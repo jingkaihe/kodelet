@@ -113,7 +113,9 @@ func TestAboutToolsTabLoadsOnFirstVisit(t *testing.T) {
 	m := newThemeTestModel(t, Config{Runner: runner})
 	m.width, m.height = 90, 40
 	m.resize()
+	require.NotNil(t, m.conversationState)
 	m.conversationID = "conversation-1"
+	m.conversationState.conversationID = "conversation-1"
 	m.openAboutDialog()
 	assert.Nil(t, m.updateAboutDialogKey("tab"), "the context tab loads nothing")
 	cmd := m.updateAboutDialogKey("tab")
@@ -136,6 +138,25 @@ func TestAboutToolsTabLoadsOnFirstVisit(t *testing.T) {
 	m.updateAboutDialogKey("shift+tab")
 	assert.Nil(t, m.updateAboutDialogKey("tab"), "returning to the tab keeps the loaded list")
 	assert.Len(t, runner.requests, 1)
+}
+
+func TestAboutToolsListsTheDraftWorkspace(t *testing.T) {
+	runner := &toolInventoryRunner{inventory: sampleToolInventory()}
+	m := newThemeTestModel(t, Config{Runner: runner})
+	m.width, m.height = 90, 40
+	m.resize()
+	require.NotNil(t, m.conversationState)
+	m.conversationState.conversationID = ""
+	m.conversationState.requestedCWD = "/repo/other"
+	m.conversationState.profile = "review"
+	m.environmentProfile = "sandbox"
+	m.openAboutDialog()
+	cmd := m.setAboutTab(aboutTabTools)
+	aboutMessagesFromCmd(t, cmd)
+
+	require.Len(t, runner.requests, 1)
+	assert.Equal(t, chat.WorkspaceTarget{CWD: "/repo/other", Profile: "review", EnvironmentProfile: "sandbox"}, runner.requests[0], "drafts list the workspace their slash commands come from")
+	assert.Equal(t, m.workspaceTargetForState(m.conversationState), runner.requests[0])
 }
 
 func TestAboutToolsKeysNavigateFoldAndFilter(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
@@ -443,12 +444,20 @@ func (m *model) loadToolInventory() tea.Cmd {
 		return nil
 	}
 	state.loading = true
-	target := chat.WorkspaceTarget{ConversationID: m.conversationID}
-	if target.ConversationID == "" {
-		target.Profile = profileForRequest(m.profile)
+	// List the same workspace slash commands come from, including a draft's directory.
+	var target chat.WorkspaceTarget
+	if m.conversationState != nil {
+		target = m.workspaceTargetForState(m.conversationState)
+	} else {
+		target = chat.WorkspaceTarget{ConversationID: m.conversationID}
+		if target.ConversationID == "" {
+			target.Profile = profileForRequest(m.profile)
+		}
 	}
-	ctx, requestID := m.ctx, state.requestID
+	parent, requestID := m.ctx, state.requestID
 	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
+		defer cancel()
 		inventory, err := provider.ToolInventory(ctx, target)
 		return toolInventoryMsg{requestID: requestID, inventory: inventory, err: err}
 	}

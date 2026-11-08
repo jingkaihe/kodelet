@@ -330,10 +330,7 @@ func (m model) loadRemoteSlashCommands(state *conversationState) tea.Cmd {
 	}
 	startedAt := state.readinessStartedAt
 	key, cwd := state.key, slashCommandCWDForState(state)
-	target := chat.WorkspaceTarget{ConversationID: state.conversationID}
-	if target.ConversationID == "" {
-		target.CWD, target.Profile, target.EnvironmentProfile = cwd, state.profile, m.environmentProfile
-	}
+	target := m.workspaceTargetForState(state)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
 		defer cancel()
@@ -462,6 +459,16 @@ func resolveSlashCommandCWD(cwd string) (string, error) {
 
 func (m model) slashCommandCWD() string {
 	return slashCommandCWDForState(m.conversationState)
+}
+
+// workspaceTargetForState addresses a saved conversation, or a draft's
+// requested directory and profiles, the way runner discovery expects.
+func (m model) workspaceTargetForState(state *conversationState) chat.WorkspaceTarget {
+	target := chat.WorkspaceTarget{ConversationID: state.conversationID}
+	if target.ConversationID == "" {
+		target.CWD, target.Profile, target.EnvironmentProfile = slashCommandCWDForState(state), state.profile, m.environmentProfile
+	}
+	return target
 }
 
 func slashCommandCWDForState(state *conversationState) string {
