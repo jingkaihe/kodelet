@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   BrowserTarget,
-  ChatStreamEvent,
   Conversation,
   ConversationListResponse,
   CWDHintsResponse,
@@ -23,26 +22,13 @@ describe('ApiService', () => {
   it.each([{}, undefined])('initializes without secure-context crypto APIs: %s', async (crypto) => {
     vi.resetModules();
     vi.stubGlobal('crypto', crypto);
-    // Without WebSockets, the page streams each request over HTTP.
-    vi.stubGlobal('WebSocket', undefined);
     try {
       const { default: client } = await import('./api');
-      mockFetch.mockResolvedValue({
-        ok: true,
-        body: new ReadableStream({
-          start(controller) {
-            controller.close();
-          },
-        }),
-        json: async () => ({}),
-      });
-      await client.streamChat(
-        { message: 'hello', conversationId: 'conversation-1' },
-        { onEvent: vi.fn() }
-      );
+      mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
       await client.respondToUIInput('conversation-1', 'request-1', {
         status: 'dismissed',
       });
+      await client.endRealtime('call-1');
       const id = mockFetch.mock.calls[0][1].headers['X-Kodelet-Client-ID'];
       expect(id).toMatch(/^client-.+/);
       expect(mockFetch.mock.calls[1][1].headers['X-Kodelet-Client-ID']).toBe(id);
@@ -51,43 +37,81 @@ describe('ApiService', () => {
       vi.resetModules();
     }
   });
-  it('uses one client identity for submissions, observation, and prompt replies', async () => {
-    mockFetch.mockImplementation(async () => ({
-      ok: true,
-      body: new ReadableStream({
-        start(controller) {
-          controller.close();
-        },
-      }),
-      json: async () => ({ success: true }),
-    }));
-    await apiService.streamChat(
-      { message: 'hello', conversationId: 'conversation-1' },
-      { onEvent: vi.fn() }
-    );
-    await apiService.streamConversation('conversation-1', { onEvent: vi.fn() });
-    await apiService.respondToUIInput('conversation-1', 'request-1', {
-      status: 'dismissed',
-    });
-    const identity = mockFetch.mock.calls[0][1].headers['X-Kodelet-Client-ID'];
-    expect(identity).toEqual(expect.any(String));
-    expect(identity.length).toBeGreaterThan(0);
-    expect(mockFetch.mock.calls.map(([url]) => url)).toEqual([
-      '/api/chat',
-      '/api/conversations/conversation-1/stream',
-      '/api/conversations/conversation-1/ui-input/request-1',
-    ]);
-    for (const [, options] of mockFetch.mock.calls) {
-      expect(options.headers['X-Kodelet-Client-ID']).toBe(identity);
+  it('uses one client identity for its event socket, submissions and prompt replies', async () => {
+    vi.resetModules();
+    const sockets: TestWebSocket[] = [];
+    class TestWebSocket {
+      readyState = 0;
+      sent: Record<string, unknown>[] = [];
+      onmessage: ((event: { data: string }) => void) | null = null;
+      onclose: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor(readonly url: string) {
+        sockets.push(this);
+      }
+      send(data: string) {
+        this.sent.push(JSON.parse(data));
+      }
+      close() {
+        this.readyState = 3;
+        this.onclose?.();
+      }
+      receive(message: unknown) {
+        this.onmessage?.({ data: JSON.stringify(message) });
+      }
+    }
+    vi.stubGlobal('WebSocket', TestWebSocket);
+    try {
+      const { default: client } = await import('./api');
+      const watching = client.streamConversation('conversation-1', { onEvent: vi.fn() });
+      await vi.waitFor(() => expect(sockets).toHaveLength(1));
+      const [socket] = sockets;
+      socket.readyState = 1;
+      socket.receive({ type: 'hello', connectionId: 'connection-1' });
+      await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
+      expect(socket.sent[0]).toMatchObject({ type: 'subscribe', capabilities: 'interactive' });
+
+      mockFetch.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ conversation_id: 'conversation-1', turn_id: 'turn-1', accepted: true }),
+          { status: 202 }
+        )
+      );
+      const submitting = client.streamChat(
+        { message: 'hello', conversationId: 'conversation-1', turnId: 'turn-1' },
+        { onEvent: vi.fn() }
+      );
+      await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledOnce());
+      socket.receive({ type: 'closed', id: 's2', reason: 'completed' });
+      await submitting;
+
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) });
+      await client.respondToUIInput('conversation-1', 'request-1', { status: 'dismissed' });
+
+      const identity = new URL(socket.url).searchParams.get('clientId');
+      expect(identity).toEqual(expect.any(String));
+      expect(socket.url).toMatch(/^ws:\/\/[^/]+\/api\/chat\/events\?clientId=/);
+      expect(mockFetch.mock.calls.map(([url]) => url)).toEqual([
+        '/api/chat',
+        '/api/conversations/conversation-1/ui-input/request-1',
+      ]);
+      for (const [, options] of mockFetch.mock.calls) {
+        expect(options.headers['X-Kodelet-Client-ID']).toBe(identity);
+      }
+      socket.receive({ type: 'closed', id: 's1', reason: 'ended' });
+      await watching;
+    } finally {
+      vi.unstubAllGlobals();
+      vi.resetModules();
     }
   });
   beforeEach(() => {
     mockFetch.mockClear();
-    // These cases cover the HTTP streams used when the event socket is unavailable.
+    // Tests that follow events inject the event socket they need.
     apiService.setChatEventSocket(null);
   });
 
-  it('uses the same authenticated client for call allocation, NDJSON events and closing', async () => {
+  it('uses the same authenticated client to allocate, follow and close a call', async () => {
     setTestCookie('kodelet_csrf=call-csrf; Path=/');
     const chat = { message: '', conversationId: 'saved-chat' };
     mockFetch.mockResolvedValueOnce({
@@ -95,32 +119,21 @@ describe('ApiService', () => {
       json: async () => ({ id: 'call/one', conversationId: 'saved-chat', answer: 'answer' }),
     });
     await apiService.startRealtime('offer', chat, { voice: 'cedar' });
-    const event = { kind: 'transcript', id: 'utterance', role: 'user', text: 'café', final: true };
-    const bytes = new TextEncoder().encode(
-      `${JSON.stringify(event)}\n${JSON.stringify({ kind: 'closed' })}`
-    );
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      body: new ReadableStream({
-        start(controller) {
-          // Split UTF-8, an NDJSON line, and leave the final line unterminated.
-          const split = bytes.indexOf(0xc3) + 1;
-          controller.enqueue(bytes.slice(0, split));
-          controller.enqueue(bytes.slice(split));
-          controller.close();
-        },
-      }),
-    });
-    const onEvent = vi.fn();
-    await apiService.streamRealtime('call/one', { signal: new AbortController().signal, onEvent });
-    expect(onEvent.mock.calls.map(([value]) => value)).toEqual([event, { kind: 'closed' }]);
+    const attachRealtime = vi.fn(async () => {});
+    apiService.setChatEventSocket({
+      connect: async () => 'connection-1',
+      attachRealtime,
+      close: vi.fn(),
+    } as unknown as ChatEventSocket);
+    const options = { signal: new AbortController().signal, onEvent: vi.fn() };
+    await apiService.streamRealtime('call/one', options);
+    expect(attachRealtime).toHaveBeenCalledWith('call/one', options);
     mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
     await apiService.endRealtime('call/one');
     const identity = mockFetch.mock.calls[0][1].headers['X-Kodelet-Client-ID'];
     expect(identity).toEqual(expect.any(String));
     expect(mockFetch.mock.calls.map(([url]) => url)).toEqual([
       '/api/realtime',
-      '/api/realtime/call%2Fone/events',
       '/api/realtime/call%2Fone',
     ]);
     for (const [, options] of mockFetch.mock.calls) {
@@ -1520,347 +1533,6 @@ describe('ApiService', () => {
     });
   });
 
-  describe('streamChat', () => {
-    it('rejects and releases the reader if a batched callback throws', async () => {
-      vi.useFakeTimers();
-      const failure = new Error('Callback failed');
-      const onEvent = vi.fn((event: ChatStreamEvent) => {
-        if (event.delta === 'tail') throw failure;
-      });
-      const cancel = vi.fn();
-      const body = new ReadableStream({
-        start(controller) {
-          controller.enqueue(
-            new TextEncoder().encode(
-              '{"kind":"text-delta","delta":"head"}\n{"kind":"text-delta","delta":"tail"}\n'
-            )
-          );
-        },
-        cancel,
-      });
-      mockFetch.mockResolvedValueOnce({ ok: true, body });
-      const outcome = apiService
-        .streamConversation('conv-123', { onEvent })
-        .catch((error: Error) => error);
-      try {
-        await vi.advanceTimersByTimeAsync(100);
-        expect(await outcome).toBe(failure);
-        expect(onEvent.mock.calls.map(([event]) => event.delta)).toEqual(['head', 'tail']);
-        expect(body.locked).toBe(false);
-        expect(cancel).toHaveBeenCalledOnce();
-        expect(vi.getTimerCount()).toBe(0);
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it('shows the first text at once and coalesces the rest without delaying event boundaries', async () => {
-      vi.useFakeTimers();
-      const onEvent = vi.fn();
-      const stream = new TransformStream<Uint8Array, Uint8Array>();
-      const writer = stream.writable.getWriter();
-      mockFetch.mockResolvedValueOnce({ ok: true, body: stream.readable });
-      const finished = apiService.streamConversation('conv-123', { onEvent });
-      const send = async (event: ChatStreamEvent) => {
-        await writer.write(new TextEncoder().encode(`${JSON.stringify(event)}\n`));
-      };
-      try {
-        await send({ kind: 'text-delta', delta: 'first' });
-        expect(onEvent).toHaveBeenCalledExactlyOnceWith({ kind: 'text-delta', delta: 'first' });
-        await vi.advanceTimersByTimeAsync(30);
-        await send({ kind: 'text-delta', delta: ' second' });
-        await send({ kind: 'text-delta', delta: ' batch' });
-        await vi.advanceTimersByTimeAsync(44);
-        expect(onEvent).toHaveBeenCalledOnce();
-        await vi.advanceTimersByTimeAsync(1);
-        expect(onEvent).toHaveBeenLastCalledWith({ kind: 'text-delta', delta: ' second batch' });
-
-        await send({ kind: 'text-delta', delta: 'tail' });
-        await send({ kind: 'thinking-delta', delta: 'reasoning' });
-        await send({ kind: 'tool-use', tool_call_id: 'tool-1' });
-        await send({ kind: 'text-delta', delta: 'last' });
-        await send({ kind: 'done' });
-        expect(onEvent.mock.calls.map(([event]) => event)).toEqual([
-          { kind: 'text-delta', delta: 'first' },
-          { kind: 'text-delta', delta: ' second batch' },
-          { kind: 'text-delta', delta: 'tail' },
-          { kind: 'thinking-delta', delta: 'reasoning' },
-          { kind: 'tool-use', tool_call_id: 'tool-1' },
-          { kind: 'text-delta', delta: 'last' },
-          { kind: 'done' },
-        ]);
-        expect(vi.getTimerCount()).toBe(0);
-      } finally {
-        await writer.close();
-        await finished;
-        vi.useRealTimers();
-      }
-    });
-
-    it.each([
-      'eof',
-      'abort',
-    ])('flushes buffered text and clears its timer on %s', async (ending) => {
-      vi.useFakeTimers();
-      const onEvent = vi.fn();
-      const stream = new TransformStream<Uint8Array, Uint8Array>();
-      const writer = stream.writable.getWriter();
-      mockFetch.mockResolvedValueOnce({ ok: true, body: stream.readable });
-      const finished = apiService.streamConversation('conv-123', { onEvent });
-      // Attach the rejection handler before simulating an aborted/failed fetch body.
-      const outcome = finished.then(
-        () => null,
-        (error: Error) => error
-      );
-      try {
-        await writer.write(
-          new TextEncoder().encode(
-            '{"kind":"text-delta","delta":"head"}\n{"kind":"text-delta","delta":"tail"}\n'
-          )
-        );
-        expect(onEvent).toHaveBeenCalledExactlyOnceWith({ kind: 'text-delta', delta: 'head' });
-        if (ending === 'eof') await writer.close();
-        else await writer.abort(new DOMException('Aborted', 'AbortError'));
-        const error = await outcome;
-        expect(error?.name ?? null).toBe(ending === 'eof' ? null : 'AbortError');
-        expect(onEvent).toHaveBeenCalledTimes(2);
-        expect(onEvent).toHaveBeenLastCalledWith({ kind: 'text-delta', delta: 'tail' });
-        expect(vi.getTimerCount()).toBe(0);
-        await vi.advanceTimersByTimeAsync(100);
-        expect(onEvent).toHaveBeenCalledTimes(2);
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it.each([
-      'run',
-      'observer',
-    ])('dismisses pending %s prompts on stream loss without stopping execution', async (mode) => {
-      const onEvent = vi.fn();
-      const encoder = new TextEncoder();
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        body: new ReadableStream({
-          start(controller) {
-            controller.enqueue(
-              encoder.encode(
-                '{"kind":"ui-input-request","ui_input":{"id":"request-1","title":"Pending"}}\n'
-              )
-            );
-            controller.close();
-          },
-        }),
-      });
-      if (mode === 'run') {
-        await apiService.streamChat(
-          { message: 'hello', conversationId: 'conversation-1' },
-          { onEvent }
-        );
-      } else {
-        await apiService.streamConversation('conversation-1', { onEvent });
-      }
-      expect(onEvent).toHaveBeenLastCalledWith({
-        kind: 'ui-request-end',
-        conversation_id: 'conversation-1',
-        ui_request_id: 'request-1',
-      });
-      expect(mockFetch).toHaveBeenCalledTimes(1);
-    });
-
-    it('dismisses prompts when an attached stream is malformed', async () => {
-      const onEvent = vi.fn();
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        body: new ReadableStream({
-          start(controller) {
-            controller.enqueue(
-              new TextEncoder().encode(
-                '{"kind":"ui-confirm-request","ui_confirm":{"id":"confirm-1","title":"Pending"}}\nnot-json\n'
-              )
-            );
-            controller.close();
-          },
-        }),
-      });
-      await expect(apiService.streamConversation('conversation-1', { onEvent })).rejects.toThrow();
-      expect(onEvent).toHaveBeenLastCalledWith({
-        kind: 'ui-request-end',
-        conversation_id: 'conversation-1',
-        ui_request_id: 'confirm-1',
-      });
-      expect(mockFetch).toHaveBeenCalledTimes(1);
-    });
-
-    it('streams newline-delimited chat events', async () => {
-      setTestCookie('kodelet_csrf=csrf-stream; Path=/');
-      const onEvent = vi.fn();
-      const encoder = new TextEncoder();
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        body: new ReadableStream({
-          start(controller) {
-            controller.enqueue(
-              encoder.encode(
-                '{"kind":"conversation","conversation_id":"conv-123"}\n{"kind":"done","conversation_id":"conv-123"}\n'
-              )
-            );
-            controller.close();
-          },
-        }),
-      });
-
-      await apiService.streamChat(
-        {
-          message: 'hello',
-        },
-        { onEvent }
-      );
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        '/api/chat',
-        expect.objectContaining({
-          method: 'POST',
-          headers: expect.objectContaining({ 'X-CSRF-Token': 'csrf-stream' }),
-          body: JSON.stringify({ message: 'hello' }),
-        })
-      );
-      expect(onEvent).toHaveBeenNthCalledWith(1, {
-        kind: 'conversation',
-        conversation_id: 'conv-123',
-      });
-      expect(onEvent).toHaveBeenNthCalledWith(2, {
-        kind: 'done',
-        conversation_id: 'conv-123',
-      });
-    });
-
-    it('sends multimodal content blocks when provided', async () => {
-      const encoder = new TextEncoder();
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        body: new ReadableStream({
-          start(controller) {
-            controller.enqueue(encoder.encode('{"kind":"done"}\n'));
-            controller.close();
-          },
-        }),
-      });
-
-      await apiService.streamChat(
-        {
-          message: 'describe this image',
-          content: [
-            { type: 'text', text: 'describe this image' },
-            {
-              type: 'image',
-              source: {
-                data: 'aGVsbG8=',
-                media_type: 'image/png',
-              },
-            },
-          ],
-        },
-        { onEvent: vi.fn() }
-      );
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        '/api/chat',
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({
-            message: 'describe this image',
-            content: [
-              { type: 'text', text: 'describe this image' },
-              {
-                type: 'image',
-                source: {
-                  data: 'aGVsbG8=',
-                  media_type: 'image/png',
-                },
-              },
-            ],
-          }),
-        })
-      );
-    });
-
-    it('sends profile and reasoning effort when provided', async () => {
-      const encoder = new TextEncoder();
-      const stream = new ReadableStream({
-        start(controller) {
-          controller.enqueue(
-            encoder.encode(
-              '{"kind":"conversation","conversation_id":"conv-123"}\n{"kind":"done","conversation_id":"conv-123"}\n'
-            )
-          );
-          controller.close();
-        },
-      });
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        body: stream,
-      });
-
-      await apiService.streamChat(
-        {
-          message: 'hello',
-          profile: 'anthropic',
-          reasoningEffort: 'high',
-        },
-        {
-          onEvent: vi.fn(),
-        }
-      );
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        '/api/chat',
-        expect.objectContaining({
-          body: JSON.stringify({
-            message: 'hello',
-            profile: 'anthropic',
-            reasoningEffort: 'high',
-          }),
-        })
-      );
-    });
-
-    it('sends cwd when provided', async () => {
-      const encoder = new TextEncoder();
-      const stream = new ReadableStream({
-        start(controller) {
-          controller.enqueue(encoder.encode('{"kind":"done"}\n'));
-          controller.close();
-        },
-      });
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        body: stream,
-      });
-
-      await apiService.streamChat(
-        {
-          message: 'hello',
-          cwd: '/workspace/project',
-        },
-        {
-          onEvent: vi.fn(),
-        }
-      );
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        '/api/chat',
-        expect.objectContaining({
-          body: JSON.stringify({ message: 'hello', cwd: '/workspace/project' }),
-        })
-      );
-    });
-  });
-
   describe('event socket', () => {
     const fakeSocket = (connectionId: string | null) => ({
       connect: vi.fn(async () => connectionId),
@@ -1929,28 +1601,52 @@ describe('ApiService', () => {
       expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    it('streams over HTTP when the socket cannot be opened', async () => {
+    it('submits the whole request, including content blocks, profile and directory', async () => {
+      const socket = fakeSocket('connection-1');
+      apiService.setChatEventSocket(socket as unknown as ChatEventSocket);
+      const request = {
+        message: 'describe this image',
+        conversationId: 'conversation-1',
+        content: [
+          { type: 'text' as const, text: 'describe this image' },
+          { type: 'image' as const, source: { data: 'aGVsbG8=', media_type: 'image/png' } },
+        ],
+        profile: 'anthropic',
+        reasoningEffort: 'high',
+        cwd: '/workspace/project',
+      };
+      await apiService.streamChat(request, { onEvent: vi.fn() });
+      const [[, options]] = socket.submit.mock.calls as unknown as [
+        [unknown, { post: SubmitChatRequest }],
+      ];
+      expect(socket.submit).toHaveBeenCalledWith(request, expect.any(Object));
+      mockFetch.mockResolvedValueOnce(new Response('{}', { status: 202 }));
+      await options.post({ ...request, turnId: 'turn-1' }, {});
+      expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({ ...request, turnId: 'turn-1' });
+    });
+
+    it('reports that live updates are unavailable when the socket cannot be opened', async () => {
       const socket = fakeSocket(null);
       apiService.setChatEventSocket(socket as unknown as ChatEventSocket);
-      mockFetch.mockResolvedValue({
-        ok: true,
-        body: new ReadableStream({
-          start(controller) {
-            controller.close();
-          },
-        }),
-      });
-      await apiService.streamChat(
-        { message: 'hello', conversationId: 'conversation-1' },
-        { onEvent: vi.fn() }
-      );
-      await apiService.streamConversation('conversation-1', { onEvent: vi.fn() });
+      const unavailable = /Could not connect to live updates at \/api\/chat\/events/;
+      await expect(
+        apiService.streamChat(
+          { message: 'hello', conversationId: 'conversation-1' },
+          { onEvent: vi.fn() }
+        )
+      ).rejects.toThrow(unavailable);
+      await expect(
+        apiService.streamConversation('conversation-1', { onEvent: vi.fn() })
+      ).rejects.toThrow(unavailable);
+      await expect(
+        apiService.streamRealtime('call-1', {
+          signal: new AbortController().signal,
+          onEvent: vi.fn(),
+        })
+      ).rejects.toThrow(unavailable);
       expect(socket.submit).not.toHaveBeenCalled();
       expect(socket.watch).not.toHaveBeenCalled();
-      expect(mockFetch.mock.calls.map(([url]) => url)).toEqual([
-        '/api/chat',
-        '/api/conversations/conversation-1/stream',
-      ]);
+      expect(mockFetch).not.toHaveBeenCalled();
     });
   });
 });

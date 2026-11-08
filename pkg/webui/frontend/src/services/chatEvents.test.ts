@@ -46,6 +46,7 @@ const createSocket = (
   options: {
     getTurnReceipt?: (conversationId: string, turnId: string) => Promise<TurnReceipt>;
     reconnectDelaysMs?: number[];
+    receiptRetryDelaysMs?: number[];
   } = {}
 ) =>
   new ChatEventSocket({
@@ -54,6 +55,7 @@ const createSocket = (
     getTurnReceipt:
       options.getTurnReceipt ?? (() => Promise.reject(new Error('no receipt in this test'))),
     reconnectDelaysMs: options.reconnectDelaysMs ?? [0],
+    receiptRetryDelaysMs: options.receiptRetryDelaysMs ?? [0],
     connectTimeoutMs: 1000,
   });
 
@@ -337,14 +339,40 @@ describe('ChatEventSocket', () => {
     );
   });
 
-  it('reports the socket unavailable when it closes before its handshake', async () => {
+  it('reports the socket unavailable when it closes before its handshake, then tries again', async () => {
     const events = createSocket();
     const connecting = events.connect();
     latestSocket().close();
     expect(await connecting).toBeNull();
-    // The page streams over HTTP for a while rather than retrying every request.
-    expect(await events.connect()).toBeNull();
-    expect(FakeSocket.instances).toHaveLength(1);
+    const retried = events.connect();
+    expect(FakeSocket.instances).toHaveLength(2);
+    latestSocket().accept('connection-2');
+    expect(await retried).toBe('connection-2');
+  });
+
+  it('reports a missed run whose outcome cannot be read as an error, not success', async () => {
+    const getTurnReceipt = vi.fn(async () => {
+      throw new Error('receipt unavailable');
+    });
+    const events = createSocket({ getTurnReceipt, receiptRetryDelaysMs: [0, 1] });
+    const socket = await connected(events);
+    const onEvent = vi.fn();
+    void events.watch('conversation', { onEvent });
+    socket.event('s1', { kind: 'conversation', conversation_id: 'conversation', turn_id: 't1' });
+    socket.close();
+    await vi.waitFor(() => expect(FakeSocket.instances).toHaveLength(2));
+    const reconnected = latestSocket();
+    reconnected.accept('connection-2');
+    reconnected.receive({ type: 'subscribed', id: 's1', conversationId: 'conversation' });
+    await vi.waitFor(() => expect(onEvent).toHaveBeenCalledTimes(2));
+    expect(getTurnReceipt).toHaveBeenCalledTimes(2);
+    expect(onEvent).toHaveBeenLastCalledWith({
+      kind: 'error',
+      error:
+        'Could not confirm how the run ended. Reload the conversation to see its saved result.',
+      conversation_id: 'conversation',
+      turn_id: 't1',
+    });
   });
 
   it('rejects followers once reconnecting fails', async () => {

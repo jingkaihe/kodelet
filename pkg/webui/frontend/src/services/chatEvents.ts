@@ -80,8 +80,8 @@ export interface ChatEventSocketOptions {
   createSocket?: (url: string) => WebSocket;
   connectTimeoutMs?: number;
   reconnectDelaysMs?: readonly number[];
-  /** How long to use HTTP streams after the socket could not be opened at all. */
-  unavailableRetryMs?: number;
+  /** Waits before each attempt to read a missed turn's saved status. */
+  receiptRetryDelaysMs?: readonly number[];
 }
 
 export type SubmitChatRequest = (
@@ -91,7 +91,14 @@ export type SubmitChatRequest = (
 ) => Promise<Response>;
 
 const DEFAULT_RECONNECT_DELAYS_MS = [250, 500, 1000, 2000, 4000, 8000];
+const DEFAULT_RECEIPT_RETRY_DELAYS_MS = [0, 500, 1500];
+
+/** Reported when the page cannot open its event socket. */
+export const EVENT_SOCKET_UNAVAILABLE =
+  'Could not connect to live updates at /api/chat/events. Check that Kodelet is running and that any reverse proxy allows WebSocket connections.';
 const LOST_CONNECTION = 'Lost connection to the server. Reload the page to reconnect.';
+const UNCONFIRMED_OUTCOME =
+  'Could not confirm how the run ended. Reload the conversation to see its saved result.';
 const CALL_DISCONNECTED = 'The call disconnected. Try again.';
 
 const abortError = () => new DOMException('The operation was aborted.', 'AbortError');
@@ -139,25 +146,21 @@ export class ChatEventSocket {
   private connectionId: string | null = null;
   private connecting: Promise<string | null> | null = null;
   private reconnecting = false;
-  private everConnected = false;
-  private unavailableUntil = 0;
   private nextId = 0;
   private readonly subscriptions = new Map<string, Subscription>();
 
   constructor(private readonly options: ChatEventSocketOptions) {}
 
   /**
-   * Opens the socket if needed. Resolves to null when it cannot be opened, for
-   * example behind a proxy that refuses WebSockets, so callers use HTTP streams.
+   * Opens the socket if needed, and resolves to its connection ID, or to null
+   * when it cannot be opened: the server is unreachable, or a proxy refuses
+   * WebSockets.
    */
   connect(): Promise<string | null> {
     if (this.socket && this.connectionId) return Promise.resolve(this.connectionId);
-    if (!this.connecting) {
-      if (Date.now() < this.unavailableUntil) return Promise.resolve(null);
-      this.connecting = this.open().finally(() => {
-        this.connecting = null;
-      });
-    }
+    this.connecting ??= this.open().finally(() => {
+      this.connecting = null;
+    });
     return this.connecting;
   }
 
@@ -400,7 +403,6 @@ export class ChatEventSocket {
           this.options.url()
         );
       } catch {
-        this.markUnavailable();
         resolve(null);
         return;
       }
@@ -413,13 +415,11 @@ export class ChatEventSocket {
           socket.onmessage = null;
           socket.onclose = null;
           socket.close();
-          this.markUnavailable();
           resolve(null);
           return;
         }
         this.socket = socket;
         this.connectionId = connectionId;
-        this.everConnected = true;
         resolve(connectionId);
         // Follow again every conversation that was followed before a disconnect.
         for (const subscription of this.subscriptions.values()) {
@@ -446,12 +446,6 @@ export class ChatEventSocket {
     });
   }
 
-  private markUnavailable() {
-    if (!this.everConnected) {
-      this.unavailableUntil = Date.now() + (this.options.unavailableRetryMs ?? 60_000);
-    }
-  }
-
   /** Abandons a connection the server no longer knows, without waiting for it to close. */
   private dropConnection() {
     const socket = this.socket;
@@ -466,7 +460,7 @@ export class ChatEventSocket {
     this.connectionId = null;
     for (const subscription of [...this.subscriptions.values()]) {
       if (subscription.kind === 'realtime') {
-        // As with its HTTP stream, a call ends with its observer.
+        // A call cannot outlive its only event observer.
         this.end(subscription, { error: new Error(CALL_DISCONNECTED) });
         continue;
       }
@@ -593,6 +587,8 @@ export class ChatEventSocket {
   /**
    * After following a conversation again, reports a run that ended unseen:
    * its saved status says how. Events that arrive meanwhile wait behind it.
+   * An outcome that cannot be read is reported as an error, never as success,
+   * so queued commands do not run after a turn that may have failed.
    */
   private async reconcile(
     subscription: ConversationSubscription,
@@ -603,18 +599,27 @@ export class ChatEventSocket {
     if (!missedTurn || (acknowledgement.active && acknowledgement.turnId === missedTurn)) return;
     const held: ChatStreamEvent[] = [];
     subscription.held = held;
-    let events: ChatStreamEvent[];
-    try {
-      events = turnReceiptEvents(
-        await this.options.getTurnReceipt(subscription.conversationId, missedTurn)
-      );
-    } catch {
-      // Without its saved status, report that the run ended so the page
-      // reloads the conversation.
-      events = [
-        { kind: 'done', conversation_id: subscription.conversationId, turn_id: missedTurn },
-      ];
+    let events: ChatStreamEvent[] | undefined;
+    for (const delay of this.options.receiptRetryDelaysMs ?? DEFAULT_RECEIPT_RETRY_DELAYS_MS) {
+      if (delay > 0) await sleep(delay);
+      if (subscription.held !== held) return;
+      try {
+        events = turnReceiptEvents(
+          await this.options.getTurnReceipt(subscription.conversationId, missedTurn)
+        );
+        break;
+      } catch {
+        // Retry: the saved status is the only reliable account of the turn.
+      }
     }
+    events ??= [
+      {
+        kind: 'error',
+        error: UNCONFIRMED_OUTCOME,
+        conversation_id: subscription.conversationId,
+        turn_id: missedTurn,
+      },
+    ];
     if (subscription.held !== held) return;
     subscription.held = undefined;
     for (const event of [...events, ...held]) this.deliver(subscription, event);

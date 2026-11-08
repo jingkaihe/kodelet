@@ -40,8 +40,7 @@ import type {
   UserLoginDecisionResponse,
   WorkspaceTarget,
 } from '../types';
-import { createChatEventDelivery } from './chatEventDelivery';
-import { type ChatEventLevel, ChatEventSocket } from './chatEvents';
+import { type ChatEventLevel, ChatEventSocket, EVENT_SOCKET_UNAVAILABLE } from './chatEvents';
 
 class ApiService {
   private baseUrl = '';
@@ -531,10 +530,7 @@ class ApiService {
     );
   }
 
-  /**
-   * Replaces the page's event socket. With null, each stream uses its own HTTP
-   * response, as it does when the socket cannot be opened.
-   */
+  /** Replaces the page's event socket, for example with a test double. */
   setChatEventSocket(socket: ChatEventSocket | null): void {
     if (this.chatEvents !== socket) this.chatEvents?.close();
     this.chatEvents = socket;
@@ -552,57 +548,40 @@ class ApiService {
     });
   }
 
-  /** Resolves to the page's event socket, or null to stream over HTTP instead. */
-  private async eventSocket(): Promise<ChatEventSocket | null> {
+  /** The page's connected event socket, which carries every chat event it follows. */
+  private async eventSocket(): Promise<ChatEventSocket> {
     const socket = this.chatEvents;
-    return socket && (await socket.connect()) ? socket : null;
+    if (!socket || !(await socket.connect())) throw new Error(EVENT_SOCKET_UNAVAILABLE);
+    return socket;
   }
 
   /**
-   * Submits a turn and delivers its events until it ends. With the page's event
-   * socket, the request returns once the turn starts and events arrive on the
-   * socket; otherwise they stream in the response.
+   * Submits a turn and delivers its events until it ends. The request returns
+   * once the turn starts; its events arrive on the page's event socket.
    */
   async streamChat(
-    request: ChatRequest,
+    request: ChatRequest & { conversationId: string },
     options: {
       signal?: AbortSignal;
       onEvent: (event: ChatStreamEvent) => void;
     }
   ): Promise<void> {
-    const { conversationId } = request;
-    const socket = conversationId ? await this.eventSocket() : null;
-    if (socket && conversationId) {
-      return socket.submit(
-        { ...request, conversationId },
-        {
-          ...options,
-          post: (turnRequest, headers, signal) =>
-            fetch('/api/chat', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Kodelet-Client-ID': this.clientId,
-                ...this.getCSRFHeaders('POST'),
-                ...headers,
-              },
-              body: JSON.stringify(turnRequest),
-              signal,
-            }),
-        }
-      );
-    }
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Kodelet-Client-ID': this.clientId,
-        ...this.getCSRFHeaders('POST'),
-      },
-      body: JSON.stringify(request),
-      signal: options.signal,
+    const socket = await this.eventSocket();
+    return socket.submit(request, {
+      ...options,
+      post: (turnRequest, headers, signal) =>
+        fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Kodelet-Client-ID': this.clientId,
+            ...this.getCSRFHeaders('POST'),
+            ...headers,
+          },
+          body: JSON.stringify(turnRequest),
+          signal,
+        }),
     });
-    return this.consumeChatStream(response, options.onEvent, request.conversationId);
   }
 
   async getRealtimeCapabilities(signal?: AbortSignal): Promise<RealtimeCapabilities> {
@@ -630,51 +609,18 @@ class ApiService {
     });
   }
 
+  /** Delivers a live voice call's events until the call ends. */
   async streamRealtime(
     id: string,
     options: { signal: AbortSignal; onEvent: (event: RealtimeEvent) => void }
   ): Promise<void> {
     const socket = await this.eventSocket();
-    if (socket) return socket.attachRealtime(id, options);
-    const response = await fetch(`/api/realtime/${encodeURIComponent(id)}/events`, {
-      headers: { 'X-Kodelet-Client-ID': this.clientId },
-      signal: options.signal,
-    });
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.error || error.message || 'Could not connect to the call.');
-    }
-    if (!response.body) throw new Error('Call event stream is unavailable.');
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    const deliver = (line: string) => {
-      if (line.trim() && !options.signal.aborted)
-        options.onEvent(JSON.parse(line) as RealtimeEvent);
-    };
-    try {
-      while (!options.signal.aborted) {
-        const { done, value } = await reader.read();
-        buffer += decoder.decode(value, { stream: !done });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) deliver(line);
-        if (buffer.length > 1024 * 1024) throw new Error('Call event exceeded the supported size.');
-        if (done) {
-          deliver(buffer);
-          return;
-        }
-      }
-    } finally {
-      await reader.cancel().catch(() => {});
-      reader.releaseLock();
-    }
+    return socket.attachRealtime(id, options);
   }
 
   /**
-   * Follows a conversation until aborted or ended by the server. Lifecycle
-   * level, for conversations the page is not showing, omits transcript detail
-   * when the page's event socket is available.
+   * Follows a conversation until aborted or ended by the server. The lifecycle
+   * level, for conversations the page is not showing, omits transcript detail.
    */
   async streamConversation(
     conversationId: string,
@@ -685,89 +631,7 @@ class ApiService {
     }
   ): Promise<void> {
     const socket = await this.eventSocket();
-    if (socket) {
-      return socket.watch(conversationId, { ...options, capabilities: 'interactive' });
-    }
-    const response = await fetch(`/api/conversations/${conversationId}/stream`, {
-      method: 'GET',
-      headers: {
-        'X-Kodelet-Client-ID': this.clientId,
-        'X-Kodelet-UI-Capabilities': 'interactive',
-      },
-      signal: options.signal,
-    });
-    return this.consumeChatStream(response, options.onEvent, conversationId);
-  }
-
-  private async consumeChatStream(
-    response: Response,
-    onEvent: (event: ChatStreamEvent) => void,
-    conversationId?: string
-  ): Promise<void> {
-    if (!response.ok) {
-      let error: ApiError;
-      try {
-        error = await response.json();
-      } catch {
-        error = { error: `HTTP ${response.status}` };
-      }
-      throw new Error(error.error || error.message || `HTTP ${response.status}`);
-    }
-
-    if (!response.body) {
-      throw new Error('Streaming response body is unavailable');
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let deliveryFailure: { error: unknown } | undefined;
-    const delivery = createChatEventDelivery(onEvent, {
-      conversationId,
-      onDeferredError: (error) => {
-        // Wake the pending read so callback errors reject the stream just
-        // like synchronous delivery, rather than escaping from a timer.
-        deliveryFailure = { error };
-        void reader.cancel().catch(() => {});
-      },
-    });
-    const deliver = (line: string) => {
-      delivery.deliver(JSON.parse(line) as ChatStreamEvent);
-    };
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (deliveryFailure) throw deliveryFailure.error;
-        buffer += decoder.decode(value, { stream: !done });
-
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) {
-            continue;
-          }
-          deliver(trimmed);
-        }
-
-        if (done) {
-          const trimmed = buffer.trim();
-          if (trimmed) {
-            deliver(trimmed);
-          }
-          return;
-        }
-      }
-    } finally {
-      try {
-        delivery.close();
-      } finally {
-        await reader.cancel().catch(() => {});
-        reader.releaseLock();
-      }
-    }
+    return socket.watch(conversationId, { ...options, capabilities: 'interactive' });
   }
 }
 
