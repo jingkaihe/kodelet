@@ -1,5 +1,23 @@
 # Kodelet
 
+## 0.8.25-beta
+
+Added a searchable Tools tab to About Kodelet in the TUI and Web UI, listing built-in tools, plugins, extensions, and skills for the selected workspace and profiles. The inventory shows descriptions, installation paths, global or local scope, disabled items, and extension startup failures without starting a model turn.
+
+Added per-window Web UI conversation tabs above the transcript, with drag-to-reorder, running and attention indicators, a compact tab switcher, and `Alt/⌥+[` / `Alt/⌥+]` navigation. Tabs survive page reloads; closing a saved conversation's tab neither stops its run nor deletes its history.
+
+Kept workspace panels open across conversation switches and retained unsaved chats' terminal and browser sessions until their draft tab closes. Fixed steering submissions clearing newer composer text or the wrong conversation's draft.
+
+Moved Web UI chat events to one shared WebSocket per page, avoiding a separate HTTP stream for every running conversation. Reconnects reconcile missed turn outcomes and reload the shown conversation when idle; outcomes that cannot be confirmed are reported as errors rather than success. CLI, TUI, SDK, and ACP streaming remains unchanged.
+
+Moved image artifact cleanup off server startup into a background pass, using incremental reads and bounded write transactions so cleanup no longer blocks opening storage.
+
+Fixed Anthropic rejecting failed tool results containing images by replacing those images with text notices while retaining the error and other text output.
+
+Fixed duplicate extension widget delivery to the approval-owning client during live voice handoffs.
+
+**Upgrade:** Upgrade the daemon and Web UI together for the new chat event WebSocket; upgrade runners alongside clients to enable the Tools inventory.
+
 ## 0.8.24-beta
 
 Improved SQLite concurrency with shared connections, parallel reads, and safer write transactions. Centralized database ownership and hardened startup and shutdown.
