@@ -1994,7 +1994,11 @@ const ChatPage: React.FC = () => {
     },
   });
   const modalOpen = higherPriorityDialogOpen || dictation.busy;
-  const layout = useChatLayout(modalOpen);
+  const layout = useChatLayout(modalOpen, {
+    terminal: workspaceTerminalAvailable,
+    diff: workspaceGitDiffAvailable,
+    browser: workspaceBrowserAvailable,
+  });
   const {
     mobileLayout,
     workspaceOverlayLayout,
@@ -2109,24 +2113,6 @@ const ChatPage: React.FC = () => {
       slashCommandNames.has(name)
     );
   };
-
-  useEffect(() => {
-    if (
-      !workspaceToolsAvailable ||
-      (workspacePanelView === 'terminal' && !workspaceTerminalAvailable) ||
-      (workspacePanelView === 'browser' && !workspaceBrowserAvailable) ||
-      (workspacePanelView === 'diff' && !workspaceGitDiffAvailable)
-    ) {
-      setWorkspacePanelView(null);
-    }
-  }, [
-    setWorkspacePanelView,
-    workspaceBrowserAvailable,
-    workspaceGitDiffAvailable,
-    workspacePanelView,
-    workspaceTerminalAvailable,
-    workspaceToolsAvailable,
-  ]);
 
   const composerModelLabel = currentModelLabel
     ? [currentProfileLabel, currentModelLabel].filter(Boolean).join('/')

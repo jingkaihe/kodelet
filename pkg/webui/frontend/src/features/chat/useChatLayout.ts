@@ -18,6 +18,7 @@ const OVERLAY_FOCUSABLE_SELECTOR = [
   "[tabindex]:not([tabindex='-1'])",
 ].join(',');
 type WorkspacePanelView = 'diff' | 'terminal' | 'browser';
+export type WorkspacePanelAvailability = Record<WorkspacePanelView, boolean>;
 
 const clampSidebarWidth = (width: number): number =>
   Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width));
@@ -80,8 +81,20 @@ const readStoredSidebarWidth = (): number => {
   return Number.isFinite(parsedWidth) ? clampSidebarWidth(parsedWidth) : DEFAULT_SIDEBAR_WIDTH;
 };
 
-export const useChatLayout = (higherPriorityDialogOpen: boolean) => {
-  const [workspacePanelView, setWorkspacePanelView] = useState<WorkspacePanelView | null>(null);
+export const useChatLayout = (
+  higherPriorityDialogOpen: boolean,
+  availableWorkspaceViews: WorkspacePanelAvailability
+) => {
+  // Keep the requested view across conversation switches. It is shown only while
+  // the current workspace supports it, so a conversation that is still loading or
+  // lacks the tool hides the panel without forgetting that it was open.
+  const [requestedWorkspacePanelView, setWorkspacePanelView] = useState<WorkspacePanelView | null>(
+    null
+  );
+  const workspacePanelView =
+    requestedWorkspacePanelView && availableWorkspaceViews[requestedWorkspacePanelView]
+      ? requestedWorkspacePanelView
+      : null;
   const mobileLayout = useMediaQuery(MOBILE_LAYOUT_MEDIA_QUERY);
   const workspaceOverlayLayout = useMediaQuery(WORKSPACE_OVERLAY_MEDIA_QUERY);
   const [sidebarVisible, setSidebarVisible] = useState(readInitialSidebarVisible);

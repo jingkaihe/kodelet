@@ -91,7 +91,7 @@ describe('ChatPage workspace tools and browsers', () => {
     selectWorkspaceRunner();
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
-    fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+    // The open panel follows the user into the new chat with a fresh draft browser.
     const nextBrowser = await screen.findByTestId('browser-panel');
     expect(nextBrowser).not.toBe(firstBrowser);
     expect(nextBrowser.dataset.conversationId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
@@ -222,7 +222,7 @@ describe('ChatPage workspace tools and browsers', () => {
     expect(screen.queryByRole('button', { name: 'Show browser' })).not.toBeInTheDocument();
   });
 
-  it('uses conversation identity rather than cwd when switching between saved browsers', async () => {
+  it('keeps the browser open across saved conversations using conversation identity', async () => {
     const runner = makeRunner({ workspaceBrowser: true });
     mockGetRunners.mockResolvedValue({ runners: [runner] });
     mockGetConversation.mockImplementation(async (id: string) => ({
@@ -238,18 +238,64 @@ describe('ChatPage workspace tools and browsers', () => {
     }));
     setRouteParams({ id: 'conv-browser-a' });
     const { rerender } = render(<ChatPage />);
+    await screen.findByText('Saved conv-browser-a');
+    fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
     let previousPanel: HTMLElement | undefined;
     for (const id of ['conv-browser-a', 'conv-browser-b', 'conv-browser-a']) {
       setRouteParams({ id });
       rerender(<ChatPage />);
       await screen.findByText(`Saved ${id}`);
-      fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
       const panel = await screen.findByTestId('browser-panel');
       expect(panel).toHaveAttribute('data-conversation-id', id);
       expect(panel).toHaveAttribute('data-runner-id', runner.id);
       expect(panel).not.toBe(previousPanel);
       previousPanel = panel;
     }
+
+    fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+    setRouteParams({ id: 'conv-browser-b' });
+    rerender(<ChatPage />);
+    await screen.findByText('Saved conv-browser-b');
+    await flushAsyncUpdates();
+    expect(screen.getByTestId('workspace-tools-shell')).toBeInTheDocument();
+    expect(screen.queryByTestId('workspace-tools-dock')).not.toBeInTheDocument();
+  });
+
+  it('keeps changes open and refreshes them when switching saved conversations', async () => {
+    const runner = makeRunner({ workspaceGitDiff: true });
+    mockGetRunners.mockResolvedValue({ runners: [runner] });
+    mockGetConversation.mockImplementation(async (id: string) => ({
+      id,
+      createdAt: '2026-09-14T00:00:00Z',
+      updatedAt: '2026-09-14T00:00:00Z',
+      messageCount: 1,
+      cwd: '/runner/kodelet',
+      runnerId: runner.id,
+      runner,
+      messages: [{ role: 'user', content: `Saved ${id}` }],
+      toolResults: {},
+    }));
+    setRouteParams({ id: 'conv-diff-a' });
+    const { rerender } = render(<ChatPage />);
+    await screen.findByText('Saved conv-diff-a');
+    fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+    expect(await screen.findByTestId('git-diff-panel')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(mockGetGitDiff).toHaveBeenLastCalledWith(
+        expect.objectContaining({ conversationId: 'conv-diff-a' })
+      )
+    );
+
+    setRouteParams({ id: 'conv-diff-b' });
+    rerender(<ChatPage />);
+    await screen.findByText('Saved conv-diff-b');
+    expect(await screen.findByTestId('git-diff-panel')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(mockGetGitDiff).toHaveBeenLastCalledWith(
+        expect.objectContaining({ conversationId: 'conv-diff-b' })
+      )
+    );
+    expect(screen.getByTestId('workspace-tools-diff-tab')).toHaveAttribute('aria-pressed', 'true');
   });
 
   it.each([
