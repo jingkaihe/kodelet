@@ -72,26 +72,22 @@ func buildWorkspaceInventory(
 		Skills:       []protocol.InventorySkill{},
 	}
 
-	available := make(map[string]bool, len(manifest.Tools))
+	// Classify by the tool that won the name, not by name alone: when an
+	// extension reuses a built-in's name, the run keeps the built-in.
+	extensionOwners := map[string]string{}
 	enabledSkills := map[string]bool{}
+	builtins := map[string]bool{}
 	for _, definition := range manifest.Tools {
-		available[definition.Name] = true
+		if owned, ok := definition.Tool.(extensionOwnedTool); ok {
+			extensionOwners[definition.Name] = owned.ExtensionID()
+			continue
+		}
 		if skillTool, ok := definition.Tool.(*tools.SkillTool); ok {
 			for name := range skillTool.GetSkills() {
 				enabledSkills[name] = true
 			}
 		}
-	}
-	extensionTools := map[string]bool{}
-	for _, status := range statuses {
-		for _, tool := range status.Tools {
-			extensionTools[tool.Name] = true
-		}
-	}
-
-	builtins := map[string]bool{}
-	for _, definition := range manifest.Tools {
-		if extensionTools[definition.Name] || builtins[definition.Name] {
+		if builtins[definition.Name] {
 			continue
 		}
 		builtins[definition.Name] = true
@@ -131,7 +127,7 @@ func buildWorkspaceInventory(
 	}
 
 	for _, status := range statuses {
-		item := inventoryExtension(status, available)
+		item := inventoryExtension(status, extensionOwners)
 		if prefix := status.Extension.PluginPrefix; prefix != "" {
 			owner := plugin(prefix, item.Scope, filepath.Dir(status.Extension.RootDir))
 			owner.Extensions = append(owner.Extensions, item)
@@ -177,7 +173,12 @@ func buildWorkspaceInventory(
 	return result
 }
 
-func inventoryExtension(status extensions.ExtensionStatus, available map[string]bool) protocol.InventoryExtension {
+// extensionOwnedTool is implemented by tools an extension registered.
+type extensionOwnedTool interface {
+	ExtensionID() string
+}
+
+func inventoryExtension(status extensions.ExtensionStatus, extensionOwners map[string]string) protocol.InventoryExtension {
 	ext := status.Extension
 	path := ext.ExecPath
 	if ext.Dir != "" && ext.Dir != ext.RootDir {
@@ -205,7 +206,7 @@ func inventoryExtension(status extensions.ExtensionStatus, available map[string]
 		item.Tools = append(item.Tools, protocol.InventoryTool{
 			Name:        tool.Name,
 			Description: toolSummary(tool.Name, tool.Description, ""),
-			Enabled:     tool.Enabled && available[tool.Name],
+			Enabled:     tool.Enabled && extensionOwners[tool.Name] == ext.ID,
 		})
 	}
 	sort.Slice(item.Tools, func(i, j int) bool { return item.Tools[i].Name < item.Tools[j].Name })

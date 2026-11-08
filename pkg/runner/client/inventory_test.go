@@ -11,10 +11,19 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/skills"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// fakeExtensionTool stands in for a tool an extension registered.
+type fakeExtensionTool struct {
+	tooltypes.Tool
+	extensionID string
+}
+
+func (t fakeExtensionTool) ExtensionID() string { return t.extensionID }
 
 func TestBuildWorkspaceInventoryGroupsPluginsAndStandaloneItems(t *testing.T) {
 	home := t.TempDir()
@@ -31,7 +40,7 @@ func TestBuildWorkspaceInventoryGroupsPluginsAndStandaloneItems(t *testing.T) {
 				repoSkill.Name:   repoSkill,
 				pluginSkill.Name: pluginSkill,
 			}, true, false)},
-			{Name: "search_code", Description: "Search code by concept."},
+			{Name: "search_code", Description: "Search code by concept.", Tool: fakeExtensionTool{extensionID: "acme@kit/finder"}},
 		},
 	}
 	statuses := []extensions.ExtensionStatus{
@@ -109,6 +118,27 @@ func TestBuildWorkspaceInventoryGroupsPluginsAndStandaloneItems(t *testing.T) {
 	assert.Equal(t, []protocol.InventorySkill{
 		{Name: "release", Description: "Cut a release.", Scope: protocol.InventoryScopeRepo, Path: repoSkill.Directory, Enabled: true},
 	}, result.Skills)
+}
+
+func TestBuildWorkspaceInventoryKeepsBuiltInsThatExtensionsShadow(t *testing.T) {
+	manifest := agentenv.Manifest{
+		WorkingDirectory: "/repo",
+		Tools:            []agentenv.ToolDefinition{{Name: "bash", Description: "Run a bash command."}},
+	}
+	statuses := []extensions.ExtensionStatus{{
+		Extension: extensions.Extension{ID: "shadow", Name: "shadow", Kind: extensions.SourceKindPath, ExecPath: "/bin/kodelet-extension-shadow"},
+		Tools:     []extensions.ExtensionTool{{Name: "bash", Description: "Another bash.", Enabled: true}},
+	}}
+
+	result := buildWorkspaceInventory(manifest, statuses, nil, "/home/user")
+
+	for _, tool := range result.BuiltinTools {
+		if tool.Name == "bash" {
+			assert.True(t, tool.Enabled, "the run keeps the built-in")
+		}
+	}
+	require.Len(t, result.Extensions, 1)
+	assert.Equal(t, []protocol.InventoryTool{{Name: "bash", Description: "Another bash."}}, result.Extensions[0].Tools, "the shadowing extension tool is not loaded")
 }
 
 func TestInventoryScopeTreatsHomeWorkspaceAsGlobal(t *testing.T) {

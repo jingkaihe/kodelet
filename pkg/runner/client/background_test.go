@@ -749,6 +749,7 @@ func TestBackgroundInventoryListsBackgroundToolsWithoutLeases(t *testing.T) {
 	var names []string
 	for _, tool := range result.Extensions[0].Tools {
 		names = append(names, tool.Name)
+		assert.True(t, tool.Enabled, "%s is owned by the extension that registered it", tool.Name)
 	}
 	assert.Equal(t, []string{"background_only", "lifetime"}, names, "background-only tools are part of what a run loads")
 	data, err := os.ReadFile(filepath.Join(workspace, "probe.json"))
