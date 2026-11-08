@@ -470,15 +470,7 @@ func (m *model) loadToolInventory() tea.Cmd {
 	}
 	state.loading = true
 	// List the same workspace slash commands come from, including a draft's directory.
-	var target chat.WorkspaceTarget
-	if m.conversationState != nil {
-		target = m.workspaceTargetForState(m.conversationState)
-	} else {
-		target = chat.WorkspaceTarget{ConversationID: m.conversationID}
-		if target.ConversationID == "" {
-			target.Profile = profileForRequest(m.profile)
-		}
-	}
+	target := m.workspaceTargetForState(m.conversationState)
 	parent, requestID := m.ctx, state.requestID
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(parent, 30*time.Second)

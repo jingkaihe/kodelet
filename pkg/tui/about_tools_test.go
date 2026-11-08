@@ -113,9 +113,7 @@ func TestAboutToolsTabLoadsOnFirstVisit(t *testing.T) {
 	m := newThemeTestModel(t, Config{Runner: runner})
 	m.width, m.height = 90, 40
 	m.resize()
-	require.NotNil(t, m.conversationState)
 	m.conversationID = "conversation-1"
-	m.conversationState.conversationID = "conversation-1"
 	m.openAboutDialog()
 	assert.Nil(t, m.updateAboutDialogKey("tab"), "the context tab loads nothing")
 	cmd := m.updateAboutDialogKey("tab")
@@ -145,10 +143,9 @@ func TestAboutToolsListsTheDraftWorkspace(t *testing.T) {
 	m := newThemeTestModel(t, Config{Runner: runner})
 	m.width, m.height = 90, 40
 	m.resize()
-	require.NotNil(t, m.conversationState)
-	m.conversationState.conversationID = ""
-	m.conversationState.requestedCWD = "/repo/other"
-	m.conversationState.profile = "review"
+	m.conversationID = ""
+	m.requestedCWD = "/repo/other"
+	m.profile = "review"
 	m.environmentProfile = "sandbox"
 	m.openAboutDialog()
 	cmd := m.setAboutTab(aboutTabTools)
