@@ -1,0 +1,492 @@
+/* Conversation tabs replace the workspace header strip above the transcript. */
+.chat-tabs-header {
+  --chat-tab-height: 1.9rem;
+  --chat-tab-hover: color-mix(in srgb, var(--kodelet-dark) 5%, transparent);
+  --chat-tab-active: color-mix(in srgb, var(--kodelet-dark) 7%, transparent);
+  --chat-tab-stroke: color-mix(in srgb, var(--kodelet-dark) 14%, transparent);
+  position: relative;
+  z-index: 15;
+  display: flex;
+  flex-shrink: 0;
+  min-width: 0;
+  min-height: calc(4.25rem + env(safe-area-inset-top));
+  align-items: center;
+  gap: 0.25rem;
+  /* Collapse into a switcher based on the main panel's width, not the viewport. */
+  container-type: inline-size;
+  border-bottom: 1px solid var(--tui-surface);
+  padding: env(safe-area-inset-top) calc(4rem + env(safe-area-inset-right)) 0
+    calc(4rem + env(safe-area-inset-left));
+  color: var(--kodelet-muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.chat-tabs-strip {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.chat-tabs-list {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  gap: 0.2rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chat-tabs-list::-webkit-scrollbar {
+  display: none;
+}
+
+.chat-tab {
+  display: flex;
+  flex: 0 1 13rem;
+  min-width: 8.5rem;
+  max-width: 15rem;
+  height: var(--chat-tab-height);
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 0.25rem;
+  color: var(--kodelet-muted);
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.chat-tab:hover {
+  background: var(--chat-tab-hover);
+  color: var(--kodelet-dark);
+}
+
+.chat-tab.is-active {
+  background: var(--chat-tab-active);
+  border-color: var(--chat-tab-stroke);
+  color: var(--kodelet-dark);
+}
+
+.chat-tab.is-dragging {
+  opacity: 0.45;
+}
+
+.chat-tab[data-status="unread"] .chat-tab-title,
+.chat-tab[data-status="attention"] .chat-tab-title {
+  color: var(--kodelet-dark);
+}
+
+.chat-tab.is-draft .chat-tab-title {
+  font-style: italic;
+}
+
+.chat-tab-select {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  align-items: center;
+  gap: 0.4rem;
+  border: 0;
+  border-radius: 0.2rem;
+  background: transparent;
+  padding: 0 0.15rem 0 0.55rem;
+  color: inherit;
+  font: inherit;
+  font-size: 0.72rem;
+  text-align: left;
+}
+
+.chat-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Replaces the close button: one menu holds the tab's copy and close actions. */
+.chat-tab-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 1.4rem;
+  height: 1.4rem;
+  align-items: center;
+  justify-content: center;
+  margin-right: 0.2rem;
+  border: 0;
+  border-radius: 0.2rem;
+  background: transparent;
+  color: inherit;
+  opacity: 0;
+}
+
+.chat-tab:hover .chat-tab-actions,
+.chat-tab:focus-within .chat-tab-actions,
+.chat-tab.is-active .chat-tab-actions,
+.chat-tab.is-menu-open .chat-tab-actions {
+  opacity: 1;
+}
+
+.chat-tab-actions:hover,
+.chat-tab-actions[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--kodelet-dark) 10%, transparent);
+  color: var(--kodelet-dark);
+}
+
+.chat-tab.is-menu-open:not(.is-active) {
+  background: var(--chat-tab-hover);
+}
+
+.chat-tab-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 0.9rem;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-tab-status.is-running,
+.chat-tab-status.is-unread {
+  color: var(--kodelet-link);
+}
+
+.chat-tab-status.is-running {
+  font-size: 0.9rem;
+}
+
+.chat-tab-status.is-attention {
+  color: var(--kodelet-warning);
+}
+
+.chat-tab-status.is-error {
+  color: var(--kodelet-error);
+}
+
+.chat-tab-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.chat-tab-status.is-attention .chat-tab-dot {
+  box-shadow: 0 0 0 0.18rem color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.chat-tabs-icon-button {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: var(--chat-tab-height);
+  height: var(--chat-tab-height);
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--kodelet-muted);
+}
+
+.chat-tabs-icon-button:hover:not(:disabled),
+.chat-tabs-icon-button[aria-expanded="true"] {
+  background: var(--chat-tab-hover);
+  color: var(--kodelet-dark);
+}
+
+.chat-tabs-count-dot {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.3rem;
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 999px;
+  background: var(--kodelet-warning);
+}
+
+.chat-tabs-trailing {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  min-width: 0;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+/* Only shown with the compact switcher, where the tabs and their menus are hidden. */
+.chat-tabs-active-actions {
+  display: none;
+}
+
+.chat-tab-menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  z-index: 30;
+  display: flex;
+  width: 17rem;
+  max-width: calc(100% - 1rem);
+  flex-direction: column;
+  border: 1px solid var(--sidebar-stroke-strong);
+  border-radius: 0.35rem;
+  background: var(--sidebar-surface-opaque);
+  padding: 0.3rem;
+  box-shadow: 0 14px 34px rgb(20 20 19 / 0.14);
+}
+
+.chat-tab-menu-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid var(--tui-surface);
+  padding: 0.4rem 0.55rem 0.55rem;
+}
+
+.chat-tab-menu-title {
+  color: var(--kodelet-dark);
+  font-size: 0.74rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.chat-tab-menu-path {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  color: var(--kodelet-muted);
+  font-size: 0.68rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.chat-tab-menu-path svg {
+  flex-shrink: 0;
+  margin-top: 0.12rem;
+}
+
+.chat-tab-menu-item {
+  display: flex;
+  min-height: 2.1rem;
+  align-items: center;
+  gap: 0.55rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  padding: 0.3rem 0.55rem;
+  color: var(--kodelet-dark);
+  font: inherit;
+  font-size: 0.74rem;
+  text-align: left;
+}
+
+.chat-tab-menu-item:hover,
+.chat-tab-menu-item:focus-visible {
+  background: var(--chat-tab-active);
+}
+
+.chat-tab-menu-item svg {
+  flex-shrink: 0;
+  color: var(--kodelet-muted);
+}
+
+.chat-tab-menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chat-tab-menu-shortcut {
+  color: var(--kodelet-muted);
+  font-family: inherit;
+  font-size: 0.66rem;
+}
+
+.chat-tab-menu-separator {
+  margin: 0.25rem 0;
+  border: 0;
+  border-top: 1px solid var(--tui-surface);
+}
+
+.chat-tabs-switcher {
+  display: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 2.3rem;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid var(--chat-tab-stroke);
+  border-radius: 0.25rem;
+  background: var(--chat-tab-hover);
+  padding: 0 0.55rem;
+  color: var(--kodelet-dark);
+  font: inherit;
+  text-align: left;
+}
+
+.chat-tabs-switcher .chat-tab-title {
+  flex: 1 1 auto;
+}
+
+.chat-tabs-count {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 1.3rem;
+  height: 1.3rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, var(--kodelet-dark) 9%, transparent);
+  padding: 0 0.3rem;
+  color: var(--kodelet-muted);
+  font-size: 0.68rem;
+}
+
+.chat-tabs-count .chat-tabs-count-dot {
+  top: -0.15rem;
+  right: -0.15rem;
+}
+
+.chat-tabs-menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  width: min(24rem, calc(100vw - 1.5rem));
+  max-height: min(28rem, 70vh);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--sidebar-stroke-strong);
+  border-radius: 0.35rem;
+  background: var(--sidebar-surface-opaque);
+  padding: 0.3rem;
+  box-shadow: 0 14px 34px rgb(20 20 19 / 0.14);
+}
+
+.chat-tabs-menu-list {
+  margin: 0;
+  overflow-y: auto;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-tabs-menu-item {
+  display: flex;
+  align-items: center;
+  border-radius: 0.25rem;
+  color: var(--kodelet-muted);
+}
+
+.chat-tabs-menu-item:hover,
+.chat-tabs-menu-item.is-active {
+  background: var(--chat-tab-active);
+  color: var(--kodelet-dark);
+}
+
+.chat-tabs-menu-select {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 2.25rem;
+  align-items: center;
+  gap: 0.5rem;
+  border: 0;
+  background: transparent;
+  padding: 0 0.5rem;
+  color: inherit;
+  font: inherit;
+  font-size: 0.74rem;
+  text-align: left;
+}
+
+.chat-tabs-menu-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-tabs-menu-cwd {
+  flex: 0 0 auto;
+  max-width: 8rem;
+  overflow: hidden;
+  color: var(--kodelet-muted);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-tabs-menu-new {
+  display: flex;
+  min-height: 2.25rem;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  border: 0;
+  border-top: 1px solid var(--tui-surface);
+  background: transparent;
+  padding: 0 0.5rem;
+  color: var(--kodelet-link);
+  font: inherit;
+  font-size: 0.74rem;
+}
+
+.chat-tabs-header button:focus-visible {
+  outline: 2px solid var(--kodelet-link);
+  outline-offset: -2px;
+}
+
+.chat-tabs-header button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+@container (max-width: 34rem) {
+  .chat-tabs-strip,
+  .chat-tabs-menu-trigger {
+    display: none;
+  }
+
+  .chat-tabs-trailing {
+    flex: 1 1 auto;
+  }
+
+  .chat-tabs-switcher {
+    display: flex;
+  }
+
+  .chat-tabs-active-actions {
+    display: inline-flex;
+  }
+
+  .chat-tabs-menu {
+    left: 0;
+    width: auto;
+  }
+}
+
+@media (min-width: 1024px) {
+  .chat-tabs-header {
+    min-height: var(--workspace-header-height);
+    padding: 0 0.5rem;
+  }
+}
+
+@media (any-pointer: coarse) {
+  .chat-tabs-header {
+    --chat-tab-height: 2.75rem;
+  }
+
+  .chat-tab-actions {
+    width: 2.75rem;
+    height: 2.75rem;
+    margin-right: 0;
+    opacity: 1;
+  }
+
+  .chat-tab-menu-item {
+    min-height: 2.75rem;
+  }
+}
