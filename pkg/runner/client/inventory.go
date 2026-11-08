@@ -127,7 +127,7 @@ func buildWorkspaceInventory(
 	}
 
 	for _, status := range statuses {
-		item := inventoryExtension(status, extensionOwners)
+		item := inventoryExtension(status, extensionOwners, cwd, homeDir)
 		if prefix := status.Extension.PluginPrefix; prefix != "" {
 			owner := plugin(prefix, item.Scope, filepath.Dir(status.Extension.RootDir))
 			owner.Extensions = append(owner.Extensions, item)
@@ -178,7 +178,7 @@ type extensionOwnedTool interface {
 	ExtensionID() string
 }
 
-func inventoryExtension(status extensions.ExtensionStatus, extensionOwners map[string]string) protocol.InventoryExtension {
+func inventoryExtension(status extensions.ExtensionStatus, extensionOwners map[string]string, cwd, homeDir string) protocol.InventoryExtension {
 	ext := status.Extension
 	path := ext.ExecPath
 	if ext.Dir != "" && ext.Dir != ext.RootDir {
@@ -188,7 +188,7 @@ func inventoryExtension(status extensions.ExtensionStatus, extensionOwners map[s
 		ID:        ext.ID,
 		Name:      ext.Name,
 		Version:   status.Version,
-		Scope:     extensionScope(ext.Kind),
+		Scope:     extensionScope(ext.Kind, cwd, homeDir),
 		Path:      path,
 		Status:    protocol.InventoryStatusReady,
 		Tools:     []protocol.InventoryTool{},
@@ -213,9 +213,18 @@ func inventoryExtension(status extensions.ExtensionStatus, extensionOwners map[s
 	return item
 }
 
-func extensionScope(kind extensions.SourceKind) string {
+// homeWorkspace reports whether the workspace's .kodelet is also the global one.
+func homeWorkspace(cwd, homeDir string) bool {
+	return homeDir != "" && filepath.Clean(cwd) == filepath.Clean(homeDir)
+}
+
+func extensionScope(kind extensions.SourceKind, cwd, homeDir string) string {
 	switch kind {
 	case extensions.SourceKindLocalStandalone, extensions.SourceKindLocalPlugin:
+		// Discovery finds ~/.kodelet first as the workspace's own when they coincide.
+		if homeWorkspace(cwd, homeDir) {
+			return protocol.InventoryScopeGlobal
+		}
 		return protocol.InventoryScopeRepo
 	case extensions.SourceKindGlobalStandalone, extensions.SourceKindGlobalPlugin:
 		return protocol.InventoryScopeGlobal
@@ -241,7 +250,7 @@ func inventoryScope(path, cwd, homeDir string) string {
 		}
 		return false
 	}
-	if within(cwd) && filepath.Clean(cwd) != filepath.Clean(homeDir) {
+	if within(cwd) && !homeWorkspace(cwd, homeDir) {
 		return protocol.InventoryScopeRepo
 	}
 	if within(homeDir) {

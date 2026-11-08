@@ -141,6 +141,33 @@ func TestBuildWorkspaceInventoryKeepsBuiltInsThatExtensionsShadow(t *testing.T) 
 	assert.Equal(t, []protocol.InventoryTool{{Name: "bash", Description: "Another bash."}}, result.Extensions[0].Tools, "the shadowing extension tool is not loaded")
 }
 
+func TestBuildWorkspaceInventoryKeepsOnePluginForAHomeWorkspace(t *testing.T) {
+	home := t.TempDir()
+	pluginDir := filepath.Join(home, ".kodelet", "plugins", "acme@kit")
+	statuses := []extensions.ExtensionStatus{
+		{Extension: extensions.Extension{
+			ID: "acme@kit/finder", Name: "finder", Kind: extensions.SourceKindLocalPlugin, PluginPrefix: "acme@kit",
+			RootDir: filepath.Join(pluginDir, "extensions"), Dir: filepath.Join(pluginDir, "extensions", "finder"),
+		}},
+		{Extension: extensions.Extension{
+			ID: "notes", Name: "notes", Kind: extensions.SourceKindLocalStandalone,
+			RootDir: filepath.Join(home, ".kodelet", "extensions"), Dir: filepath.Join(home, ".kodelet", "extensions", "notes"),
+		}},
+	}
+	discovered := map[string]*skills.Skill{
+		"acme@kit/helper": {Name: "acme@kit/helper", Description: "Help.", Directory: filepath.Join(pluginDir, "skills", "helper")},
+	}
+
+	result := buildWorkspaceInventory(agentenv.Manifest{WorkingDirectory: home}, statuses, discovered, home)
+
+	require.Len(t, result.Plugins, 1, "the plugin's extensions and skills stay together")
+	assert.Equal(t, protocol.InventoryScopeGlobal, result.Plugins[0].Scope)
+	assert.Len(t, result.Plugins[0].Extensions, 1)
+	assert.Len(t, result.Plugins[0].Skills, 1)
+	require.Len(t, result.Extensions, 1)
+	assert.Equal(t, protocol.InventoryScopeGlobal, result.Extensions[0].Scope)
+}
+
 func TestInventoryScopeTreatsHomeWorkspaceAsGlobal(t *testing.T) {
 	home := t.TempDir()
 	skillDir := filepath.Join(home, ".kodelet", "skills", "notes")
