@@ -1130,6 +1130,18 @@ const ChatPage: React.FC = () => {
     });
   };
 
+  // Opening from the sidebar or search replaces an untouched new chat, like a browser's new tab page.
+  const handleOpenConversation = (nextConversationId: string) => {
+    if (!conversationId && !draft.trim() && attachments.length === 0) {
+      if (conversationTabs.tabs.some((tab) => tab.id === nextConversationId)) {
+        conversationTabs.close(NEW_CHAT_TAB_ID);
+      } else {
+        replaceConversationTab(NEW_CHAT_TAB_ID, nextConversationId);
+      }
+    }
+    handleSelectConversation(nextConversationId);
+  };
+
   const handleSelectTab = (id: string) => {
     if (id !== NEW_CHAT_TAB_ID) {
       handleSelectConversation(id);
@@ -1184,7 +1196,7 @@ const ChatPage: React.FC = () => {
       });
     }
     handleCloseConversationSearch();
-    handleSelectConversation(nextConversationId);
+    handleOpenConversation(nextConversationId);
   };
 
   const handleForkConversation = async (sourceConversationId: string) => {
@@ -2733,7 +2745,7 @@ const ChatPage: React.FC = () => {
               onOpenShortcuts={() => setInfoDialog('shortcuts')}
               onOpenProviderSettings={() => setProviderSettingsOpen(true)}
               onSearch={handleOpenSidebarSearch}
-              onSelectConversation={handleSelectConversation}
+              onSelectConversation={handleOpenConversation}
               searchActive={sidebarSearchOpen}
             />
             <hr

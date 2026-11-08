@@ -113,6 +113,32 @@ describe('ChatPage conversation tabs', () => {
     expect(mockNavigate).toHaveBeenLastCalledWith('/c/conv-a');
   });
 
+  it('replaces an untouched new chat with the conversation opened from the sidebar', async () => {
+    useConversations();
+    const { rerender } = await visit(null);
+    expect(tabTitles()).toEqual(['New chat']);
+
+    fireEvent.click(within(screen.getByTestId('conversation-row-conv-a')).getByText('Alpha task'));
+    expect(mockNavigate).toHaveBeenLastCalledWith('/c/conv-a');
+    await revisit(rerender, 'conv-a');
+
+    expect(tabTitles()).toEqual(['Alpha task']);
+  });
+
+  it('keeps a new chat with unsent text when opening a conversation from the sidebar', async () => {
+    useConversations();
+    const { rerender } = await visit(null);
+    fireEvent.change(screen.getByTestId('composer-textarea'), {
+      target: { value: 'Half-written request' },
+    });
+
+    fireEvent.click(within(screen.getByTestId('conversation-row-conv-a')).getByText('Alpha task'));
+    await revisit(rerender, 'conv-a');
+
+    expect(tabTitles()).toEqual(['New chat', 'Alpha task']);
+    expect(screen.getByTestId('composer-textarea')).toHaveValue('');
+  });
+
   it('closes a tab without stopping its running agent', async () => {
     useConversations(['conv-a']);
     streamListeners();
