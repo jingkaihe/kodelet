@@ -82,6 +82,11 @@ describe('ApiService', () => {
         { onEvent: vi.fn() }
       );
       await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledOnce());
+      socket.receive({
+        type: 'event',
+        id: 's2',
+        event: { kind: 'done', conversation_id: 'conversation-1', turn_id: 'turn-1' },
+      });
       socket.receive({ type: 'closed', id: 's2', reason: 'completed' });
       await submitting;
 

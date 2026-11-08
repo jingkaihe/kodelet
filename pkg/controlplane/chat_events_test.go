@@ -469,6 +469,9 @@ func TestChatEventSubmitterThatFallsBehindIsToldToFollowAgain(t *testing.T) {
 
 	require.NoError(t, submitter.Send(chat.ChatEvent{Kind: "text-delta", Delta: "kept"}))
 	require.Error(t, submitter.Send(chat.ChatEvent{Kind: "text-delta", Delta: "lost"}))
+	// The run finishes before the page catches up, so its outcome was lost too.
+	require.Error(t, submitter.Send(chat.ChatEvent{Kind: "done", TurnID: "turn-1"}))
+	connection.end(subscription, chatEventEndCompleted)
 	connection.forward(subscription, false, false)
 
 	var messages []chatEventTestMessage

@@ -85,6 +85,23 @@ export const useViewedConversationStream = ({
     void apiService
       .streamConversation(conversationId, {
         signal: controller.signal,
+        // Events may have been missed while the page was not following the
+        // conversation, so reload its saved state. An active run is left to
+        // stream: its end reloads the transcript, and a snapshot now would
+        // replace its live output.
+        onResubscribed: ({ active }) => {
+          if (active) return;
+          const runVersion = conversationRunVersion.current;
+          void reconcileCompletedConversation(
+            conversationId,
+            () =>
+              !controller.signal.aborted &&
+              runStreams.viewedGeneration === streamInstance &&
+              viewedConversationIdRef.current === conversationId &&
+              !runStreams.sends[conversationId] &&
+              conversationRunVersion.current === runVersion
+          );
+        },
         onEvent: (event: ChatStreamEvent) => {
           if (controller.signal.aborted && !isBlockingUIRequestEvent(event)) return;
           if (event.conversation_id && event.conversation_id !== conversationId) {

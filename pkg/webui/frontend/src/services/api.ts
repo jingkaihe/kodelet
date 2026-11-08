@@ -40,7 +40,12 @@ import type {
   UserLoginDecisionResponse,
   WorkspaceTarget,
 } from '../types';
-import { type ChatEventLevel, ChatEventSocket, EVENT_SOCKET_UNAVAILABLE } from './chatEvents';
+import {
+  type ChatEventLevel,
+  type ChatEventResubscription,
+  ChatEventSocket,
+  EVENT_SOCKET_UNAVAILABLE,
+} from './chatEvents';
 
 class ApiService {
   private baseUrl = '';
@@ -621,6 +626,8 @@ class ApiService {
   /**
    * Follows a conversation until aborted or ended by the server. The lifecycle
    * level, for conversations the page is not showing, omits transcript detail.
+   * onResubscribed reports that events may have been missed; see
+   * ChatEventSocket.watch.
    */
   async streamConversation(
     conversationId: string,
@@ -628,6 +635,7 @@ class ApiService {
       signal?: AbortSignal;
       level?: ChatEventLevel;
       onEvent: (event: ChatStreamEvent) => void;
+      onResubscribed?: (state: ChatEventResubscription) => void;
     }
   ): Promise<void> {
     const socket = await this.eventSocket();

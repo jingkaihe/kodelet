@@ -453,10 +453,12 @@ func (c *chatEventConnection) finish(subscription *chatEventSubscription) string
 	switch {
 	case subscription.unsubscribed || c.closed:
 		return ""
-	case subscription.endReason != "":
-		return subscription.endReason
+	// A page that fell behind may have missed the run's outcome, so it must
+	// follow again and reconcile, even if the run has since completed.
 	case subscription.sink != nil && subscription.sink.overflowed.Load():
 		return chatEventEndOverflow
+	case subscription.endReason != "":
+		return subscription.endReason
 	default:
 		return chatEventEndEnded
 	}

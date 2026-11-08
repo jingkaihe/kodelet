@@ -21,6 +21,13 @@ import { type ChatEventDelivery, createChatEventDelivery } from './chatEventDeli
 /** A lifecycle subscription receives run start and end, resource reloads and prompts only. */
 export type ChatEventLevel = 'full' | 'lifecycle';
 
+/** A conversation's state when a subscription to it is established again. */
+export interface ChatEventResubscription {
+  /** Whether a run is active. */
+  active: boolean;
+  turnId?: string;
+}
+
 export const EVENT_CONNECTION_HEADER = 'X-Kodelet-Event-Connection';
 export const EVENT_SUBSCRIPTION_HEADER = 'X-Kodelet-Event-Subscription';
 
@@ -56,8 +63,14 @@ interface ConversationSubscription {
   deferredClose?: ClosedMessage;
   /** For a submission, the turn whose end completes it. */
   turnId?: string;
+  /** Set once a submission has delivered its turn's outcome. */
+  turnEnded?: boolean;
   /** Set once a submission follows its turn as an ordinary subscriber. */
   resumed?: boolean;
+  /** Set once the server has acknowledged this subscription. */
+  acknowledged?: boolean;
+  /** Called when the subscription is established again; see ChatEventSocket.watch. */
+  onResubscribed?: (state: ChatEventResubscription) => void;
   /** A run seen starting but not yet ending; checked after missed events. */
   openTurnId?: string;
   /** Events held while a missed ending is reconciled. */
@@ -131,6 +144,16 @@ export const turnReceiptEvents = (receipt: TurnReceipt): ChatStreamEvent[] => {
 
 const isTerminal = (event: ChatStreamEvent) => event.kind === 'done' || event.kind === 'error';
 
+const unconfirmedOutcome = (
+  subscription: { conversationId: string },
+  turnId: string
+): ChatStreamEvent => ({
+  kind: 'error',
+  error: UNCONFIRMED_OUTCOME,
+  conversation_id: subscription.conversationId,
+  turn_id: turnId,
+});
+
 const parseMessage = (data: unknown): ServerMessage | null => {
   if (typeof data !== 'string') return null;
   try {
@@ -164,7 +187,13 @@ export class ChatEventSocket {
     return this.connecting;
   }
 
-  /** Follows a conversation until aborted, rejected, or ended by the server. */
+  /**
+   * Follows a conversation until aborted, rejected, or ended by the server.
+   * After a disconnect, or after falling behind, the socket follows it again
+   * and reports a run ending it missed. Other events may be missing, so
+   * onResubscribed is then called, once that ending has been delivered, so the
+   * page can reload the conversation's saved state.
+   */
   watch(
     conversationId: string,
     options: {
@@ -172,6 +201,7 @@ export class ChatEventSocket {
       capabilities?: string;
       signal?: AbortSignal;
       onEvent: (event: ChatStreamEvent) => void;
+      onResubscribed?: (state: ChatEventResubscription) => void;
     }
   ): Promise<void> {
     if (options.signal?.aborted) return Promise.reject(abortError());
@@ -181,6 +211,7 @@ export class ChatEventSocket {
       options.level ?? 'full'
     );
     subscription.capabilities = options.capabilities;
+    subscription.onResubscribed = options.onResubscribed;
     const finished = this.register(subscription, options.signal);
     if (this.connectionId) this.attach(subscription);
     else this.ensureConnection();
@@ -266,6 +297,7 @@ export class ChatEventSocket {
       }
       subscription.attached = false;
       if (this.connectionId) this.attach(subscription);
+      else this.ensureConnection();
       return finished;
     }
 
@@ -278,6 +310,11 @@ export class ChatEventSocket {
       // The page reconnected while the request was in flight; the run's events
       // went to the old connection.
       this.attach(subscription);
+    } else {
+      // The socket closed while the request was in flight, and reconnecting
+      // may have given up meanwhile. Try again: the turn is then followed and
+      // reconciled, or reported lost.
+      this.ensureConnection();
     }
     return finished;
   }
@@ -508,7 +545,7 @@ export class ChatEventSocket {
     if (!subscription) return;
     switch (message.type) {
       case 'subscribed':
-        if (subscription.kind === 'conversation') void this.reconcile(subscription, message);
+        if (subscription.kind === 'conversation') void this.acknowledged(subscription, message);
         return;
       case 'event':
         if (subscription.kind !== 'conversation') return;
@@ -535,6 +572,9 @@ export class ChatEventSocket {
     const terminal = isTerminal(event);
     if (terminal && (!event.turn_id || event.turn_id === subscription.openTurnId)) {
       subscription.openTurnId = undefined;
+    }
+    if (terminal && subscription.turnId && event.turn_id === subscription.turnId) {
+      subscription.turnEnded = true;
     }
     try {
       subscription.delivery.deliver(event);
@@ -580,15 +620,80 @@ export class ChatEventSocket {
         });
         return;
       default:
+        if (subscription.turnId && !subscription.turnEnded) {
+          // The server ended a submission without delivering its outcome:
+          // report the saved one rather than assume the turn succeeded.
+          void this.settleFromSavedStatus(subscription, subscription.turnId);
+          return;
+        }
         this.end(subscription, {});
     }
   }
 
   /**
+   * Handles the server's acknowledgement of a subscription. Any later one
+   * follows a disconnect or falling behind, so the page is told once a missed
+   * run ending has been reported.
+   */
+  private async acknowledged(
+    subscription: ConversationSubscription,
+    acknowledgement: { active?: boolean; turnId?: string }
+  ) {
+    const resubscribed = Boolean(subscription.acknowledged);
+    subscription.acknowledged = true;
+    await this.reconcile(subscription, acknowledgement);
+    if (!resubscribed || this.subscriptions.get(subscription.id) !== subscription) return;
+    try {
+      subscription.onResubscribed?.({
+        active: Boolean(acknowledgement.active),
+        turnId: acknowledgement.turnId,
+      });
+    } catch (error) {
+      this.end(subscription, { error, unsubscribe: true });
+    }
+  }
+
+  /** Delivers a submitted turn's saved outcome, then ends the submission. */
+  private async settleFromSavedStatus(subscription: ConversationSubscription, turnId: string) {
+    const held: ChatStreamEvent[] = [];
+    subscription.held = held;
+    const events = await this.savedOutcome(subscription, turnId, held);
+    if (!events || subscription.held !== held) return;
+    subscription.held = undefined;
+    // The run has ended, so a saved status that is not final is not confirmed.
+    const outcome = events.length > 0 ? events : [unconfirmedOutcome(subscription, turnId)];
+    for (const event of [...outcome, ...held]) this.deliver(subscription, event);
+    this.end(subscription, {});
+  }
+
+  /**
+   * Reads a turn's saved outcome, retrying briefly, while the subscription
+   * holds later events. Resolves to undefined if the subscription moved on
+   * meanwhile. An outcome that cannot be read is reported as an error, never
+   * as success, so queued commands do not run after a turn that may have failed.
+   */
+  private async savedOutcome(
+    subscription: ConversationSubscription,
+    turnId: string,
+    held: ChatStreamEvent[]
+  ): Promise<ChatStreamEvent[] | undefined> {
+    for (const delay of this.options.receiptRetryDelaysMs ?? DEFAULT_RECEIPT_RETRY_DELAYS_MS) {
+      if (delay > 0) await sleep(delay);
+      if (subscription.held !== held) return undefined;
+      try {
+        return turnReceiptEvents(
+          await this.options.getTurnReceipt(subscription.conversationId, turnId)
+        );
+      } catch {
+        // Retry: the saved status is the only reliable account of the turn.
+      }
+    }
+    return [unconfirmedOutcome(subscription, turnId)];
+  }
+
+  /**
    * After following a conversation again, reports a run that ended unseen:
    * its saved status says how. Events that arrive meanwhile wait behind it.
-   * An outcome that cannot be read is reported as an error, never as success,
-   * so queued commands do not run after a turn that may have failed.
    */
   private async reconcile(
     subscription: ConversationSubscription,
@@ -599,28 +704,8 @@ export class ChatEventSocket {
     if (!missedTurn || (acknowledgement.active && acknowledgement.turnId === missedTurn)) return;
     const held: ChatStreamEvent[] = [];
     subscription.held = held;
-    let events: ChatStreamEvent[] | undefined;
-    for (const delay of this.options.receiptRetryDelaysMs ?? DEFAULT_RECEIPT_RETRY_DELAYS_MS) {
-      if (delay > 0) await sleep(delay);
-      if (subscription.held !== held) return;
-      try {
-        events = turnReceiptEvents(
-          await this.options.getTurnReceipt(subscription.conversationId, missedTurn)
-        );
-        break;
-      } catch {
-        // Retry: the saved status is the only reliable account of the turn.
-      }
-    }
-    events ??= [
-      {
-        kind: 'error',
-        error: UNCONFIRMED_OUTCOME,
-        conversation_id: subscription.conversationId,
-        turn_id: missedTurn,
-      },
-    ];
-    if (subscription.held !== held) return;
+    const events = await this.savedOutcome(subscription, missedTurn, held);
+    if (!events || subscription.held !== held) return;
     subscription.held = undefined;
     for (const event of [...events, ...held]) this.deliver(subscription, event);
   }
