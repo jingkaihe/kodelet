@@ -24,7 +24,7 @@ const DESIGN_NOTES = `
 Browser-style conversation tabs in the header strip above the transcript.
 
 - **Placement:** tabs fill the strip; no extra vertical space is used.
-- **Tab menu:** each tab has a ▾ where a close button would be, shown on hover and on the active tab. It also opens on right-click or Shift+F10. The menu shows the full title and workspace path, then **Copy conversation ID**, **Copy workspace path** and **Close tab**, replacing today's hidden click-the-path-to-copy. A new chat has nothing to copy yet, so it offers **Config** (the new chat settings: profile, runner and workspace) and **Close tab**.
+- **Tab menu:** each tab has a ▾ where a close button would be, shown on hover and on the active tab. It also opens on right-click or Shift+F10. The menu shows the full title and workspace path, then **Copy conversation ID** and **Close tab**, replacing today's hidden click-the-path-to-copy. A new chat has nothing to copy yet, so it offers **Config** (the new chat settings: profile, runner and workspace) and **Close tab**.
 - **Open conversations only:** a tab exists for each conversation you open. Clicking one in the sidebar opens it in a new tab, or focuses its tab if it is already open.
 - **Model:** a tab is just a conversation ID (or one unsaved draft). The URL \`/c/:id\` stays the source of truth for the active tab, and only the active conversation is mounted, so there is still one stream per window.
 - **Background status:** running comes from the conversation list the sidebar already polls. New activity and failed mark a run that finished while its tab was in the background, and needs input marks a tab waiting on an extension prompt. Opening the tab clears them.

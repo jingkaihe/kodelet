@@ -400,35 +400,22 @@ const ConversationTabs = ({
             </span>
           ) : null}
         </div>
-        {menuTab.draft ? (
-          onConfigOpen ? (
-            menuItem(
-              'Config',
-              <SlidersHorizontal aria-hidden="true" size={14} strokeWidth={1.7} />,
-              // Focus returns to the tab first, so the dialog restores it on close.
-              () => onConfigOpen(menuTab.id)
-            )
-          ) : null
-        ) : (
-          <>
-            {menuItem(
+        {menuTab.draft
+          ? onConfigOpen
+            ? menuItem(
+                'Config',
+                <SlidersHorizontal aria-hidden="true" size={14} strokeWidth={1.7} />,
+                // Focus returns to the tab first, so the dialog restores it on close.
+                () => onConfigOpen(menuTab.id)
+              )
+            : null
+          : menuItem(
               'Copy conversation ID',
               <Copy aria-hidden="true" size={14} strokeWidth={1.7} />,
               () => {
                 void copyToClipboard(menuTab.id);
               }
             )}
-            {menuTab.cwd
-              ? menuItem(
-                  'Copy workspace path',
-                  <Copy aria-hidden="true" size={14} strokeWidth={1.7} />,
-                  () => {
-                    void copyToClipboard(menuTab.cwd ?? '');
-                  }
-                )
-              : null}
-          </>
-        )}
         <hr className="chat-tab-menu-separator" />
         {menuItem('Close tab', <X aria-hidden="true" size={14} />, () => closeTab(menuTab.id), {
           shortcut: 'Delete',

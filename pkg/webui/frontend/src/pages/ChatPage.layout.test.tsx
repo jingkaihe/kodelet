@@ -25,7 +25,7 @@ import {
 describe('ChatPage layout and accessibility', () => {
   setupChatPageTests();
 
-  it('copies the conversation ID and workspace path from the tab menu', async () => {
+  it('copies the conversation ID from the tab menu', async () => {
     const user = userEvent.setup();
     const writeText = vi.spyOn(navigator.clipboard, 'writeText');
     const conversationIds = [
@@ -55,16 +55,11 @@ describe('ChatPage layout and accessibility', () => {
       await user.click(screen.getByRole('button', { name: `${title} actions` }));
       const menu = screen.getByRole('menu', { name: `${title} actions` });
       expect(menu).toHaveTextContent('/runner/kodelet');
-      expect(within(menu).getAllByRole('menuitem')).toHaveLength(3);
+      expect(within(menu).getAllByRole('menuitem')).toHaveLength(2);
       expect(within(menu).getByRole('menuitem', { name: 'Close tab' })).toBeInTheDocument();
       await user.click(within(menu).getByRole('menuitem', { name: 'Copy conversation ID' }));
-      expect(writeText).toHaveBeenLastCalledWith(id);
+      expect(writeText).toHaveBeenCalledExactlyOnceWith(id);
       expect(screen.queryByRole('menu')).not.toBeInTheDocument();
-
-      await user.click(screen.getByRole('button', { name: `${title} actions` }));
-      await user.click(screen.getByRole('menuitem', { name: 'Copy workspace path' }));
-      expect(writeText).toHaveBeenLastCalledWith('/runner/kodelet');
-      expect(writeText).toHaveBeenCalledTimes(2);
       writeText.mockClear();
     }
     expect(screen.getAllByRole('tab')).toHaveLength(2);

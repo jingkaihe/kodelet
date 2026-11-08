@@ -129,7 +129,7 @@ describe('ConversationTabs', () => {
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
-  it('copies the ID and path or closes from a saved conversation menu', async () => {
+  it('copies the ID or closes from a saved conversation menu', async () => {
     const user = userEvent.setup();
     const writeText = vi.spyOn(navigator.clipboard, 'writeText');
     const { onClose } = renderTabs();
@@ -141,19 +141,17 @@ describe('ConversationTabs', () => {
       within(menu)
         .getAllByRole('menuitem')
         .map((item) => item.textContent)
-    ).toEqual(['Copy conversation ID', 'Copy workspace path', 'Close tabDel']);
+    ).toEqual(['Copy conversation ID', 'Close tabDel']);
     expect(within(menu).getByRole('menuitem', { name: 'Copy conversation ID' })).toHaveFocus();
 
     await user.keyboard('{ArrowDown}');
-    expect(within(menu).getByRole('menuitem', { name: 'Copy workspace path' })).toHaveFocus();
+    expect(within(menu).getByRole('menuitem', { name: 'Close tab' })).toHaveFocus();
+    await user.keyboard('{ArrowDown}');
+    expect(within(menu).getByRole('menuitem', { name: 'Copy conversation ID' })).toHaveFocus();
     await user.keyboard('{Enter}');
-    expect(writeText).toHaveBeenLastCalledWith('/work/beta');
+    expect(writeText).toHaveBeenLastCalledWith('conv-b');
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     expect(tab('Beta')).toHaveFocus();
-
-    await user.click(screen.getByRole('button', { name: 'Beta actions' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Copy conversation ID' }));
-    expect(writeText).toHaveBeenLastCalledWith('conv-b');
 
     await user.click(screen.getByRole('button', { name: 'Beta actions' }));
     await user.click(screen.getByRole('menuitem', { name: 'Close tab' }));
@@ -174,8 +172,6 @@ describe('ConversationTabs', () => {
 
     fireEvent.contextMenu(tab('Gamma'));
     expect(screen.getByRole('menu', { name: 'Gamma actions' })).toBeInTheDocument();
-    // A conversation without a workspace has no path to copy.
-    expect(screen.queryByRole('menuitem', { name: 'Copy workspace path' })).not.toBeInTheDocument();
     await user.click(document.body);
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
