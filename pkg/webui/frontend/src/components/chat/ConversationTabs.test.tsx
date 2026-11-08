@@ -1,7 +1,9 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import postcss from 'postcss';
 import { type ComponentProps, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import tabStyles from '../../styles/conversation-tabs.css?raw';
 import ConversationTabs, {
   adjacentConversationTabId,
   type ConversationTab,
@@ -97,6 +99,37 @@ describe('ConversationTabs', () => {
     expect(tab('Alpha')).toHaveAttribute('tabindex', '0');
     expect(tab('Beta')).toHaveAttribute('tabindex', '-1');
     expect(tab('Beta')).toHaveAttribute('title', 'Beta\nRunning\n/work/beta');
+  });
+
+  it('keeps a long title from pushing the tab actions out of view', async () => {
+    const user = userEvent.setup();
+    const title = 'Investigate the flaky integration test and summarise the cause. '
+      .repeat(20)
+      .trim();
+    renderTabs({ tabs: [{ id: 'conv-a', title, cwd: '/work/alpha' }] });
+    await user.click(screen.getByRole('button', { name: `${title} actions` }));
+    const menu = screen.getByRole('menu', { name: `${title} actions` });
+    // The clamped title stays available in full on hover.
+    expect(within(menu).getByText(title)).toHaveAttribute('title', title);
+    expect(within(menu).getByRole('menuitem', { name: /Close tab/ })).toBeInTheDocument();
+
+    const declarations = (selector: string) => {
+      const values: Record<string, string> = {};
+      postcss.parse(tabStyles).walkRules(selector, (rule) => {
+        rule.walkDecls((declaration) => {
+          values[declaration.prop] = declaration.value;
+        });
+      });
+      return values;
+    };
+    expect(declarations('.chat-tab-menu')).toMatchObject({
+      'max-height': expect.any(String),
+      'overflow-y': 'auto',
+    });
+    expect(declarations('.chat-tab-menu-title')).toMatchObject({
+      overflow: 'hidden',
+      '-webkit-line-clamp': '3',
+    });
   });
 
   it('selects tabs by click and moves with the arrow, Home and End keys', () => {

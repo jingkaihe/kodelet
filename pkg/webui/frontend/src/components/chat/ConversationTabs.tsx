@@ -386,7 +386,9 @@ const ConversationTabs = ({
         style={{ left: menuLeft }}
       >
         <div className="chat-tab-menu-header" role="none">
-          <span className="chat-tab-menu-title">{menuTab.title}</span>
+          <span className="chat-tab-menu-title" title={menuTab.title}>
+            {menuTab.title}
+          </span>
           {menuTab.cwd ? (
             <span className="chat-tab-menu-path">
               <FolderOpen aria-hidden="true" size={12} strokeWidth={1.6} />

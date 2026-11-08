@@ -226,6 +226,9 @@
   display: flex;
   width: 17rem;
   max-width: calc(100% - 1rem);
+  /* The main panel clips the menu, so long content scrolls rather than hiding actions. */
+  max-height: min(24rem, calc(100dvh - 6rem));
+  overflow-y: auto;
   flex-direction: column;
   border: 1px solid var(--sidebar-stroke-strong);
   border-radius: 0.35rem;
@@ -243,7 +246,12 @@
   padding: 0.4rem 0.55rem 0.55rem;
 }
 
+/* A new conversation's title is its whole first prompt until it is named. */
 .chat-tab-menu-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
   color: var(--kodelet-dark);
   font-size: 0.74rem;
   line-height: 1.4;
