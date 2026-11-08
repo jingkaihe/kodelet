@@ -107,9 +107,10 @@ describe('AboutKodeletDialog', () => {
   });
 
   describe('tools tab', () => {
-    it('is hidden without a workspace target', () => {
+    it('is hidden without a workspace target', async () => {
       render(<AboutKodeletDialog onClose={vi.fn()} runner={makeRunner()} terminalAuthorized />);
       expect(screen.queryByRole('tab', { name: 'Tools' })).not.toBeInTheDocument();
+      await screen.findByText('1.2.3', { selector: 'dd' });
     });
 
     it('loads the tool list when first opened and keeps it across tab switches', async () => {
@@ -146,7 +147,7 @@ describe('AboutKodeletDialog', () => {
       expect(mockGetToolInventory).toHaveBeenCalledOnce();
     });
 
-    it('explains runners that cannot list tools without calling them', () => {
+    it('explains runners that cannot list tools without calling them', async () => {
       const { rerender } = render(
         <AboutKodeletDialog
           initialTab="tools"
@@ -169,6 +170,8 @@ describe('AboutKodeletDialog', () => {
       );
       expect(screen.getByText(/This runner is not ready/)).toBeInTheDocument();
       expect(mockGetToolInventory).not.toHaveBeenCalled();
+      // The about tab's status request still settles while the tools tab is shown.
+      await act(async () => {});
     });
 
     it('reports load failures and retries', async () => {
