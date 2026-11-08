@@ -194,53 +194,10 @@ describe('ChatPage streaming, steering, and navigation', () => {
     expect(shown?.[1]).not.toHaveProperty('level');
   });
 
-  it('reloads the shown conversation after following it again, unless a run is active', async () => {
-    setRouteParams({ id: 'conv-123' });
-    const saved = {
-      id: 'conv-123',
-      createdAt: '2024-01-01T00:00:00Z',
-      updatedAt: '2024-01-01T00:00:00Z',
-      messageCount: 2,
-      messages: [
-        { role: 'user' as const, content: 'first question' },
-        { role: 'assistant' as const, content: 'first answer' },
-      ],
-      toolResults: {},
-    };
-    mockGetConversation.mockResolvedValueOnce(saved).mockResolvedValue({
-      ...saved,
-      messageCount: 4,
-      messages: [
-        ...saved.messages,
-        { role: 'user' as const, content: 'question from another client' },
-        { role: 'assistant' as const, content: 'answer from another client' },
-      ],
-    });
-    let onResubscribed!: (state: { active: boolean }) => void;
-    mockStreamConversation.mockImplementation(async (_id, options) => {
-      onResubscribed = (options as { onResubscribed: typeof onResubscribed }).onResubscribed;
-      return new Promise<void>(() => undefined);
-    });
-
-    render(<ChatPage />);
-
-    await waitFor(() => expect(screen.getByText('first answer')).toBeInTheDocument());
-    await waitFor(() => expect(onResubscribed).toBeDefined());
-    // An active run streams on; its end reloads the transcript.
-    await act(async () => {
-      onResubscribed({ active: true });
-    });
-    expect(mockGetConversation).toHaveBeenCalledTimes(1);
-
-    // Events may have been missed while the page was disconnected.
-    await act(async () => {
-      onResubscribed({ active: false });
-    });
-    await waitFor(() => expect(screen.getByText('answer from another client')).toBeInTheDocument());
-    expect(mockGetConversation).toHaveBeenCalledTimes(2);
-  });
-
-  it('reloads the shown conversation once a run active on following it again fails', async () => {
+  it.each([
+    'idle',
+    'failed',
+  ] as const)('reloads missed messages after resubscribing when the run is %s', async (outcome) => {
     setRouteParams({ id: 'conv-123' });
     const saved = {
       id: 'conv-123',
@@ -275,20 +232,27 @@ describe('ChatPage streaming, steering, and navigation', () => {
 
     await waitFor(() => expect(screen.getByText('first answer')).toBeInTheDocument());
     await waitFor(() => expect(stream).toBeDefined());
-    // A turn finished unseen while disconnected, and another is running now.
+    // An active run streams on; its end reloads the transcript.
     await act(async () => {
       stream.onResubscribed({ active: true });
-      stream.onEvent({ kind: 'conversation', conversation_id: 'conv-123', turn_id: 'turn-2' });
+      if (outcome === 'failed') {
+        stream.onEvent({ kind: 'conversation', conversation_id: 'conv-123', turn_id: 'turn-2' });
+      }
     });
     expect(mockGetConversation).toHaveBeenCalledTimes(1);
 
+    // Events may have been missed while the page was disconnected.
     await act(async () => {
-      stream.onEvent({
-        kind: 'error',
-        conversation_id: 'conv-123',
-        turn_id: 'turn-2',
-        error: 'provider failed',
-      });
+      if (outcome === 'idle') {
+        stream.onResubscribed({ active: false });
+      } else {
+        stream.onEvent({
+          kind: 'error',
+          conversation_id: 'conv-123',
+          turn_id: 'turn-2',
+          error: 'provider failed',
+        });
+      }
     });
     await waitFor(() => expect(screen.getByText('answer from another client')).toBeInTheDocument());
     expect(mockGetConversation).toHaveBeenCalledTimes(2);

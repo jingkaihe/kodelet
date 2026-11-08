@@ -375,11 +375,9 @@ func TestChatEventSocketSubmissionValidatesItsConnection(t *testing.T) {
 
 func TestChatEventSocketDisconnectKeepsRunAndDismissesPrompt(t *testing.T) {
 	var server *Server
-	prompted := make(chan struct{})
 	promptStatus := make(chan string, 1)
 	release := make(chan struct{})
 	server, httpServer := chatEventTestServer(t, func(ctx context.Context, req ChatRequest, _ ChatEventSink) (string, error) {
-		close(prompted)
 		response, err := server.uiInputBrokerForRun(req.ConversationID).Confirm(ctx, extensions.UIConfirmRequest{ID: "approval", Title: "Allow?"})
 		if err != nil {
 			return req.ConversationID, err
@@ -401,7 +399,6 @@ func TestChatEventSocketDisconnectKeepsRunAndDismissesPrompt(t *testing.T) {
 			chatEventSubscriptionHeader: "send-1",
 		})
 	require.Equal(t, http.StatusAccepted, response.StatusCode)
-	<-prompted
 	for client.readEvent("send-1").Kind != "ui-confirm-request" {
 	}
 
@@ -416,73 +413,52 @@ func TestChatEventSocketDisconnectKeepsRunAndDismissesPrompt(t *testing.T) {
 }
 
 func TestChatEventSubscriptionReportsOverflow(t *testing.T) {
-	server := &Server{conversationService: &mockConversationService{}}
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	connection := &chatEventConnection{
-		server:        server,
-		ctx:           ctx,
-		cancel:        cancel,
-		out:           make(chan []byte, 8),
-		subscriptions: make(map[string]*chatEventSubscription),
+	for _, name := range []string{"watcher", "completed submitter"} {
+		t.Run(name, func(t *testing.T) {
+			server := &Server{conversationService: &mockConversationService{}}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			connection := &chatEventConnection{
+				server:        server,
+				ctx:           ctx,
+				cancel:        cancel,
+				out:           make(chan []byte, 8),
+				subscriptions: make(map[string]*chatEventSubscription),
+			}
+			subscription, err := connection.reserve("events-1")
+			require.NoError(t, err)
+			sink := newSizedSubscriberEventSink(1)
+			sink.ctx = subscription.ctx
+			require.True(t, connection.attach(subscription, "conversation", sink))
+
+			if name == "watcher" {
+				_, registered := server.registerChatSubscriber("conversation", sink)
+				require.True(t, registered)
+				// The second broadcast finds the buffer full and drops the subscriber.
+				server.broadcastChatEvent("conversation", chat.ChatEvent{Kind: "text-delta", Delta: "kept"})
+				server.broadcastChatEvent("conversation", chat.ChatEvent{Kind: "text-delta", Delta: "lost"})
+			} else {
+				submitter := submitterEventSink{sink}
+				require.NoError(t, submitter.Send(chat.ChatEvent{Kind: "text-delta", Delta: "kept"}))
+				require.Error(t, submitter.Send(chat.ChatEvent{Kind: "text-delta", Delta: "lost"}))
+				// Even a completed turn must report overflow when its outcome was lost.
+				require.Error(t, submitter.Send(chat.ChatEvent{Kind: "done", TurnID: "turn-1"}))
+				connection.end(subscription, chatEventEndCompleted)
+			}
+			connection.forward(subscription, false, false)
+
+			var messages []chatEventTestMessage
+			for len(connection.out) > 0 {
+				var message chatEventTestMessage
+				require.NoError(t, json.Unmarshal(<-connection.out, &message))
+				messages = append(messages, message)
+			}
+			require.Len(t, messages, 2)
+			assert.Equal(t, "event", messages[0].Type)
+			assert.Equal(t, chatEventTestMessage{Type: "closed", ID: "events-1", Reason: chatEventEndOverflow}, messages[1])
+			assert.ErrorIs(t, subscription.ctx.Err(), context.Canceled, "an overflowed subscription no longer owns interactive UI")
+		})
 	}
-	subscription, err := connection.reserve("watch-1")
-	require.NoError(t, err)
-	sink := newSizedSubscriberEventSink(1)
-	sink.ctx = subscription.ctx
-	_, registered := server.registerChatSubscriber("conversation", sink)
-	require.True(t, registered)
-	require.True(t, connection.attach(subscription, "conversation", sink))
-
-	// The second event finds the buffer full, so the subscriber is dropped.
-	server.broadcastChatEvent("conversation", chat.ChatEvent{Kind: "text-delta", Delta: "kept"})
-	server.broadcastChatEvent("conversation", chat.ChatEvent{Kind: "text-delta", Delta: "lost"})
-	connection.forward(subscription, false, false)
-
-	var messages []chatEventTestMessage
-	for len(connection.out) > 0 {
-		var message chatEventTestMessage
-		require.NoError(t, json.Unmarshal(<-connection.out, &message))
-		messages = append(messages, message)
-	}
-	require.Len(t, messages, 2)
-	assert.Equal(t, "event", messages[0].Type)
-	assert.Equal(t, chatEventTestMessage{Type: "closed", ID: "watch-1", Reason: chatEventEndOverflow}, messages[1])
-	assert.Error(t, subscription.ctx.Err(), "an overflowed subscription no longer owns interactive UI")
-}
-
-func TestChatEventSubmitterThatFallsBehindIsToldToFollowAgain(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	connection := &chatEventConnection{
-		server:        &Server{},
-		ctx:           ctx,
-		cancel:        cancel,
-		out:           make(chan []byte, 8),
-		subscriptions: make(map[string]*chatEventSubscription),
-	}
-	subscription, err := connection.reserve("send-1")
-	require.NoError(t, err)
-	sink := newSizedSubscriberEventSink(1)
-	require.True(t, connection.attach(subscription, "conversation", sink))
-	submitter := submitterEventSink{sink}
-
-	require.NoError(t, submitter.Send(chat.ChatEvent{Kind: "text-delta", Delta: "kept"}))
-	require.Error(t, submitter.Send(chat.ChatEvent{Kind: "text-delta", Delta: "lost"}))
-	// The run finishes before the page catches up, so its outcome was lost too.
-	require.Error(t, submitter.Send(chat.ChatEvent{Kind: "done", TurnID: "turn-1"}))
-	connection.end(subscription, chatEventEndCompleted)
-	connection.forward(subscription, false, false)
-
-	var messages []chatEventTestMessage
-	for len(connection.out) > 0 {
-		var message chatEventTestMessage
-		require.NoError(t, json.Unmarshal(<-connection.out, &message))
-		messages = append(messages, message)
-	}
-	require.Len(t, messages, 2)
-	assert.Equal(t, "event", messages[0].Type)
-	assert.Equal(t, chatEventTestMessage{Type: "closed", ID: "send-1", Reason: chatEventEndOverflow}, messages[1])
 }
 
 func TestCoalesceChatDeltasMergesAdjacentDeltasOnly(t *testing.T) {

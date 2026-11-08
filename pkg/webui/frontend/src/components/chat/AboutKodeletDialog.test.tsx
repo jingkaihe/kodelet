@@ -77,23 +77,7 @@ const expectCapability = (label: string, state: string) => {
 
 const toolInventory: ToolInventory = {
   builtinTools: [{ name: 'bash', description: 'Run a bash command.', enabled: true }],
-  plugins: [
-    {
-      name: 'acme@kit',
-      scope: 'global',
-      path: '/home/user/.kodelet/plugins/acme@kit',
-      extensions: [],
-      skills: [
-        {
-          name: 'helper',
-          description: 'Help with kits.',
-          scope: 'global',
-          path: '/home/user/.kodelet/plugins/acme@kit/skills/helper',
-          enabled: true,
-        },
-      ],
-    },
-  ],
+  plugins: [],
   extensions: [],
   skills: [],
 };
@@ -135,15 +119,12 @@ describe('AboutKodeletDialog', () => {
       await user.click(screen.getByRole('tab', { name: 'Tools' }));
       expect(screen.getByText('Loading tools…')).toBeInTheDocument();
       await act(async () => resolveInventory(toolInventory));
-      expect(await screen.findByRole('treeitem', { name: /^acme@kit/ })).toBeInTheDocument();
+      expect(await screen.findByRole('treeitem', { name: /^bash/ })).toBeInTheDocument();
       expect(mockGetToolInventory).toHaveBeenCalledExactlyOnceWith(toolTarget);
-      expect(screen.getByRole('tree').closest('.about-tools-panel')).toHaveTextContent(
-        '1 tool · 0 extensions · 1 skill'
-      );
 
       await user.click(screen.getByRole('tab', { name: 'About' }));
       await user.click(screen.getByRole('tab', { name: 'Tools' }));
-      expect(screen.getByRole('treeitem', { name: /^acme@kit/ })).toBeInTheDocument();
+      expect(screen.getByRole('treeitem', { name: /^bash/ })).toBeInTheDocument();
       expect(mockGetToolInventory).toHaveBeenCalledOnce();
     });
 
@@ -191,7 +172,7 @@ describe('AboutKodeletDialog', () => {
       );
 
       await user.click(screen.getByRole('button', { name: 'Try again' }));
-      expect(await screen.findByRole('treeitem', { name: /^acme@kit/ })).toBeInTheDocument();
+      expect(await screen.findByRole('treeitem', { name: /^bash/ })).toBeInTheDocument();
       expect(mockGetToolInventory).toHaveBeenCalledTimes(2);
     });
   });

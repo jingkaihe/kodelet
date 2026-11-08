@@ -311,7 +311,7 @@ describe('ChatEventSocket', () => {
     expect(lastSent(reconnected)).toEqual({ type: 'unsubscribe', id: 's1' });
   });
 
-  it('follows again after falling behind', async () => {
+  it('reports a missed ending before notifying the page it follows again after overflow', async () => {
     const getTurnReceipt = vi.fn(async (conversationId: string, turnId: string) => ({
       conversationId,
       turnId,
@@ -319,9 +319,14 @@ describe('ChatEventSocket', () => {
     }));
     const events = createSocket({ getTurnReceipt });
     const socket = await connected(events);
-    const onEvent = vi.fn();
-    void events.watch('conversation', { onEvent });
+    const calls: string[] = [];
+    void events.watch('conversation', {
+      onEvent: (event) => calls.push(event.kind),
+      onResubscribed: (state) => calls.push(`resubscribed:${state.active}`),
+    });
+    socket.receive({ type: 'subscribed', id: 's1', conversationId: 'conversation' });
     socket.event('s1', { kind: 'conversation', conversation_id: 'conversation', turn_id: 't1' });
+    await vi.waitFor(() => expect(calls).toEqual(['conversation']));
     socket.receive({ type: 'closed', id: 's1', reason: 'overflow' });
     expect(lastSent(socket)).toEqual({
       type: 'subscribe',
@@ -330,13 +335,7 @@ describe('ChatEventSocket', () => {
       level: 'full',
     });
     socket.receive({ type: 'subscribed', id: 's1', conversationId: 'conversation' });
-    await vi.waitFor(() =>
-      expect(onEvent).toHaveBeenLastCalledWith({
-        kind: 'done',
-        conversation_id: 'conversation',
-        turn_id: 't1',
-      })
-    );
+    await vi.waitFor(() => expect(calls).toEqual(['conversation', 'done', 'resubscribed:false']));
   });
 
   it('reports the socket unavailable when it closes before its handshake, then tries again', async () => {
@@ -434,6 +433,7 @@ describe('ChatEventSocket', () => {
   });
 
   it('follows a turn accepted after reconnecting gave up', async () => {
+    vi.useFakeTimers();
     const getTurnReceipt = vi.fn(async (conversationId: string, turnId: string) => ({
       conversationId,
       turnId,
@@ -453,15 +453,17 @@ describe('ChatEventSocket', () => {
           }),
       }
     );
-    await vi.waitFor(() => expect(respond).toBeDefined());
+    await vi.advanceTimersByTimeAsync(0);
     socket.close();
     // The only reconnect attempt fails while the request is still in flight.
-    await vi.waitFor(() => expect(FakeSocket.instances).toHaveLength(2));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(FakeSocket.instances).toHaveLength(2);
     latestSocket().close();
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await vi.advanceTimersByTimeAsync(0);
 
     respond(accepted('t1'));
-    await vi.waitFor(() => expect(FakeSocket.instances).toHaveLength(3));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(FakeSocket.instances).toHaveLength(3);
     const reconnected = latestSocket();
     reconnected.accept('connection-3');
     expect(reconnected.sent).toEqual([
@@ -474,31 +476,6 @@ describe('ChatEventSocket', () => {
       conversation_id: 'conversation',
       turn_id: 't1',
     });
-  });
-
-  it('tells the page it follows a conversation again after reporting a missed ending', async () => {
-    const getTurnReceipt = vi.fn(async (conversationId: string, turnId: string) => ({
-      conversationId,
-      turnId,
-      status: 'succeeded',
-    }));
-    const events = createSocket({ getTurnReceipt });
-    const socket = await connected(events);
-    const calls: string[] = [];
-    void events.watch('conversation', {
-      onEvent: (event) => calls.push(event.kind),
-      onResubscribed: (state) => calls.push(`resubscribed:${state.active}`),
-    });
-    socket.receive({ type: 'subscribed', id: 's1', conversationId: 'conversation' });
-    socket.event('s1', { kind: 'conversation', conversation_id: 'conversation', turn_id: 't1' });
-    await vi.waitFor(() => expect(calls).toEqual(['conversation']));
-
-    socket.close();
-    await vi.waitFor(() => expect(FakeSocket.instances).toHaveLength(2));
-    const reconnected = latestSocket();
-    reconnected.accept('connection-2');
-    reconnected.receive({ type: 'subscribed', id: 's1', conversationId: 'conversation' });
-    await vi.waitFor(() => expect(calls).toEqual(['conversation', 'done', 'resubscribed:false']));
   });
 
   it('tells the page it follows a conversation again when the first acknowledgement was lost', async () => {

@@ -135,30 +135,21 @@ describe('useConversationTabs', () => {
     expect(ids(result.current.tabs)).toEqual(['a']);
   });
 
-  it('turns the new chat tab into the started conversation', () => {
-    const { result, rerender } = renderTabs('a');
-    rerender({ id: null });
-
-    act(() => result.current.replace(NEW_CHAT_TAB_ID, 'started'));
-    rerender({ id: 'started' });
-
-    expect(ids(result.current.tabs)).toEqual(['a', 'started']);
-  });
-
-  it('restores tabs and their remembered titles in the same window', () => {
+  it('restores reordered tabs and their remembered titles in the same window', () => {
     const first = renderTabs('a');
     first.rerender({ id: 'b' });
     act(() => first.result.current.remember([{ id: 'b', title: 'Beta', cwd: '/beta' }]));
+    act(() => first.result.current.reorder(['b', 'a']));
     first.unmount();
 
     expect(
       JSON.parse(window.sessionStorage.getItem(CONVERSATION_TABS_STORAGE_KEY) || '{}')
-    ).toEqual({ tabs: [{ id: 'a' }, { id: 'b', title: 'Beta', cwd: '/beta' }] });
+    ).toEqual({ tabs: [{ id: 'b', title: 'Beta', cwd: '/beta' }, { id: 'a' }] });
 
     const { result } = renderTabs('c');
     expect(result.current.tabs).toEqual([
-      { id: 'a', title: undefined, cwd: undefined },
       { id: 'b', title: 'Beta', cwd: '/beta' },
+      { id: 'a', title: undefined, cwd: undefined },
       { id: 'c' },
     ]);
   });
@@ -176,14 +167,5 @@ describe('useConversationTabs', () => {
     );
 
     expect(result.current.tabs).toBe(tabs);
-  });
-
-  it('reorders tabs', () => {
-    const { result, rerender } = renderTabs('a');
-    rerender({ id: 'b' });
-
-    act(() => result.current.reorder(['b', 'a']));
-
-    expect(ids(result.current.tabs)).toEqual(['b', 'a']);
   });
 });

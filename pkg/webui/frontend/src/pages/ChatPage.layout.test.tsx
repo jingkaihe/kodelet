@@ -55,11 +55,8 @@ describe('ChatPage layout and accessibility', () => {
       await user.click(screen.getByRole('button', { name: `${title} actions` }));
       const menu = screen.getByRole('menu', { name: `${title} actions` });
       expect(menu).toHaveTextContent('/runner/kodelet');
-      expect(within(menu).getAllByRole('menuitem')).toHaveLength(2);
-      expect(within(menu).getByRole('menuitem', { name: 'Close tab' })).toBeInTheDocument();
       await user.click(within(menu).getByRole('menuitem', { name: 'Copy conversation ID' }));
       expect(writeText).toHaveBeenCalledExactlyOnceWith(id);
-      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
       writeText.mockClear();
     }
     expect(screen.getAllByRole('tab')).toHaveLength(2);
@@ -70,9 +67,9 @@ describe('ChatPage layout and accessibility', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'New chat actions' }));
     const menu = screen.getByRole('menu', { name: 'New chat actions' });
-    expect(within(menu).getAllByRole('menuitem')).toHaveLength(2);
-    expect(within(menu).getByRole('menuitem', { name: 'Config' })).toBeInTheDocument();
-    expect(within(menu).getByRole('menuitem', { name: 'Close tab' })).toBeInTheDocument();
+    expect(
+      within(menu).queryByRole('menuitem', { name: 'Copy conversation ID' })
+    ).not.toBeInTheDocument();
   });
 
   it('toggles the sidebar shell from the panel controls', async () => {

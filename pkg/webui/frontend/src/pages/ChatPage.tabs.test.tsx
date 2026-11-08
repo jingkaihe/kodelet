@@ -126,9 +126,9 @@ describe('ChatPage conversation tabs', () => {
     expect(tabTitles()).toEqual(['Alpha task']);
   });
 
-  it('keeps a new chat with unsent text when opening a conversation from the sidebar', async () => {
+  it('preserves an unsent new chat when opening a conversation and returning from the sidebar', async () => {
     useConversations();
-    const { rerender } = await visit(null);
+    const { rerender } = await renderChatWithRunner();
     fireEvent.change(screen.getByTestId('composer-textarea'), {
       target: { value: 'Half-written request' },
     });
@@ -138,6 +138,13 @@ describe('ChatPage conversation tabs', () => {
 
     expect(tabTitles()).toEqual(['New chat', 'Alpha task']);
     expect(screen.getByTestId('composer-textarea')).toHaveValue('');
+
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    expect(mockNavigate).toHaveBeenLastCalledWith('/');
+    expect(screen.queryByTestId('new-chat-dialog')).not.toBeInTheDocument();
+    await revisit(rerender, null);
+    expect(screen.getByTestId('composer-textarea')).toHaveValue('Half-written request');
+    expect(tabTitles()).toEqual(['New chat', 'Alpha task']);
   });
 
   it('closes a tab without stopping its running agent', async () => {
@@ -153,19 +160,6 @@ describe('ChatPage conversation tabs', () => {
     expect(tabTitles()).toEqual(['Beta task']);
     expect(mockStopConversation).not.toHaveBeenCalled();
     expect(screen.getByTestId('conversation-running-indicator-conv-a')).toBeInTheDocument();
-  });
-
-  it('starts over with a fresh new chat when its only tab closes', async () => {
-    await renderChatWithRunner();
-    fireEvent.change(screen.getByTestId('composer-textarea'), {
-      target: { value: 'Never mind' },
-    });
-
-    fireEvent.keyDown(getActiveTab(), { key: 'Delete' });
-
-    expect(tabTitles()).toEqual(['New chat']);
-    expect(screen.getByTestId('composer-textarea')).toHaveValue('');
-    expect(mockNavigate).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -325,24 +319,6 @@ describe('ChatPage conversation tabs', () => {
     fireEvent.keyDown(window, { key: ']', code: 'BracketRight', altKey: true, ctrlKey: true });
     fireEvent.keyDown(window, { key: '}', code: 'BracketRight', altKey: true, shiftKey: true });
     expect(mockNavigate).not.toHaveBeenCalled();
-  });
-
-  it('returns to the open new chat instead of resetting it', async () => {
-    useConversations();
-    const { rerender } = await renderChatWithRunner();
-    fireEvent.change(screen.getByTestId('composer-textarea'), {
-      target: { value: 'An unsent idea' },
-    });
-    await revisit(rerender, 'conv-a');
-    expect(tabTitles()).toEqual(['New chat', 'Alpha task']);
-
-    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
-
-    expect(mockNavigate).toHaveBeenLastCalledWith('/');
-    expect(screen.queryByTestId('new-chat-dialog')).not.toBeInTheDocument();
-    await revisit(rerender, null);
-    expect(screen.getByTestId('composer-textarea')).toHaveValue('An unsent idea');
-    expect(tabTitles()).toEqual(['New chat', 'Alpha task']);
   });
 
   it('opens new chat settings from a background new chat tab', async () => {

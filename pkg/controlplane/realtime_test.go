@@ -394,6 +394,11 @@ func TestRealtimeUsesExistingApprovalOwner(t *testing.T) {
 	_, registered := s.registerChatSubscriber("saved", subscriber)
 	require.True(t, registered)
 	s.chatRunner = &mockChatRunner{runFunc: func(ctx context.Context, req ChatRequest, _ ChatEventSink) (string, error) {
+		s.emitExtensionUIEvent(req.ConversationID, chat.ChatEvent{
+			Kind:           "ui-widget",
+			ConversationID: req.ConversationID,
+			UIWidget:       &chat.UIWidgetEvent{Key: "status", ExtensionID: "reminders", ID: "status"},
+		})
 		response, err := s.uiInputBrokerForRun("saved").Confirm(ctx, extensions.UIConfirmRequest{ID: "approval", Title: "Allow tool?"})
 		assert.True(t, response.Confirmed)
 		return req.ConversationID, err
@@ -408,67 +413,30 @@ func TestRealtimeUsesExistingApprovalOwner(t *testing.T) {
 	t.Cleanup(func() { cancel(); call.work.Wait() })
 	viewer := newSubscriberEventSink()
 	s.registerChatSubscriber("saved", viewer)
+	widgets := 0
 	for {
 		select {
 		case event := <-subscriber.ch:
-			if event.Kind != "ui-confirm-request" {
-				continue
+			switch event.Kind {
+			case "ui-widget":
+				widgets++
+			case "ui-confirm-request":
+				broker := s.uiInputBrokerForRun("saved")
+				for len(viewer.ch) > 0 {
+					assert.NotEqual(t, "ui-confirm-request", (<-viewer.ch).Kind)
+				}
+				call.close()
+				assert.False(t, broker.respondOwned("other-client", event.UIConfirm.ID, extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Confirmed: true}))
+				assert.True(t, broker.respondOwned("browser", event.UIConfirm.ID, extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Confirmed: true}))
+			case "done":
+				assert.Equal(t, 1, widgets, "the page that owns approvals also follows the conversation")
+				require.Eventually(t, func() bool { return !s.isActiveChat("saved") }, time.Second, time.Millisecond)
+				return
 			}
-			broker := s.uiInputBrokerForRun("saved")
-			for len(viewer.ch) > 0 {
-				assert.NotEqual(t, "ui-confirm-request", (<-viewer.ch).Kind)
-			}
-			call.close()
-			assert.False(t, broker.respondOwned("other-client", event.UIConfirm.ID, extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Confirmed: true}))
-			assert.True(t, broker.respondOwned("browser", event.UIConfirm.ID, extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Confirmed: true}))
-			require.Eventually(t, func() bool { return !s.isActiveChat("saved") }, time.Second, time.Millisecond)
-			return
 		case <-time.After(time.Second):
 			t.Fatal("approval or coding completion did not arrive")
 		}
 	}
-}
-
-func TestRealtimeApprovalOwnerReceivesEachWidgetOnce(t *testing.T) {
-	s, session := realtimeTestServer(t)
-	owner := newSubscriberEventSink()
-	owner.ctx = t.Context()
-	owner.clientID = "browser"
-	owner.capabilities.InteractiveUI = true
-	_, registered := s.registerChatSubscriber("saved", owner)
-	require.True(t, registered)
-	s.chatRunner = &mockChatRunner{runFunc: func(_ context.Context, req ChatRequest, _ ChatEventSink) (string, error) {
-		s.emitExtensionUIEvent(req.ConversationID, chat.ChatEvent{
-			Kind:           "ui-widget",
-			ConversationID: req.ConversationID,
-			UIWidget:       &chat.UIWidgetEvent{Key: "status", ExtensionID: "reminders", ID: "status"},
-		})
-		return req.ConversationID, nil
-	}}
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	call := &realtimeCall{
-		server: s, id: "voice", clientID: "browser", chat: chat.ChatRequest{ConversationID: "saved", ClientCapabilities: &chat.ChatClientCapabilities{InteractiveUI: true}},
-		ctx: ctx, cancel: cancel, session: session, events: make(chan realtimeEvent, 16), handoffs: make(map[string]struct{}),
-	}
-	call.delegate(llmtypes.RealtimeEvent{HandoffID: "widget-task", Text: "do the work"})
-	t.Cleanup(func() { cancel(); call.work.Wait() })
-
-	widgets := 0
-	for finished := false; !finished; {
-		select {
-		case event := <-owner.ch:
-			switch event.Kind {
-			case "ui-widget":
-				widgets++
-			case "done":
-				finished = true
-			}
-		case <-time.After(time.Second):
-			t.Fatal("the coding turn did not finish")
-		}
-	}
-	assert.Equal(t, 1, widgets, "the page that owns approvals also follows the conversation")
 }
 
 // gatedRecorder blocks the first stream write so a test can make queued events

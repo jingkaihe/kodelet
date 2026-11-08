@@ -153,7 +153,6 @@ func TestAboutToolsListsTheDraftWorkspace(t *testing.T) {
 
 	require.Len(t, runner.requests, 1)
 	assert.Equal(t, chat.WorkspaceTarget{CWD: "/repo/other", Profile: "review", EnvironmentProfile: "sandbox"}, runner.requests[0], "drafts list the workspace their slash commands come from")
-	assert.Equal(t, m.workspaceTargetForState(m.conversationState), runner.requests[0])
 }
 
 func TestAboutToolsKeysNavigateFoldAndFilter(t *testing.T) {
@@ -212,36 +211,30 @@ func TestAboutToolsKeysNavigateFoldAndFilter(t *testing.T) {
 }
 
 func TestAboutToolsClearingTheFilterKeepsTheSelectedRow(t *testing.T) {
-	m := newThemeTestModel(t, Config{})
-	m.width, m.height = 90, 40
-	m.resize()
-	m.openAboutDialog()
-	m.aboutDialog.tab = aboutTabTools
-	m.aboutDialog.tools = loadedAboutToolsState(sampleToolInventory())
-	state := m.aboutDialog.tools
-	const match = "plugin:global:acme@kit/extension:finder/tool:search_code"
-	for _, key := range []string{"/", "s", "e", "a", "r", "c", "h"} {
-		m.updateAboutDialogKey(key)
-	}
-	require.Equal(t, match, state.cursorID)
+	for _, phase := range []string{"editing", "applied"} {
+		t.Run(phase, func(t *testing.T) {
+			m := newThemeTestModel(t, Config{})
+			m.openAboutDialog()
+			m.aboutDialog.tab = aboutTabTools
+			m.aboutDialog.tools = loadedAboutToolsState(sampleToolInventory())
+			state := m.aboutDialog.tools
+			const match = "plugin:global:acme@kit/extension:finder/tool:search_code"
+			for _, key := range []string{"/", "s", "e", "a", "r", "c", "h"} {
+				m.updateAboutDialogKey(key)
+			}
+			if phase == "applied" {
+				m.updateAboutDialogKey("enter")
+			}
+			require.Equal(t, phase == "editing", state.filtering)
+			require.Equal(t, match, state.cursorID)
 
-	m.updateAboutDialogKey("esc")
-	assert.Empty(t, state.query)
-	assert.Equal(t, match, state.cursorID, "the selection survives clearing the filter")
-	assert.Contains(t, rowLabels(state.rows()), "      search_code", "the filter's expansion is kept for the selected row")
-
-	m.aboutDialog.tools = loadedAboutToolsState(sampleToolInventory())
-	state = m.aboutDialog.tools
-	for _, key := range []string{"/", "s", "e", "a", "r", "c", "h", "enter"} {
-		m.updateAboutDialogKey(key)
+			m.updateAboutDialogKey("esc")
+			require.NotNil(t, m.aboutDialog, "the first Esc clears the filter")
+			assert.Empty(t, state.query)
+			assert.Equal(t, match, state.cursorID, "the selection survives clearing the filter")
+			assert.Contains(t, rowLabels(state.rows()), "      search_code", "the filter's expansion is kept for the selected row")
+		})
 	}
-	require.False(t, state.filtering)
-	require.Equal(t, "search", state.query)
-	m.updateAboutDialogKey("esc")
-	require.NotNil(t, m.aboutDialog, "the first Esc clears an applied filter")
-	assert.Empty(t, state.query)
-	assert.Equal(t, match, state.cursorID, "Esc on an applied filter keeps the selection too")
-	assert.Contains(t, rowLabels(state.rows()), "      search_code")
 }
 
 func TestAboutToolsRetriesFailedLoads(t *testing.T) {

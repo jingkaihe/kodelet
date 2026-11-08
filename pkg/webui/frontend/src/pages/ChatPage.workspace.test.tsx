@@ -17,6 +17,7 @@ import {
   mockGetSlashCommands,
   mockGetTranscriptionCapabilities,
   mockHeartbeatDraftWorkspace,
+  mockNavigate,
   mockStreamChat,
   openActiveTabMenu,
   openNewChatSettings,
@@ -167,16 +168,23 @@ describe('ChatPage workspace tools and browsers', () => {
     ]);
   });
 
-  it("releases a closed new chat's sessions and starts the next one fresh", async () => {
+  it('closing the only new chat clears its draft and releases its sessions', async () => {
     mockGetRunners.mockResolvedValue({ runners: [makeRunner({ workspaceBrowser: true })] });
     await renderChatWithRunner();
     await waitForTerminalAccess();
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
     const draftId = (await screen.findByTestId('browser-panel')).dataset.conversationId;
+    fireEvent.change(screen.getByTestId('composer-textarea'), {
+      target: { value: 'Never mind' },
+    });
 
     fireEvent.keyDown(getActiveTab(), { key: 'Delete' });
     await flushAsyncUpdates();
 
+    expect(screen.getAllByRole('tab')).toHaveLength(1);
+    expect(getActiveTab()).toHaveAccessibleName('New chat');
+    expect(screen.getByTestId('composer-textarea')).toHaveValue('');
+    expect(mockNavigate).not.toHaveBeenCalled();
     expect(mockDiscardDraftWorkspace).toHaveBeenCalledExactlyOnceWith({
       runnerId: 'runner-1',
       conversationId: draftId,

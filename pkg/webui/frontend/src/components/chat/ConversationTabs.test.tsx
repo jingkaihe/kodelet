@@ -306,30 +306,6 @@ describe('ConversationTabs keyboard focus', () => {
     expect(trigger).toHaveFocus();
   });
 
-  it('focuses the chosen tab, or the switcher while the tabs are collapsed', async () => {
-    const user = userEvent.setup();
-    render(<StatefulTabs initial={tabs} />);
-
-    await user.click(screen.getByRole('button', { name: 'All conversation tabs' }));
-    await user.click(
-      within(screen.getByRole('dialog', { name: 'Open conversations' })).getByRole('button', {
-        name: /Gamma/,
-      })
-    );
-    expect(tab('Gamma')).toHaveFocus();
-    expect(tab('Gamma')).toHaveAttribute('aria-selected', 'true');
-
-    collapseTabStrip();
-    const switcher = screen.getByRole('button', { name: /Switch conversation tab/ });
-    await user.click(switcher);
-    await user.click(
-      within(screen.getByRole('dialog', { name: 'Open conversations' })).getByRole('button', {
-        name: /Beta/,
-      })
-    );
-    expect(switcher).toHaveFocus();
-  });
-
   it('focuses the neighbouring tab after a close, then the new chat after the last one', async () => {
     const user = userEvent.setup();
     render(<StatefulTabs initial={tabs.slice(0, 2)} />);
@@ -360,14 +336,25 @@ describe('ConversationTabs focus across layout changes', () => {
     vi.unstubAllGlobals();
   });
 
-  it('moves focus between the switcher and the active tab as the tabs collapse and expand', async () => {
+  it('focuses the selected tab and follows it as the tabs collapse and expand', async () => {
     const user = userEvent.setup();
     const resize = stubResizeObserver();
     render(<StatefulTabs initial={tabs} />);
     resize();
+
+    await user.click(screen.getByRole('button', { name: 'All conversation tabs' }));
+    await user.click(
+      within(screen.getByRole('dialog', { name: 'Open conversations' })).getByRole('button', {
+        name: /Gamma/,
+      })
+    );
+    expect(tab('Gamma')).toHaveFocus();
+    expect(tab('Gamma')).toHaveAttribute('aria-selected', 'true');
+
     collapseTabStrip();
     resize();
     const switcher = screen.getByRole('button', { name: /Switch conversation tab/ });
+    expect(switcher).toHaveFocus();
 
     await user.click(switcher);
     await user.click(

@@ -7,7 +7,7 @@ import type {
   GitDiffResponse,
 } from '../types';
 import apiService from './api';
-import type { ChatEventSocket, SubmitChatRequest } from './chatEvents';
+import type { ChatEventSocket } from './chatEvents';
 
 // Mock fetch globally
 const mockFetch = vi.fn();
@@ -37,8 +37,9 @@ describe('ApiService', () => {
       vi.resetModules();
     }
   });
-  it('uses one client identity for its event socket, submissions and prompt replies', async () => {
+  it('binds the full chat request and prompt replies to the event socket identity', async () => {
     vi.resetModules();
+    setTestCookie('kodelet_csrf=socket-csrf; Path=/');
     const sockets: TestWebSocket[] = [];
     class TestWebSocket {
       readyState = 0;
@@ -77,11 +78,35 @@ describe('ApiService', () => {
           { status: 202 }
         )
       );
-      const submitting = client.streamChat(
-        { message: 'hello', conversationId: 'conversation-1', turnId: 'turn-1' },
-        { onEvent: vi.fn() }
-      );
+      const request = {
+        message: 'describe this image',
+        conversationId: 'conversation-1',
+        turnId: 'turn-1',
+        content: [
+          { type: 'text' as const, text: 'describe this image' },
+          { type: 'image' as const, source: { data: 'aGVsbG8=', media_type: 'image/png' } },
+        ],
+        profile: 'anthropic',
+        reasoningEffort: 'high',
+        cwd: '/workspace/project',
+      };
+      const onEvent = vi.fn();
+      const signal = new AbortController().signal;
+      const submitting = client.streamChat(request, { onEvent, signal });
       await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledOnce());
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/chat',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify(request),
+          signal,
+          headers: expect.objectContaining({
+            'X-CSRF-Token': 'socket-csrf',
+            'X-Kodelet-Event-Connection': 'connection-1',
+            'X-Kodelet-Event-Subscription': 's2',
+          }),
+        })
+      );
       socket.receive({
         type: 'event',
         id: 's2',
@@ -89,6 +114,11 @@ describe('ApiService', () => {
       });
       socket.receive({ type: 'closed', id: 's2', reason: 'completed' });
       await submitting;
+      expect(onEvent).toHaveBeenCalledWith({
+        kind: 'done',
+        conversation_id: 'conversation-1',
+        turn_id: 'turn-1',
+      });
 
       mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) });
       await client.respondToUIInput('conversation-1', 'request-1', { status: 'dismissed' });
@@ -1550,84 +1580,17 @@ describe('ApiService', () => {
       apiService.setChatEventSocket(null);
     });
 
-    it('submits through the socket with a short request bound to it', async () => {
-      setTestCookie('kodelet_csrf=socket-csrf; Path=/');
+    it('forwards conversation options through the socket without an HTTP request', async () => {
       const socket = fakeSocket('connection-1');
       apiService.setChatEventSocket(socket as unknown as ChatEventSocket);
       const onEvent = vi.fn();
-      await apiService.streamChat(
-        { message: 'hello', conversationId: 'conversation-1' },
-        { onEvent }
-      );
-      expect(socket.submit).toHaveBeenCalledOnce();
-      const [[request, options]] = socket.submit.mock.calls as unknown as [
-        [unknown, { onEvent: unknown; post: SubmitChatRequest }],
-      ];
-      expect(request).toEqual({ message: 'hello', conversationId: 'conversation-1' });
-      expect(options.onEvent).toBe(onEvent);
-
-      mockFetch.mockResolvedValueOnce(new Response('{}', { status: 202 }));
-      await options.post(
-        { message: 'hello', conversationId: 'conversation-1', turnId: 'turn-1' },
-        { 'X-Kodelet-Event-Connection': 'connection-1', 'X-Kodelet-Event-Subscription': 's1' }
-      );
-      expect(mockFetch).toHaveBeenCalledWith(
-        '/api/chat',
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({
-            message: 'hello',
-            conversationId: 'conversation-1',
-            turnId: 'turn-1',
-          }),
-          headers: expect.objectContaining({
-            'X-CSRF-Token': 'socket-csrf',
-            'X-Kodelet-Client-ID': expect.any(String),
-            'X-Kodelet-Event-Connection': 'connection-1',
-            'X-Kodelet-Event-Subscription': 's1',
-          }),
-        })
-      );
-    });
-
-    it('follows conversations and calls through the socket', async () => {
-      const socket = fakeSocket('connection-1');
-      apiService.setChatEventSocket(socket as unknown as ChatEventSocket);
-      const onEvent = vi.fn();
-      const signal = new AbortController().signal;
       await apiService.streamConversation('conversation-1', { onEvent, level: 'lifecycle' });
       expect(socket.watch).toHaveBeenCalledWith('conversation-1', {
         onEvent,
         level: 'lifecycle',
         capabilities: 'interactive',
       });
-      await apiService.streamRealtime('call-1', { signal, onEvent });
-      expect(socket.attachRealtime).toHaveBeenCalledWith('call-1', { signal, onEvent });
       expect(mockFetch).not.toHaveBeenCalled();
-    });
-
-    it('submits the whole request, including content blocks, profile and directory', async () => {
-      const socket = fakeSocket('connection-1');
-      apiService.setChatEventSocket(socket as unknown as ChatEventSocket);
-      const request = {
-        message: 'describe this image',
-        conversationId: 'conversation-1',
-        content: [
-          { type: 'text' as const, text: 'describe this image' },
-          { type: 'image' as const, source: { data: 'aGVsbG8=', media_type: 'image/png' } },
-        ],
-        profile: 'anthropic',
-        reasoningEffort: 'high',
-        cwd: '/workspace/project',
-      };
-      await apiService.streamChat(request, { onEvent: vi.fn() });
-      const [[, options]] = socket.submit.mock.calls as unknown as [
-        [unknown, { post: SubmitChatRequest }],
-      ];
-      expect(socket.submit).toHaveBeenCalledWith(request, expect.any(Object));
-      mockFetch.mockResolvedValueOnce(new Response('{}', { status: 202 }));
-      await options.post({ ...request, turnId: 'turn-1' }, {});
-      expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({ ...request, turnId: 'turn-1' });
     });
 
     it('reports that live updates are unavailable when the socket cannot be opened', async () => {
