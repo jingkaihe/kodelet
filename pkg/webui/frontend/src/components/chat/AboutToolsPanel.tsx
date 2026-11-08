@@ -38,8 +38,10 @@ const kindIcons = {
 } as const;
 
 const Highlight: React.FC<{ text: string; query: string }> = ({ text, query }) => {
-  const index = query ? text.toLowerCase().indexOf(query) : -1;
-  if (index < 0) return <>{text}</>;
+  const lower = text.toLowerCase();
+  const index = query ? lower.indexOf(query) : -1;
+  // Offsets into the lowercased text only fit the original when lengths match (not for "İ").
+  if (index < 0 || lower.length !== text.length) return <>{text}</>;
   return (
     <>
       {text.slice(0, index)}

@@ -69,6 +69,24 @@ describe('AboutToolsPanel', () => {
     expect(screen.getByText('Nothing matches “zzz”.')).toBeInTheDocument();
   });
 
+  it('does not misplace highlights when lowercasing changes the text length', async () => {
+    const user = userEvent.setup();
+    render(
+      <AboutToolsPanel
+        inventory={{
+          builtinTools: [{ name: 'İzmir_tool', description: 'Plan a trip.', enabled: true }],
+          plugins: [],
+          extensions: [],
+          skills: [],
+        }}
+      />
+    );
+    await user.type(filter(), 'tool');
+    const label = row('İzmir_tool').querySelector('.about-tools-label');
+    expect(label).toHaveTextContent('İzmir_tool');
+    expect(label?.querySelector('mark')).toBeNull();
+  });
+
   it('keeps the selected row when the filter is cleared', async () => {
     const user = userEvent.setup();
     render(<AboutToolsPanel inventory={sampleToolInventory} />);
