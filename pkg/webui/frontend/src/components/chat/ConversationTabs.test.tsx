@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { ComponentProps } from 'react';
+import { type ComponentProps, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import ConversationTabs, {
   adjacentConversationTabId,
@@ -28,6 +28,35 @@ const renderTabs = (props: Partial<ComponentProps<typeof ConversationTabs>> = {}
 };
 
 const tab = (name: string) => screen.getByRole('tab', { name: new RegExp(name) });
+
+/** Closes and selects tabs the way the chat page does. */
+const StatefulTabs = ({ initial }: { initial: ConversationTab[] }) => {
+  const [state, setState] = useState({ tabs: initial, activeId: initial[0].id });
+  return (
+    <ConversationTabs
+      activeId={state.activeId}
+      onClose={(id) =>
+        setState(({ tabs: current, activeId }) => {
+          const index = current.findIndex((item) => item.id === id);
+          const rest = current.filter((item) => item.id !== id);
+          const next = rest.length > 0 ? rest : [{ id: 'new', title: 'New chat', draft: true }];
+          return {
+            tabs: next,
+            activeId: activeId === id ? next[Math.min(index, next.length - 1)].id : activeId,
+          };
+        })
+      }
+      onNew={vi.fn()}
+      onSelect={(id) => setState((current) => ({ ...current, activeId: id }))}
+      tabs={state.tabs}
+    />
+  );
+};
+
+const collapseTabStrip = () => {
+  const strip = document.querySelector<HTMLElement>('.chat-tabs-strip');
+  if (strip) strip.style.display = 'none';
+};
 
 describe('ConversationTabs', () => {
   it('shows each open conversation with its background status', () => {
@@ -202,6 +231,77 @@ describe('ConversationTabs', () => {
       'conv-c',
       'conv-d',
     ]);
+  });
+});
+
+describe('ConversationTabs keyboard focus', () => {
+  it('moves focus into the tab list and returns it on Escape', async () => {
+    const user = userEvent.setup();
+    renderTabs();
+    const trigger = screen.getByRole('button', { name: 'All conversation tabs' });
+
+    trigger.focus();
+    await user.keyboard('{Enter}');
+    const list = screen.getByRole('dialog', { name: 'Open conversations' });
+    expect(within(list).getByRole('button', { name: /Alpha/ })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+
+    // Escape also works while focus is still on the trigger.
+    await user.keyboard('{Enter}');
+    trigger.focus();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('focuses the chosen tab, or the switcher while the tabs are collapsed', async () => {
+    const user = userEvent.setup();
+    render(<StatefulTabs initial={tabs} />);
+
+    await user.click(screen.getByRole('button', { name: 'All conversation tabs' }));
+    await user.click(
+      within(screen.getByRole('dialog', { name: 'Open conversations' })).getByRole('button', {
+        name: /Gamma/,
+      })
+    );
+    expect(tab('Gamma')).toHaveFocus();
+    expect(tab('Gamma')).toHaveAttribute('aria-selected', 'true');
+
+    collapseTabStrip();
+    const switcher = screen.getByRole('button', { name: /Switch conversation tab/ });
+    await user.click(switcher);
+    await user.click(
+      within(screen.getByRole('dialog', { name: 'Open conversations' })).getByRole('button', {
+        name: /Beta/,
+      })
+    );
+    expect(switcher).toHaveFocus();
+  });
+
+  it('focuses the neighbouring tab after a close, then the new chat after the last one', async () => {
+    const user = userEvent.setup();
+    render(<StatefulTabs initial={tabs.slice(0, 2)} />);
+
+    tab('Beta').focus();
+    await user.keyboard('{Delete}');
+    expect(tab('Alpha')).toHaveFocus();
+
+    await user.keyboard('{Delete}');
+    expect(screen.getAllByRole('tab')).toHaveLength(1);
+    expect(tab('New chat')).toHaveFocus();
+  });
+
+  it('focuses the switcher after closing a tab while the tabs are collapsed', async () => {
+    const user = userEvent.setup();
+    render(<StatefulTabs initial={tabs.slice(0, 2)} />);
+    collapseTabStrip();
+
+    await user.click(screen.getByRole('button', { name: 'Current tab actions' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Close tab' }));
+
+    expect(screen.getByRole('button', { name: /Switch conversation tab, 1 open/ })).toHaveFocus();
   });
 });
 

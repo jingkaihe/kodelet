@@ -128,9 +128,17 @@ const ConversationTabs = ({
   const [menuLeft, setMenuLeft] = useState(0);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const headerRef = useRef<HTMLElement>(null);
+  const stripRef = useRef<HTMLDivElement>(null);
+  const switcherRef = useRef<HTMLButtonElement>(null);
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
   const listRef = useRef<HTMLDivElement>(null);
+  const listPanelRef = useRef<HTMLDivElement>(null);
+  const listOpenerRef = useRef<HTMLElement | null>(null);
   const tabMenuRef = useRef<HTMLDivElement>(null);
+  // Focus target after a close re-renders the tabs: a tab ID, or null for the active tab.
+  const pendingFocusRef = useRef<string | null | undefined>(undefined);
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
   const listId = useId();
   const tabMenuId = useId();
   const activeTab = tabs.find((tab) => tab.id === activeId);
@@ -175,12 +183,53 @@ const ConversationTabs = ({
 
   const focusTab = (id: string) => queueMicrotask(() => tabRefs.current.get(id)?.focus());
 
+  /** Focuses a tab, or the switcher while narrow layouts hide the tabs. */
+  const focusVisibleTab = (id?: string) => {
+    const strip = stripRef.current;
+    if (strip && getComputedStyle(strip).display === 'none') {
+      switcherRef.current?.focus();
+      return;
+    }
+    const target =
+      (id === undefined ? undefined : tabRefs.current.get(id)) ??
+      tabRefs.current.get(activeIdRef.current) ??
+      tabRefs.current.values().next().value;
+    target?.focus();
+  };
+
   const closeTab = (id: string) => {
     const index = tabs.findIndex((tab) => tab.id === id);
     onClose(id);
-    const next = tabs[index + 1] ?? tabs[index - 1];
-    if (next) focusTab(next.id);
+    pendingFocusRef.current = (tabs[index + 1] ?? tabs[index - 1])?.id ?? null;
   };
+
+  useEffect(() => {
+    const pending = pendingFocusRef.current;
+    if (pending === undefined) return;
+    pendingFocusRef.current = undefined;
+    focusVisibleTab(pending ?? undefined);
+  });
+
+  const openList = (opener: HTMLElement) => {
+    setTabMenu(null);
+    listOpenerRef.current = opener;
+    setListOpen(true);
+  };
+
+  const closeList = (restoreFocus: boolean) => {
+    setListOpen(false);
+    const opener = listOpenerRef.current;
+    if (restoreFocus && opener?.isConnected) opener.focus();
+  };
+
+  useEffect(() => {
+    if (!listOpen) return;
+    const panel = listPanelRef.current;
+    (
+      panel?.querySelector<HTMLElement>('[aria-current="page"]') ??
+      panel?.querySelector<HTMLElement>('button')
+    )?.focus();
+  }, [listOpen]);
 
   /** Opens a tab's menu below `anchor`; focus returns to the tab, or to `returnFocus`. */
   const openTabMenu = (id: string, anchor: HTMLElement | null, returnFocus?: HTMLElement) => {
@@ -348,12 +397,7 @@ const ConversationTabs = ({
       aria-label="Open conversations"
       className="chat-tabs-menu"
       id={listId}
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') {
-          event.stopPropagation();
-          setListOpen(false);
-        }
-      }}
+      ref={listPanelRef}
       role="dialog"
     >
       <ul className="chat-tabs-menu-list">
@@ -368,6 +412,7 @@ const ConversationTabs = ({
               onClick={() => {
                 setListOpen(false);
                 onSelect(tab.id);
+                focusVisibleTab(tab.id);
               }}
               title={tabTooltip(tab)}
               type="button"
@@ -382,7 +427,8 @@ const ConversationTabs = ({
       <button
         className="chat-tabs-menu-new"
         onClick={() => {
-          setListOpen(false);
+          // The opener takes focus first, so a dialog opened by onNew returns to it.
+          closeList(true);
           onNew();
         }}
         type="button"
@@ -400,7 +446,7 @@ const ConversationTabs = ({
       data-testid="chat-tabs-header"
       ref={headerRef}
     >
-      <div className="chat-tabs-strip">
+      <div className="chat-tabs-strip" ref={stripRef}>
         <div aria-label="Open conversations" className="chat-tabs-list" role="tablist">
           {tabs.map((tab, index) => {
             const active = tab.id === activeId;
@@ -494,7 +540,17 @@ const ConversationTabs = ({
         </button>
       </div>
 
-      <div className="chat-tabs-trailing" ref={listRef}>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: Escape closes the list from its trigger or its rows. */}
+      <div
+        className="chat-tabs-trailing"
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape' || !listOpen) return;
+          event.preventDefault();
+          event.stopPropagation();
+          closeList(true);
+        }}
+        ref={listRef}
+      >
         {/* Below ~34rem of main-panel width the strip collapses into this switcher. */}
         <button
           aria-controls={listOpen ? listId : undefined}
@@ -502,7 +558,8 @@ const ConversationTabs = ({
           aria-haspopup="dialog"
           aria-label={`Switch conversation tab, ${tabs.length} open`}
           className="chat-tabs-switcher"
-          onClick={() => setListOpen((open) => !open)}
+          onClick={(event) => (listOpen ? closeList(false) : openList(event.currentTarget))}
+          ref={switcherRef}
           type="button"
         >
           {activeTab ? <TabStatusIcon tab={activeTab} /> : null}
@@ -538,10 +595,7 @@ const ConversationTabs = ({
           aria-haspopup="dialog"
           aria-label="All conversation tabs"
           className="chat-tabs-icon-button chat-tabs-menu-trigger"
-          onClick={() => {
-            setTabMenu(null);
-            setListOpen((open) => !open);
-          }}
+          onClick={(event) => (listOpen ? closeList(false) : openList(event.currentTarget))}
           title="All conversation tabs"
           type="button"
         >
