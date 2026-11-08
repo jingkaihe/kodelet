@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
@@ -22,6 +23,20 @@ import (
 )
 
 var imageShortCodePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{22}$`)
+
+func (s *Server) startArtifactSweep() {
+	if s.artifacts == nil || s.artifactSweepDone != nil || s.runCtx == nil {
+		return
+	}
+	done := make(chan struct{})
+	s.artifactSweepDone = done
+	go func() {
+		defer close(done)
+		if err := s.artifacts.Sweep(s.runCtx); err != nil && s.runCtx.Err() == nil {
+			logger.G(s.runCtx).WithError(err).Warn("failed to clean up image artifacts")
+		}
+	}()
+}
 
 func (s *Server) imageViewURL(shortCode string) string {
 	if !imageShortCodePattern.MatchString(shortCode) {

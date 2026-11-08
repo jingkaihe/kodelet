@@ -2,11 +2,14 @@ package artifacts
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
@@ -65,7 +68,7 @@ func DeleteReferences(ctx context.Context, tx *sqlx.Tx, conversationID string) (
 }
 
 // RemoveFiles unlinks immutable files after their metadata deletion has committed.
-// A failure is recoverable by the next startup sweep and cannot roll back the committed deletion.
+// A failure is recoverable by the next background sweep and cannot roll back the committed deletion.
 func RemoveFiles(dbPath string, artifactIDs []string) error {
 	for _, id := range artifactIDs {
 		if id == "" || id == "." || id == ".." || filepath.Base(id) != id {
@@ -78,33 +81,185 @@ func RemoveFiles(dbPath string, artifactIDs []string) error {
 	return nil
 }
 
-func (s *Store) sweep(ctx context.Context) error {
+const cleanupBatchSize = 128
+
+type artifactReference struct {
+	ToolCallID string `db:"tool_call_id"`
+	ArtifactID string `db:"artifact_id"`
+}
+
+type artifactSnapshot struct {
+	exists    bool
+	updatedAt time.Time
+	abandoned []artifactReference
+}
+
+// Sweep releases abandoned uploads and unreferenced files older than 24 hours.
+// Run one pass at a time, with a context canceled before the database is closed.
+// JSON is inspected once per conversation through the reader pool; only guarded,
+// bounded deletions acquire the writer connection.
+func (s *Store) Sweep(ctx context.Context) error {
 	cutoff := time.Now().UTC().Add(-cleanupGrace)
-	tx, err := s.db.Writer.BeginTxx(ctx, nil)
+	var after string
+	for {
+		var conversations []string
+		if err := s.db.Reader.SelectContext(ctx, &conversations, `
+			SELECT DISTINCT r.conversation_id FROM conversation_artifacts r
+			JOIN image_artifacts a ON a.id = r.artifact_id
+			WHERE r.conversation_id > ? AND a.created_at < ?
+			AND NOT EXISTS (SELECT 1 FROM runner_runs rr
+				WHERE rr.conversation_id = r.conversation_id AND rr.status IN ('opening', 'running'))
+			ORDER BY r.conversation_id LIMIT ?`, after, cutoff, cleanupBatchSize); err != nil {
+			return errors.Wrap(err, "failed to list artifact cleanup candidates")
+		}
+		if len(conversations) == 0 {
+			break
+		}
+		for _, id := range conversations {
+			snapshot, err := s.abandonedReferences(ctx, id, cutoff)
+			if err != nil {
+				return err
+			}
+			for refs := snapshot.abandoned; len(refs) > 0; {
+				n := min(len(refs), cleanupBatchSize)
+				unchanged, err := s.pruneReferences(ctx, id, snapshot, refs[:n], cutoff)
+				if err != nil {
+					return err
+				}
+				if !unchanged {
+					break
+				}
+				refs = refs[n:]
+			}
+		}
+		after = conversations[len(conversations)-1]
+	}
+	if err := s.pruneMetadata(ctx, cutoff); err != nil {
+		return err
+	}
+	return s.sweepFiles(ctx, cutoff)
+}
+
+func (s *Store) abandonedReferences(ctx context.Context, id string, cutoff time.Time) (artifactSnapshot, error) {
+	var snapshot artifactSnapshot
+	// Read the references and saved results from the same snapshot, then release
+	// the connection before parsing potentially large tool-result JSON.
+	tx, err := s.db.Reader.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return errors.Wrap(err, "failed to begin artifact cleanup")
+		return snapshot, errors.Wrap(err, "failed to read artifact cleanup snapshot")
 	}
 	defer tx.Rollback()
-	// Uploads can precede checkpoints. Only release old references absent from
-	// persisted results when no run is still executing for that conversation.
-	_, err = tx.ExecContext(ctx, `DELETE FROM conversation_artifacts AS r
-		WHERE EXISTS (SELECT 1 FROM image_artifacts a WHERE a.id = r.artifact_id AND a.created_at < ?)
-		AND NOT EXISTS (SELECT 1 FROM runner_runs rr WHERE rr.conversation_id = r.conversation_id AND rr.status IN ('opening', 'running'))
-		AND NOT EXISTS (
-			SELECT 1 FROM conversations c, json_each(c.tool_results) t, json_each(t.value, '$.attachments') a
-			WHERE c.id = r.conversation_id AND t.key = r.tool_call_id AND json_extract(a.value, '$.artifactId') = r.artifact_id
-		)`, cutoff)
-	if err != nil {
-		return errors.Wrap(err, "failed to release abandoned image uploads")
+	var raw sql.NullString
+	err = tx.QueryRowContext(ctx, `SELECT tool_results, updated_at FROM conversations WHERE id = ?`, id).Scan(&raw, &snapshot.updatedAt)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return snapshot, errors.Wrap(err, "failed to read saved artifact references")
 	}
-	_, err = tx.ExecContext(ctx, `DELETE FROM image_artifacts WHERE created_at < ?
-		AND NOT EXISTS (SELECT 1 FROM conversation_artifacts WHERE artifact_id = image_artifacts.id)`, cutoff)
-	if err != nil {
-		return errors.Wrap(err, "failed to delete unreferenced image metadata")
+	snapshot.exists = err == nil
+	var refs []artifactReference
+	if err := tx.SelectContext(ctx, &refs, `
+		SELECT r.tool_call_id, r.artifact_id FROM conversation_artifacts r
+		JOIN image_artifacts a ON a.id = r.artifact_id
+		WHERE r.conversation_id = ? AND a.created_at < ?`, id, cutoff); err != nil {
+		return snapshot, errors.Wrap(err, "failed to read artifact cleanup references")
 	}
 	if err := tx.Commit(); err != nil {
-		return errors.Wrap(err, "failed to commit artifact cleanup")
+		return snapshot, errors.Wrap(err, "failed to finish artifact cleanup snapshot")
 	}
+	if err := ctx.Err(); err != nil {
+		return snapshot, err
+	}
+	// Ignore tool data and metadata: only the (tool call, artifact) pair proves
+	// a reference is checkpointed. Do not invoke StructuredToolResult decoding.
+	var results map[string]struct {
+		Attachments []struct {
+			ArtifactID string `json:"artifactId"`
+		} `json:"attachments"`
+	}
+	if raw.Valid {
+		if err := json.Unmarshal([]byte(raw.String), &results); err != nil {
+			logger.G(ctx).WithError(err).WithField("conversation_id", id).Warn("skipping artifact cleanup for unreadable tool results")
+			return snapshot, nil
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return snapshot, err
+	}
+	checkpointed := make(map[artifactReference]struct{})
+	for callID, result := range results {
+		for _, attachment := range result.Attachments {
+			checkpointed[artifactReference{ToolCallID: callID, ArtifactID: attachment.ArtifactID}] = struct{}{}
+		}
+	}
+	for _, ref := range refs {
+		if _, ok := checkpointed[ref]; !ok {
+			snapshot.abandoned = append(snapshot.abandoned, ref)
+		}
+	}
+	return snapshot, nil
+}
+
+func (s *Store) pruneReferences(ctx context.Context, id string, snapshot artifactSnapshot, refs []artifactReference, cutoff time.Time) (bool, error) {
+	tx, err := s.db.Writer.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to begin artifact cleanup")
+	}
+	defer tx.Rollback()
+	// Conversation saves update this timestamp and references atomically. A
+	// missing conversation must still be missing. Never upgrade a read snapshot
+	// to a writer, or delete against results that changed while being parsed.
+	var updatedAt time.Time
+	err = tx.GetContext(ctx, &updatedAt, `SELECT updated_at FROM conversations WHERE id = ?`, id)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, errors.Wrap(err, "failed to recheck artifact cleanup snapshot")
+	}
+	if snapshot.exists != (err == nil) || !updatedAt.Equal(snapshot.updatedAt) {
+		return false, nil
+	}
+	var active bool
+	if err := tx.GetContext(ctx, &active, `SELECT EXISTS (SELECT 1 FROM runner_runs
+		WHERE conversation_id = ? AND status IN ('opening', 'running'))`, id); err != nil {
+		return false, errors.Wrap(err, "failed to recheck active artifact uploads")
+	}
+	if active {
+		return false, nil
+	}
+	for _, ref := range refs {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM conversation_artifacts
+			WHERE conversation_id = ? AND tool_call_id = ? AND artifact_id = ?
+			AND EXISTS (SELECT 1 FROM image_artifacts WHERE id = ? AND created_at < ?)`,
+			id, ref.ToolCallID, ref.ArtifactID, ref.ArtifactID, cutoff); err != nil {
+			return false, errors.Wrap(err, "failed to release abandoned image uploads")
+		}
+	}
+	return true, errors.Wrap(tx.Commit(), "failed to commit artifact cleanup")
+}
+
+func (s *Store) pruneMetadata(ctx context.Context, cutoff time.Time) error {
+	var after string
+	for {
+		var ids []string
+		if err := s.db.Reader.SelectContext(ctx, &ids, `SELECT id FROM image_artifacts
+			WHERE id > ? AND created_at < ?
+			AND NOT EXISTS (SELECT 1 FROM conversation_artifacts WHERE artifact_id = image_artifacts.id)
+			ORDER BY id LIMIT ?`, after, cutoff, cleanupBatchSize); err != nil {
+			return errors.Wrap(err, "failed to list unreferenced image metadata")
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		query, args, err := sqlx.In(`DELETE FROM image_artifacts WHERE id IN (?) AND created_at < ?
+			AND NOT EXISTS (SELECT 1 FROM conversation_artifacts WHERE artifact_id = image_artifacts.id)`, ids, cutoff)
+		if err != nil {
+			return errors.Wrap(err, "failed to prepare image metadata cleanup")
+		}
+		if _, err := s.db.Writer.ExecContext(ctx, query, args...); err != nil {
+			return errors.Wrap(err, "failed to delete unreferenced image metadata")
+		}
+		after = ids[len(ids)-1]
+	}
+}
+
+func (s *Store) sweepFiles(ctx context.Context, cutoff time.Time) error {
 	directory, err := os.Open(s.dir)
 	if err != nil {
 		return errors.Wrap(err, "failed to open artifact directory for cleanup")

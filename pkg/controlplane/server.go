@@ -104,6 +104,7 @@ type Server struct {
 	extensionProfilesMu   sync.RWMutex
 	turns                 *turnStore
 	artifacts             *artifacts.Store
+	artifactSweepDone     chan struct{}
 	artifactUploads       artifactUploadManager
 	authStore             *authStore
 	oidcFlow              OIDCFlow
@@ -2583,6 +2584,7 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	s.startSearchIndexer()
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- s.server.Serve(listener) }()
+	s.startArtifactSweep()
 	runnerCtx, stopRunner := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopRunner()
 	runnerDone := make(chan struct{})
@@ -2787,6 +2789,11 @@ func (s *Server) Close() error {
 		}
 	}
 	s.waitForSearchIndexer()
+	// Stop cancels the sweep; it must release every database handle before
+	// the shared pools close, even if JSON parsing is still finishing.
+	if s.artifactSweepDone != nil {
+		<-s.artifactSweepDone
+	}
 	if s.conversationService != nil {
 		if err := s.conversationService.Close(); err != nil && firstErr == nil {
 			firstErr = errors.Wrap(err, "failed to close conversation service")

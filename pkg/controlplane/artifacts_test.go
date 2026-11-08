@@ -16,14 +16,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/artifacts"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
@@ -32,9 +35,142 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/vision"
+	"github.com/sirupsen/logrus"
+	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestArtifactSweepDoesNotBlockReadinessAndCancelsOnShutdown(t *testing.T) {
+	database := dbtest.OpenTemp(t)
+	store, err := artifacts.Open(t.Context(), database)
+	require.NoError(t, err)
+	// Hold the only reader so the real sweep cannot make progress. No live
+	// data, artificial delays, or production hooks are needed.
+	database.Reader.SetMaxOpenConns(1)
+	reader, err := database.Reader.Connx(t.Context())
+	require.NoError(t, err)
+	defer reader.Close()
+	waits := database.Reader.Stats().WaitCount
+	log, hook := logrustest.NewNullLogger()
+	runCtx, cancelRun := context.WithCancel(logger.WithLogger(t.Context(), logrus.NewEntry(log)))
+	defer cancelRun()
+	server := &Server{
+		router:    mux.NewRouter(),
+		config:    &ServerConfig{},
+		database:  database,
+		artifacts: store,
+		runCtx:    runCtx,
+		runCancel: cancelRun,
+	}
+	server.setupRoutes()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer listener.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	served := make(chan error, 1)
+	go func() { served <- server.Serve(ctx, listener) }()
+	stop := sync.OnceFunc(func() {
+		cancel()
+		select {
+		case err := <-served:
+			assert.NoError(t, err)
+		case <-time.After(5 * time.Second):
+			t.Error("server did not stop")
+			return
+		}
+		assert.NoError(t, server.Close())
+	})
+	t.Cleanup(stop)
+	require.Eventually(t, func() bool {
+		return database.Reader.Stats().WaitCount > waits
+	}, 5*time.Second, time.Millisecond, "background sweep should be waiting for a reader")
+
+	client := &http.Client{Timeout: time.Second}
+	response, err := client.Get("http://" + listener.Addr().String() + readyzPath)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	require.Equal(t, http.StatusOK, response.StatusCode)
+
+	// The reader is still held: shutdown must cancel the sweep's pool wait,
+	// not depend on cleanup finishing or the connection becoming available.
+	stop()
+	assert.ErrorIs(t, runCtx.Err(), context.Canceled)
+	select {
+	case <-server.artifactSweepDone:
+	default:
+		t.Error("Close returned before artifact cleanup stopped")
+	}
+	assert.Empty(t, hook.AllEntries(), "normal cancellation must not warn")
+	assert.Error(t, database.Writer.PingContext(t.Context()))
+}
+
+func TestCloseWaitsForArtifactSweepBeforeClosingDatabase(t *testing.T) {
+	database := dbtest.OpenTemp(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan struct{})
+	finish := sync.OnceFunc(func() { close(done) })
+	defer finish()
+	server := &Server{
+		database:          database,
+		runCtx:            ctx,
+		runCancel:         cancel,
+		artifactSweepDone: done,
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- server.Close() }()
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("Close did not cancel background work")
+	}
+	// Model a sweep still unwinding after cancellation. Its database must
+	// remain open until the worker signals completion.
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned before cleanup finished: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	require.NoError(t, database.Reader.PingContext(t.Context()))
+	require.NoError(t, database.Writer.PingContext(t.Context()))
+	finish()
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("Close did not finish after cleanup stopped")
+	}
+	assert.Error(t, database.Reader.PingContext(t.Context()))
+	assert.Error(t, database.Writer.PingContext(t.Context()))
+}
+
+func TestArtifactSweepWarnsOnFailureAndRunsOnlyOnce(t *testing.T) {
+	database := dbtest.OpenTemp(t)
+	store, err := artifacts.Open(t.Context(), database)
+	require.NoError(t, err)
+	require.NoError(t, database.Reader.Close())
+	log, hook := logrustest.NewNullLogger()
+	server := &Server{
+		artifacts: store,
+		runCtx:    logger.WithLogger(t.Context(), logrus.NewEntry(log)),
+	}
+	server.startArtifactSweep()
+	done := server.artifactSweepDone
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("failed artifact sweep did not return")
+	}
+	entries := hook.AllEntries()
+	require.Len(t, entries, 1)
+	assert.Equal(t, logrus.WarnLevel, entries[0].Level)
+	assert.Equal(t, "failed to clean up image artifacts", entries[0].Message)
+	assert.Contains(t, entries[0].Data, "error")
+	server.startArtifactSweep()
+	assert.Equal(t, done, server.artifactSweepDone)
+	assert.Len(t, hook.AllEntries(), 1)
+}
 
 func TestImageArtifactRunnerRoundTrip(t *testing.T) {
 	config := embeddedRunnerTestConfig(t)

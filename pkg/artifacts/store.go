@@ -43,14 +43,14 @@ type Store struct {
 
 // Open opens artifact storage beside database, whose migrations must have
 // been applied. The caller owns database and closes it after the store.
-// It sweeps abandoned uploads and unreferenced files older than 24 hours.
+// The caller runs Sweep separately so cleanup never blocks opening storage.
 func Open(ctx context.Context, database *db.DB) (*Store, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	store := &Store{db: database, dir: filepath.Join(filepath.Dir(database.Path()), "artifacts")}
 	if err := os.MkdirAll(store.dir, 0o700); err != nil {
 		return nil, errors.Wrap(err, "failed to create artifact directory")
-	}
-	if err := store.sweep(ctx); err != nil {
-		return nil, err
 	}
 	return store, nil
 }
@@ -128,7 +128,7 @@ func (s *Store) Put(
 		return tooltypes.ToolAttachment{}, errors.Wrap(err, "failed to finalize uploaded image")
 	}
 	// Persist the directory entry before publishing metadata. A failed transaction
-	// may leave an orphan file; the startup sweep safely recovers it after the grace period.
+	// may leave an orphan file; the background sweep recovers it after the grace period.
 	dir, err := os.Open(s.dir)
 	if err != nil {
 		return tooltypes.ToolAttachment{}, errors.Wrap(err, "failed to open artifact directory")

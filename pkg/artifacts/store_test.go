@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"hash/crc32"
 	"image"
 	"image/color"
@@ -26,7 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testStore(t *testing.T) (*Store, *db.DB) {
+func testStore(t testing.TB) (*Store, *db.DB) {
 	t.Helper()
 	database := dbtest.OpenTemp(t)
 	store, err := Open(t.Context(), database)
@@ -94,7 +95,7 @@ func TestPutGetAndScope(t *testing.T) {
 	second, err := store.Put(t.Context(), "conversation", "call", input, bytes.NewReader(data))
 	require.NoError(t, err)
 	assert.NotEqual(t, attachment.ArtifactID, second.ArtifactID)
-	// Reopening repeats the startup sweep.
+	// Reopening preserves uploaded images.
 	reopened, err := Open(t.Context(), database)
 	require.NoError(t, err)
 	_, _, err = reopened.Get(t.Context(), "conversation", attachment.ArtifactID)
@@ -201,7 +202,7 @@ func TestGIFBudgetAndCorruptLaterFrames(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestStartupSweep(t *testing.T) {
+func TestSweep(t *testing.T) {
 	store, database := testStore(t)
 	old := time.Now().UTC().Add(-48 * time.Hour)
 	data := testPNG(t)
@@ -248,9 +249,12 @@ func TestStartupSweep(t *testing.T) {
 			require.NoError(t, os.Chtimes(file, old, old))
 		}
 	}
-	// Reopening repeats the startup sweep.
+	// Opening is initialization only; the server runs cleanup separately.
 	reopened, err := Open(t.Context(), database)
 	require.NoError(t, err)
+	_, _, err = reopened.Get(t.Context(), "abandoned", abandoned.ArtifactID)
+	require.NoError(t, err)
+	require.NoError(t, reopened.Sweep(t.Context()))
 	_, _, err = reopened.Get(t.Context(), "abandoned", abandoned.ArtifactID)
 	assert.ErrorIs(t, err, ErrNotFound)
 	for _, name := range []string{abandoned.ArtifactID, ".upload-orphan", "art_orphan"} {
@@ -266,6 +270,227 @@ func TestStartupSweep(t *testing.T) {
 		assert.FileExists(t, file)
 	}
 	assert.FileExists(t, filepath.Join(store.dir, ".upload-fresh"))
+}
+
+// Seed metadata without image encoding so cleanup tests can exercise multiple
+// pages and benchmarks can vary the number of references independently of JSON.
+func seedCleanupReferences(t testing.TB, database *db.DB, conversationID string, count int) []artifactReference {
+	t.Helper()
+	old := time.Now().UTC().Add(-48 * time.Hour)
+	tx, err := database.Writer.BeginTxx(t.Context(), nil)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	refs := make([]artifactReference, count)
+	for i := range count {
+		refs[i] = artifactReference{ToolCallID: fmt.Sprintf("call-%03d", i), ArtifactID: fmt.Sprintf("art_%s_%03d", conversationID, i)}
+		_, err := tx.ExecContext(t.Context(), `INSERT INTO image_artifacts
+			(id, short_code, filename, mime_type, width, height, size, created_at)
+			VALUES (?, ?, 'image.png', 'image/png', 1, 1, 1, ?)`, refs[i].ArtifactID, refs[i].ArtifactID, old)
+		require.NoError(t, err)
+		_, err = tx.ExecContext(t.Context(), `INSERT INTO conversation_artifacts
+			(conversation_id, tool_call_id, artifact_id) VALUES (?, ?, ?)`, conversationID, refs[i].ToolCallID, refs[i].ArtifactID)
+		require.NoError(t, err)
+	}
+	require.NoError(t, tx.Commit())
+	return refs
+}
+
+func saveCleanupConversation(t testing.TB, database *db.DB, id, results string) {
+	t.Helper()
+	now := time.Now().UTC()
+	_, err := database.Writer.ExecContext(t.Context(), `INSERT INTO conversations
+		(id, raw_messages, provider, usage, tool_results, created_at, updated_at)
+		VALUES (?, '[]', 'openai', '{}', ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET tool_results = excluded.tool_results, updated_at = excluded.updated_at`,
+		id, results, now, now)
+	require.NoError(t, err)
+}
+
+func TestSweepCheckpointedReferencesDoNotAcquireWriter(t *testing.T) {
+	store, database := testStore(t)
+	refs := seedCleanupReferences(t, database, "saved", 2)
+	saveCleanupConversation(t, database, "saved", fmt.Sprintf(`{
+		"call-000": {"attachments": [{"artifactId": %q}], "data": %q, "metadataType": "unknown"},
+		"call-001": {"attachments": [{"artifactId": %q}]}
+	}`, refs[0].ArtifactID, strings.Repeat("large tool output", 4096), refs[1].ArtifactID))
+	writer, err := database.Writer.Connx(t.Context())
+	require.NoError(t, err)
+	defer writer.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	waits := database.Writer.Stats().WaitCount
+	require.NoError(t, store.Sweep(ctx))
+	assert.Equal(t, waits, database.Writer.Stats().WaitCount, "valid references must never wait for the writer")
+	var count int
+	require.NoError(t, database.Reader.Get(&count, `SELECT COUNT(*) FROM conversation_artifacts`))
+	assert.Equal(t, 2, count)
+}
+
+func TestSweepRechecksSnapshotBeforeDeleting(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		exists   bool
+		mutation string
+		keep     bool
+	}{
+		{name: "missing conversation"},
+		{name: "unchanged conversation", exists: true},
+		{name: "concurrent checkpoint", exists: true, mutation: "save", keep: true},
+		{name: "first checkpoint", mutation: "save", keep: true},
+		{name: "conversation removed", exists: true, mutation: "delete", keep: true},
+		{name: "run started", mutation: "run", keep: true},
+		{name: "age changed", mutation: "age", keep: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store, database := testStore(t)
+			refs := seedCleanupReferences(t, database, "conversation", 1)
+			if test.exists {
+				saveCleanupConversation(t, database, "conversation", `{}`)
+			}
+			cutoff := time.Now().UTC().Add(-cleanupGrace)
+			snapshot, err := store.abandonedReferences(t.Context(), "conversation", cutoff)
+			require.NoError(t, err)
+			require.Equal(t, refs, snapshot.abandoned)
+			switch test.mutation {
+			case "save":
+				saveCleanupConversation(t, database, "conversation", fmt.Sprintf(
+					`{"call-000": {"attachments": [{"artifactId": %q}]}}`, refs[0].ArtifactID))
+			case "delete":
+				_, err = database.Writer.Exec(`DELETE FROM conversations WHERE id = 'conversation'`)
+				require.NoError(t, err)
+			case "run":
+				now := time.Now().UTC()
+				_, err = database.Writer.Exec(`INSERT INTO runner_registrations
+					(id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at)
+					VALUES ('runner', 'local', 'host', '/work', 'work', 'online', ?, ?)`, now, now)
+				require.NoError(t, err)
+				_, err = database.Writer.Exec(`INSERT INTO runner_runs
+					(id, conversation_id, runner_id, status, created_at, updated_at)
+					VALUES ('run', 'conversation', 'runner', 'opening', ?, ?)`, now, now)
+				require.NoError(t, err)
+			case "age":
+				_, err = database.Writer.Exec(`UPDATE image_artifacts SET created_at = ?`, time.Now().UTC())
+				require.NoError(t, err)
+			}
+			_, err = store.pruneReferences(t.Context(), "conversation", snapshot, snapshot.abandoned, cutoff)
+			require.NoError(t, err)
+			var count int
+			require.NoError(t, database.Reader.Get(&count, `SELECT COUNT(*) FROM conversation_artifacts`))
+			assert.Equal(t, test.keep, count == 1)
+		})
+	}
+}
+
+func TestSweepUnreadableResultsAreRetained(t *testing.T) {
+	store, database := testStore(t)
+	for i, results := range []string{`{broken`, ``, `{"call-000": {"attachments": "broken"}}`} {
+		id := fmt.Sprintf("unreadable-%d", i)
+		seedCleanupReferences(t, database, id, 1)
+		saveCleanupConversation(t, database, id, results)
+	}
+	seedCleanupReferences(t, database, "abandoned", 1)
+	require.NoError(t, store.Sweep(t.Context()))
+	var count int
+	require.NoError(t, database.Reader.Get(&count, `SELECT COUNT(*) FROM conversation_artifacts`))
+	assert.Equal(t, 3, count, "unreadable history must not cause deletions or stop cleanup of other conversations")
+}
+
+func TestSweepBatchesAndSharedImages(t *testing.T) {
+	store, database := testStore(t)
+	// More than one page of conversations, references, and orphan metadata.
+	for i := range cleanupBatchSize + 1 {
+		seedCleanupReferences(t, database, fmt.Sprintf("conversation-%03d", i), 1)
+	}
+	seedCleanupReferences(t, database, "many-references", cleanupBatchSize+1)
+	seedCleanupReferences(t, database, "orphan-metadata", cleanupBatchSize+1)
+	_, err := database.Writer.Exec(`DELETE FROM conversation_artifacts WHERE conversation_id = 'orphan-metadata'`)
+	require.NoError(t, err)
+	refs := seedCleanupReferences(t, database, "saved", 1)
+	saveCleanupConversation(t, database, "saved", fmt.Sprintf(
+		`{"call-000": {"attachments": [{"artifactId": %q}]}}`, refs[0].ArtifactID))
+	for _, id := range []string{"saved", "abandoned-sharing-image"} {
+		_, err := database.Writer.Exec(`INSERT INTO conversation_artifacts VALUES (?, 'wrong-call', ?)`, id, refs[0].ArtifactID)
+		require.NoError(t, err)
+	}
+	require.NoError(t, store.Sweep(t.Context()))
+	var remaining []artifactReference
+	require.NoError(t, database.Reader.Select(&remaining, `SELECT tool_call_id, artifact_id FROM conversation_artifacts`))
+	assert.Equal(t, refs, remaining, "retain only the exact checkpointed (tool call, artifact) pair")
+	var ids []string
+	require.NoError(t, database.Reader.Select(&ids, `SELECT id FROM image_artifacts`))
+	assert.Equal(t, []string{refs[0].ArtifactID}, ids, "shared image survives abandoned-reference cleanup")
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	assert.ErrorIs(t, store.Sweep(ctx), context.Canceled)
+}
+
+func TestSweepRetainsMetadataReferencedAfterSelection(t *testing.T) {
+	store, database := testStore(t)
+	refs := seedCleanupReferences(t, database, "orphan", 1)
+	_, err := database.Writer.Exec(`DELETE FROM conversation_artifacts`)
+	require.NoError(t, err)
+	writer, err := database.Writer.Connx(t.Context())
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	done := make(chan error, 1)
+	finished := make(chan struct{})
+	defer func() {
+		cancel()
+		writer.Close()
+		<-finished
+	}()
+	waits := database.Writer.Stats().WaitCount
+	go func() {
+		defer close(finished)
+		done <- store.Sweep(ctx)
+	}()
+	require.Eventually(t, func() bool {
+		return database.Writer.Stats().WaitCount > waits
+	}, time.Second, time.Millisecond, "cleanup selected the orphan and is waiting to delete it")
+	_, err = writer.ExecContext(t.Context(), `INSERT INTO conversation_artifacts
+		(conversation_id, tool_call_id, artifact_id) VALUES ('new-reference', 'call', ?)`, refs[0].ArtifactID)
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	require.NoError(t, <-done)
+	var count int
+	require.NoError(t, database.Reader.Get(&count, `SELECT COUNT(*) FROM image_artifacts`))
+	assert.Equal(t, 1, count, "the delete must recheck references, not trust the earlier orphan selection")
+}
+
+func BenchmarkSweepCheckpointedReferences(b *testing.B) {
+	store, database := testStore(b)
+	// Eight 1 MiB snapshots with 32 images each model the repeated-parsing
+	// bottleneck, without copying any real conversation data.
+	for i := range 8 {
+		id := fmt.Sprintf("conversation-%d", i)
+		refs := seedCleanupReferences(b, database, id, 32)
+		results := make(map[string]any, len(refs)+1)
+		results["large-output"] = map[string]any{"data": strings.Repeat("x", 1<<20)}
+		for _, ref := range refs {
+			results[ref.ToolCallID] = map[string]any{"attachments": []map[string]string{{"artifactId": ref.ArtifactID}}}
+		}
+		raw, err := json.Marshal(results)
+		require.NoError(b, err)
+		saveCleanupConversation(b, database, id, string(raw))
+	}
+	cutoff := time.Now().UTC().Add(-cleanupGrace)
+	b.Run("per-reference-query", func(b *testing.B) {
+		for b.Loop() {
+			_, err := database.Writer.ExecContext(b.Context(), `DELETE FROM conversation_artifacts AS r
+				WHERE EXISTS (SELECT 1 FROM image_artifacts a WHERE a.id = r.artifact_id AND a.created_at < ?)
+				AND NOT EXISTS (SELECT 1 FROM runner_runs rr WHERE rr.conversation_id = r.conversation_id AND rr.status IN ('opening', 'running'))
+				AND NOT EXISTS (
+					SELECT 1 FROM conversations c, json_each(c.tool_results) t, json_each(t.value, '$.attachments') a
+					WHERE c.id = r.conversation_id AND t.key = r.tool_call_id AND json_extract(a.value, '$.artifactId') = r.artifact_id
+				)`, cutoff)
+			require.NoError(b, err)
+		}
+	})
+	b.Run("per-conversation-sweep", func(b *testing.B) {
+		for b.Loop() {
+			require.NoError(b, store.Sweep(b.Context()))
+		}
+	})
 }
 
 type zeroReader struct{}
