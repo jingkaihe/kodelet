@@ -501,6 +501,23 @@ describe('ChatEventSocket', () => {
     await vi.waitFor(() => expect(calls).toEqual(['conversation', 'done', 'resubscribed:false']));
   });
 
+  it('tells the page it follows a conversation again when the first acknowledgement was lost', async () => {
+    const events = createSocket();
+    const socket = await connected(events);
+    const onResubscribed = vi.fn();
+    void events.watch('conversation', { onEvent: vi.fn(), onResubscribed });
+    expect(socket.sent).toHaveLength(1);
+    // The connection closes before the server acknowledges the subscription.
+    socket.close();
+    await vi.waitFor(() => expect(FakeSocket.instances).toHaveLength(2));
+    const reconnected = latestSocket();
+    reconnected.accept('connection-2');
+    reconnected.receive({ type: 'subscribed', id: 's1', conversationId: 'conversation' });
+    await vi.waitFor(() =>
+      expect(onResubscribed).toHaveBeenCalledExactlyOnceWith({ active: false })
+    );
+  });
+
   it('reports an already submitted turn from its saved status', async () => {
     const events = createSocket();
     const socket = await connected(events);

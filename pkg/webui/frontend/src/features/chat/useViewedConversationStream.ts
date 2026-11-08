@@ -28,8 +28,11 @@ interface ViewedConversationStreamOptions {
   handleResourcesReloaded: (event: ChatStreamEvent, id: string) => void;
   /** Reports the end of a run this page saw start. */
   finishObservedRun: (id: string, event: ChatStreamEvent, controller: AbortController) => void;
-  /** Reloads a finished conversation's saved state while isCurrent holds. */
-  reconcileCompletedConversation: (id: string, isCurrent: () => boolean) => Promise<void>;
+  /**
+   * Reloads a finished conversation's saved state while isCurrent holds, and
+   * resolves to whether it replaced the transcript.
+   */
+  reconcileCompletedConversation: (id: string, isCurrent: () => boolean) => Promise<boolean>;
   /** Shows a prompt or notification, and reports whether the event was one. */
   handleUIRequest: (event: ChatStreamEvent) => boolean;
   handleExtensionWidgetEvent: (event: ChatStreamEvent) => boolean;
@@ -81,26 +84,36 @@ export const useViewedConversationStream = ({
     let sawEvent = false;
     let watchedTurn = 0;
     let terminalSeen = false;
+    // Set when events may have been missed; cleared once saved state is shown.
+    let reloadPending = false;
+    // Shows the saved conversation, unless this stream was replaced, the page
+    // moved on, or a run started meanwhile: a snapshot would hide its output.
+    const reloadSavedConversation = () => {
+      const completedTurn = watchedTurn;
+      const runVersion = conversationRunVersion.current;
+      void reconcileCompletedConversation(
+        conversationId,
+        () =>
+          !controller.signal.aborted &&
+          runStreams.viewedGeneration === streamInstance &&
+          viewedConversationIdRef.current === conversationId &&
+          !runStreams.sends[conversationId] &&
+          completedTurn === watchedTurn &&
+          conversationRunVersion.current === runVersion
+      ).then((reloaded) => {
+        if (reloaded) reloadPending = false;
+      });
+    };
 
     void apiService
       .streamConversation(conversationId, {
         signal: controller.signal,
         // Events may have been missed while the page was not following the
-        // conversation, so reload its saved state. An active run is left to
-        // stream: its end reloads the transcript, and a snapshot now would
-        // replace its live output.
+        // conversation. An active run is left to stream, and the reload waits
+        // for it to end, however it ends.
         onResubscribed: ({ active }) => {
-          if (active) return;
-          const runVersion = conversationRunVersion.current;
-          void reconcileCompletedConversation(
-            conversationId,
-            () =>
-              !controller.signal.aborted &&
-              runStreams.viewedGeneration === streamInstance &&
-              viewedConversationIdRef.current === conversationId &&
-              !runStreams.sends[conversationId] &&
-              conversationRunVersion.current === runVersion
-          );
+          reloadPending = true;
+          if (!active) reloadSavedConversation();
         },
         onEvent: (event: ChatStreamEvent) => {
           if (controller.signal.aborted && !isBlockingUIRequestEvent(event)) return;
@@ -168,22 +181,12 @@ export const useViewedConversationStream = ({
             if (terminalSeen) return;
             terminalSeen = true;
             onObservedRunFinished(conversationId, event, controller);
-            const completedTurn = watchedTurn;
-            const runVersion = conversationRunVersion.current;
-            void reconcileCompletedConversation(
-              conversationId,
-              () =>
-                !controller.signal.aborted &&
-                runStreams.viewedGeneration === streamInstance &&
-                viewedConversationIdRef.current === conversationId &&
-                !runStreams.sends[conversationId] &&
-                completedTurn === watchedTurn &&
-                conversationRunVersion.current === runVersion
-            );
+            reloadSavedConversation();
           } else if (event.kind === 'error') {
             if (terminalSeen) return;
             terminalSeen = true;
             onObservedRunFinished(conversationId, event, controller);
+            if (reloadPending) reloadSavedConversation();
           }
 
           if (event.kind === 'error') {

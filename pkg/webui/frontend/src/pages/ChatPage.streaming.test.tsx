@@ -240,6 +240,60 @@ describe('ChatPage streaming, steering, and navigation', () => {
     expect(mockGetConversation).toHaveBeenCalledTimes(2);
   });
 
+  it('reloads the shown conversation once a run active on following it again fails', async () => {
+    setRouteParams({ id: 'conv-123' });
+    const saved = {
+      id: 'conv-123',
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+      messageCount: 2,
+      messages: [
+        { role: 'user' as const, content: 'first question' },
+        { role: 'assistant' as const, content: 'first answer' },
+      ],
+      toolResults: {},
+    };
+    mockGetConversation.mockResolvedValueOnce(saved).mockResolvedValue({
+      ...saved,
+      messageCount: 4,
+      messages: [
+        ...saved.messages,
+        { role: 'user' as const, content: 'question from another client' },
+        { role: 'assistant' as const, content: 'answer from another client' },
+      ],
+    });
+    let stream!: {
+      onEvent: (event: ChatStreamEvent) => void;
+      onResubscribed: (state: { active: boolean }) => void;
+    };
+    mockStreamConversation.mockImplementation(async (_id, options) => {
+      stream = options as typeof stream;
+      return new Promise<void>(() => undefined);
+    });
+
+    render(<ChatPage />);
+
+    await waitFor(() => expect(screen.getByText('first answer')).toBeInTheDocument());
+    await waitFor(() => expect(stream).toBeDefined());
+    // A turn finished unseen while disconnected, and another is running now.
+    await act(async () => {
+      stream.onResubscribed({ active: true });
+      stream.onEvent({ kind: 'conversation', conversation_id: 'conv-123', turn_id: 'turn-2' });
+    });
+    expect(mockGetConversation).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      stream.onEvent({
+        kind: 'error',
+        conversation_id: 'conv-123',
+        turn_id: 'turn-2',
+        error: 'provider failed',
+      });
+    });
+    await waitFor(() => expect(screen.getByText('answer from another client')).toBeInTheDocument());
+    expect(mockGetConversation).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps healthy watchers and recovers voice turns after an observer disconnects', async () => {
     setRouteParams({ id: 'conv-123' });
     mockGetConversation

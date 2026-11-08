@@ -314,25 +314,28 @@ const ChatPage: React.FC = () => {
     [setConversationRunning]
   );
 
+  // Resolves to whether the saved conversation replaced the transcript.
   const reconcileCompletedConversation = useCallback(
-    async (id: string, isCurrent: () => boolean) => {
+    async (id: string, isCurrent: () => boolean): Promise<boolean> => {
       try {
         const captionSeq = realtimeCaptionSeq.current;
         const data = await apiService.getConversation(id);
-        if (!isCurrent()) return;
+        if (!isCurrent()) return false;
         if (data.isRunning) {
           // Another turn may already have started server-side before its stream
           // header reaches us. Do not replace its live output with a checkpoint.
           markConversationRunning(id);
-          return;
+          return false;
         }
         const normalized = normalizeConversation(data);
         setConversation(normalized);
         setMessages(projectConversation(normalized, captionSeq));
         setConversationRunning(id, Boolean(normalized.isRunning));
         void refreshConversations();
+        return true;
       } catch (error) {
         console.error('Failed to refresh completed conversation', error);
+        return false;
       }
     },
     [markConversationRunning, projectConversation, refreshConversations, setConversationRunning]

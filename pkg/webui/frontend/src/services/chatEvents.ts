@@ -67,8 +67,11 @@ interface ConversationSubscription {
   turnEnded?: boolean;
   /** Set once a submission follows its turn as an ordinary subscriber. */
   resumed?: boolean;
-  /** Set once the server has acknowledged this subscription. */
-  acknowledged?: boolean;
+  /**
+   * Requests made to the server for this subscription. A later request means
+   * an earlier one was interrupted, whether or not it was acknowledged.
+   */
+  requests: number;
   /** Called when the subscription is established again; see ChatEventSocket.watch. */
   onResubscribed?: (state: ChatEventResubscription) => void;
   /** A run seen starting but not yet ending; checked after missed events. */
@@ -361,6 +364,7 @@ export class ChatEventSocket {
       conversationId,
       level,
       attached: false,
+      requests: 0,
       settlement: { resolve: () => {}, reject: () => {} },
       delivery: createChatEventDelivery(onEvent, {
         conversationId,
@@ -422,6 +426,7 @@ export class ChatEventSocket {
 
   private attach(subscription: ConversationSubscription) {
     subscription.attached = true;
+    subscription.requests += 1;
     if (subscription.turnId) subscription.resumed = true;
     this.send({
       type: 'subscribe',
@@ -631,16 +636,15 @@ export class ChatEventSocket {
   }
 
   /**
-   * Handles the server's acknowledgement of a subscription. Any later one
-   * follows a disconnect or falling behind, so the page is told once a missed
-   * run ending has been reported.
+   * Handles the server's acknowledgement of a subscription. One that answers
+   * a later request follows a disconnect or falling behind, so the page is
+   * told once a missed run ending has been reported.
    */
   private async acknowledged(
     subscription: ConversationSubscription,
     acknowledgement: { active?: boolean; turnId?: string }
   ) {
-    const resubscribed = Boolean(subscription.acknowledged);
-    subscription.acknowledged = true;
+    const resubscribed = subscription.requests > 1;
     await this.reconcile(subscription, acknowledgement);
     if (!resubscribed || this.subscriptions.get(subscription.id) !== subscription) return;
     try {
