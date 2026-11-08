@@ -53,11 +53,12 @@ func TestArtifactConversationLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	parent.RawMessages = json.RawMessage(`[{"type":"compaction","encrypted_content":"opaque"}]`)
 	require.NoError(t, store.Save(t.Context(), parent))
-	// Startup collection must still find attachments belonging to archived calls.
+	// Cleanup must still find attachments belonging to archived calls.
 	_, err = store.db.Writer.Exec(`UPDATE image_artifacts SET created_at = ?`, time.Now().Add(-48*time.Hour))
 	require.NoError(t, err)
 	reopened, err := artifacts.Open(t.Context(), database)
 	require.NoError(t, err)
+	require.NoError(t, reopened.Sweep(t.Context()))
 	_, _, err = reopened.Get(t.Context(), parent.ID, attachment.ArtifactID)
 	require.NoError(t, err)
 	loaded, err := store.Load(t.Context(), parent.ID)
@@ -70,6 +71,8 @@ func TestArtifactConversationLifecycle(t *testing.T) {
 	require.NoError(t, store.SaveConversationFork(t.Context(), parent.ID, storedFork))
 	liveFork := convtypes.ForkConversationRecord(parent)
 	require.NoError(t, store.Save(t.Context(), liveFork))
+	// Both persisted and live forks must retain their shared image after cleanup.
+	require.NoError(t, images.Sweep(t.Context()))
 	for _, child := range []string{storedFork.ID, liveFork.ID} {
 		_, childPath, err := images.Get(t.Context(), child, attachment.ArtifactID)
 		require.NoError(t, err)
