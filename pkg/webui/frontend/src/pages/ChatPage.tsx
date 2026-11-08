@@ -373,6 +373,15 @@ const ChatPage: React.FC = () => {
     setDraft(restored?.draft ?? '');
     setAttachments((current) => restored?.attachments ?? (current.length > 0 ? [] : current));
   }, [tabKey, setAttachments]);
+  /** Clears what was sent from its tab, which may no longer be the one shown. */
+  const clearTabComposer = (key: string) => {
+    if (composerTabKeyRef.current === key) {
+      setDraft('');
+      setAttachments([]);
+    } else {
+      tabComposerRef.current.delete(key);
+    }
+  };
   const {
     conversations,
     setConversations,
@@ -1438,6 +1447,7 @@ const ChatPage: React.FC = () => {
 
       setSteering(true);
       setStreamError(null);
+      const steeringTabKey = composerTabKeyRef.current;
 
       try {
         const queuedContent = buildUserContent(prompt, attachmentsForSend);
@@ -1454,8 +1464,7 @@ const ChatPage: React.FC = () => {
               }
             : currentConversation
         );
-        setDraft('');
-        setAttachments([]);
+        clearTabComposer(steeringTabKey);
         showToast('Steering queued for the active conversation', 'success');
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to steer conversation';

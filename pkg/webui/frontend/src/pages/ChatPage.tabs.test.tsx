@@ -10,6 +10,7 @@ import {
   mockGetConversation,
   mockGetConversations,
   mockNavigate,
+  mockSteerConversation,
   mockStopConversation,
   mockStreamChat,
   mockStreamConversation,
@@ -237,6 +238,39 @@ describe('ChatPage conversation tabs', () => {
     fireEvent.keyDown(getActiveTab(), { key: 'Delete' });
     await revisit(rerender, 'conv-a');
     await revisit(rerender, 'conv-b');
+    expect(composer()).toHaveValue('');
+  });
+
+  it('clears a steering message from its own tab when it finishes after a switch', async () => {
+    useConversations(['conv-a']);
+    streamListeners();
+    let finishSteer = () => {};
+    mockSteerConversation.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishSteer = () => resolve({ success: true, conversation_id: 'conv-a', queued: true });
+        })
+    );
+    const { rerender } = await visit('conv-b');
+    const composer = () => screen.getByTestId('composer-textarea');
+    fireEvent.change(composer(), { target: { value: 'Unsent beta work' } });
+    await revisit(rerender, 'conv-a');
+    fireEvent.change(composer(), { target: { value: 'Also cover the edge case' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Steer' }));
+    await waitFor(() =>
+      expect(mockSteerConversation).toHaveBeenCalledWith(
+        'conv-a',
+        'Also cover the edge case',
+        expect.anything()
+      )
+    );
+
+    await revisit(rerender, 'conv-b');
+    expect(composer()).toHaveValue('Unsent beta work');
+    await act(async () => finishSteer());
+
+    expect(composer()).toHaveValue('Unsent beta work');
+    await revisit(rerender, 'conv-a');
     expect(composer()).toHaveValue('');
   });
 
