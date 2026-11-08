@@ -861,7 +861,8 @@ func anthropicToolResultBlock(toolUseID string, result tooltypes.ToolResult) ant
 				if err == nil {
 					validatedMimeType, err = base.Base64ImageSourceMediaType(mimeType)
 				}
-				if err != nil {
+				if err != nil || result.IsError() {
+					// Anthropic requires text-only content when is_error is true.
 					// Keep the result honest when surrounding text names an image
 					// that cannot be attached for this provider.
 					if notice := base.UndeliveredImageNotice(part); notice != "" {

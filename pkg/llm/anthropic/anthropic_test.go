@@ -560,6 +560,43 @@ func TestAnthropicToolResultBlockFallsBackToAssistantFacing(t *testing.T) {
 	assert.Contains(t, block.OfToolResult.Content[0].OfText.Text, "boom")
 }
 
+func TestAnthropicToolResultBlockErrorImagesBecomeText(t *testing.T) {
+	const imageBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+	for _, tc := range []struct {
+		name       string
+		artifactID string
+		notice     string
+	}{
+		{name: "artifact", artifactID: "art_partial", notice: "Image art_partial could not be delivered to the model."},
+		{name: "inline image", notice: "An image could not be delivered to the model."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := fakeAnthropicMultiModalToolResult{
+				BaseToolResult: tooltypes.BaseToolResult{Error: "screenshot failed"},
+				parts: []tooltypes.ToolResultContentPart{
+					{Type: tooltypes.ToolResultContentPartTypeText, Text: "screenshot failed"},
+					{Type: tooltypes.ToolResultContentPartTypeImage, ArtifactID: tc.artifactID, ImageURL: "data:image/png;base64," + imageBase64},
+					{Type: tooltypes.ToolResultContentPartTypeText, Text: "partial output retained"},
+				},
+			}
+
+			block := anthropicToolResultBlock("toolu_partial", result)
+
+			require.NotNil(t, block.OfToolResult)
+			assert.Equal(t, "toolu_partial", block.OfToolResult.ToolUseID)
+			assert.True(t, block.OfToolResult.IsError.Value)
+			require.Len(t, block.OfToolResult.Content, 3)
+			for _, part := range block.OfToolResult.Content {
+				require.NotNil(t, part.OfText, "Anthropic error tool results must contain only text")
+				assert.Nil(t, part.OfImage)
+			}
+			assert.Equal(t, "screenshot failed", block.OfToolResult.Content[0].OfText.Text)
+			assert.Equal(t, tc.notice, block.OfToolResult.Content[1].OfText.Text)
+			assert.Equal(t, "partial output retained", block.OfToolResult.Content[2].OfText.Text)
+		})
+	}
+}
+
 func TestGetModelPricingMatchesFamiliesAndDefault(t *testing.T) {
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeHaiku5_5], getModelPricing(anthropic.ModelClaudeHaiku5_5))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeHaiku5_5], getModelPricing("claude-haiku-5-5-custom"))
