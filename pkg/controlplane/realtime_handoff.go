@@ -169,9 +169,10 @@ func (c *realtimeCall) dispatch(ctx context.Context, event llmtypes.RealtimeEven
 		}
 		c.progressBridge().bind(req.TurnID, event.HandoffID, false)
 		c.emit(realtimeEvent{Kind: "agent-started", TurnID: req.TurnID})
-		// Approval ownership uses the real browser lifetime/capabilities; coding
-		// execution is detached inside runAdmittedChat, just like normal chat.
-		requestCtx, sink := ctx, realtimeChatSink{}
+		// The calling page's conversation watcher already receives the run's
+		// events through broadcast, so it only owns the run's prompts, for the
+		// watcher's lifetime. Coding execution is detached, as for typed turns.
+		var observer chatRunObserver
 		if owner := c.waitForOwnerWatch(ctx); owner != nil {
 			if req.ClientCapabilities != nil {
 				caps := *req.ClientCapabilities
@@ -180,31 +181,18 @@ func (c *realtimeCall) dispatch(ctx context.Context, event llmtypes.RealtimeEven
 				caps.PersistentSurfaces = caps.PersistentSurfaces && owner.capabilities.PersistentSurfaces
 				req.ClientCapabilities = &caps
 			}
-			requestCtx, sink = owner.ctx, realtimeChatSink{owner: owner}
+			observer.ownerCtx, observer.ownerSink = owner.ctx, owner
 		} else {
 			// Accepted work outlives the call and its browser. Like a typed
 			// turn whose browser left, prompts are unavailable to it.
 			req.ClientCapabilities = nil
 		}
-		_, err = s.runAdmittedChat(requestCtx, req, sink, c.clientID, nil, receipt)
+		_, err = s.runObservedChat(ctx, req, observer, c.clientID, nil, receipt)
 		if err != nil {
 			return chat.TurnReceipt{}, err
 		}
 		return s.turns.get(ctx, req.ConversationID, req.TurnID)
 	}
-}
-
-// This sink is used only by the approval owner, if any. Ordinary coding events
-// already fan out through broadcastingEventSink, so Send must not repeat them.
-type realtimeChatSink struct {
-	owner *subscriberEventSink
-}
-
-func (sink realtimeChatSink) Send(event chat.ChatEvent) error {
-	if sink.owner != nil && strings.HasPrefix(event.Kind, "ui-") {
-		return sink.owner.Send(event)
-	}
-	return nil
 }
 
 // waitForOwnerWatch returns the calling browser's conversation watcher, or nil.
