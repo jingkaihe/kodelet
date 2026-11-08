@@ -69,6 +69,18 @@ describe('AboutToolsPanel', () => {
     expect(screen.getByText('Nothing matches “zzz”.')).toBeInTheDocument();
   });
 
+  it('keeps the selected row when the filter is cleared', async () => {
+    const user = userEvent.setup();
+    render(<AboutToolsPanel inventory={sampleToolInventory} />);
+    await user.type(filter(), 'search');
+    await user.click(row('code_search'));
+    expect(row('code_search')).toHaveAttribute('aria-selected', 'true');
+
+    await user.clear(filter());
+    expect(row('code_search')).toHaveAttribute('aria-selected', 'true');
+    expect(row('code-search')).toHaveAttribute('aria-expanded', 'true');
+  });
+
   it('supports tree keyboard navigation', async () => {
     const user = userEvent.setup();
     render(<AboutToolsPanel inventory={sampleToolInventory} />);

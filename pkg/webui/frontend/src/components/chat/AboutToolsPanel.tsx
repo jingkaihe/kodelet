@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import React from 'react';
 import {
+  ancestorIds,
   buildInventoryTree,
   defaultExpandedIds,
   expandableIds,
@@ -186,6 +187,11 @@ const AboutToolsPanel: React.FC<AboutToolsPanelProps> = ({ inventory }) => {
               const value = event.target.value;
               setQuery(value);
               setFilterExpanded(filterInventoryTree(tree, value).expanded);
+              if (!value.trim() && activeId) {
+                // The filter may have opened the selected row's ancestors; keep it in view.
+                const ancestors = ancestorIds(tree, activeId);
+                setExpanded((current) => new Set([...current, ...ancestors]));
+              }
             }}
             placeholder="Filter tools, plugins, and skills"
             type="search"

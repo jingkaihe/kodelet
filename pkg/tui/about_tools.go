@@ -400,6 +400,31 @@ func (s *aboutToolsState) setQuery(query string) {
 	}
 }
 
+// clearFilter drops the query but keeps the selected row, opening its
+// ancestors because the filter may have been what expanded them.
+func (s *aboutToolsState) clearFilter() {
+	cursor := s.cursorID
+	s.filtering = false
+	s.setQuery("")
+	s.cursorID = cursor
+	var reveal func([]*inventoryNode, []string) bool
+	reveal = func(nodes []*inventoryNode, ancestors []string) bool {
+		for _, node := range nodes {
+			if node.id == cursor {
+				for _, id := range ancestors {
+					s.expanded[id] = true
+				}
+				return true
+			}
+			if reveal(node.children, append(ancestors[:len(ancestors):len(ancestors)], node.id)) {
+				return true
+			}
+		}
+		return false
+	}
+	reveal(s.tree, nil)
+}
+
 func (s *aboutToolsState) setExpanded(id string, open bool) {
 	target := s.expanded
 	if s.normalizedQuery() != "" {
@@ -493,10 +518,7 @@ func (m *model) updateAboutToolsKey(key string) (tea.Cmd, bool) {
 	if state.filtering {
 		switch key {
 		case "esc":
-			state.filtering = false
-			cursor := state.cursorID
-			state.setQuery("")
-			state.cursorID = cursor
+			state.clearFilter()
 		case "enter", "down":
 			state.filtering = false
 		case "backspace":
@@ -573,9 +595,7 @@ func (m *model) updateAboutToolsKey(key string) (tea.Cmd, bool) {
 		if state.query == "" {
 			return nil, false
 		}
-		cursor := state.cursorID
-		state.setQuery("")
-		state.cursorID = cursor
+		state.clearFilter()
 	default:
 		return nil, false
 	}

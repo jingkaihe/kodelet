@@ -275,6 +275,18 @@ export const filterInventoryTree = (
   return { nodes: visit(nodes), expanded };
 };
 
+/** Returns the IDs of a node's ancestors, outermost first, or [] when it is absent. */
+export const ancestorIds = (nodes: InventoryNode[], id: string): string[] => {
+  for (const node of nodes) {
+    if (node.id === id) return [];
+    const path = ancestorIds(node.children, id);
+    if (path.length > 0 || node.children.some((child) => child.id === id)) {
+      return [node.id, ...path];
+    }
+  }
+  return [];
+};
+
 export const flattenInventoryTree = (
   nodes: InventoryNode[],
   expanded: ReadonlySet<string>

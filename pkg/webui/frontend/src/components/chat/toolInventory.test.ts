@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { sampleToolInventory, toolInventoryWithIssues } from '../../stories/toolInventoryFixtures';
 import {
+  ancestorIds,
   buildInventoryTree,
   defaultExpandedIds,
   filterInventoryTree,
@@ -100,6 +101,18 @@ describe('tool inventory tree', () => {
       skills: 14,
       failedExtensions: 1,
     });
+  });
+
+  it('finds the ancestors of a node', () => {
+    const tree = buildInventoryTree(sampleToolInventory);
+    const tool = 'plugin:global:jingkaihe@skills/extension:code-search/tool:code_search';
+    expect(ancestorIds(tree, tool)).toEqual([
+      'section:plugins',
+      'plugin:global:jingkaihe@skills',
+      'plugin:global:jingkaihe@skills/extension:code-search',
+    ]);
+    expect(ancestorIds(tree, 'section:plugins')).toEqual([]);
+    expect(ancestorIds(tree, 'missing')).toEqual([]);
   });
 
   it('keeps repo and global copies of a plugin apart', () => {
