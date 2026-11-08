@@ -16,11 +16,15 @@ import ChatComposer from '../components/chat/ChatComposer';
 import ChatSidebar, {
   ChatSidebarCollapsedRail,
   ConversationSearchDialog,
+  previewConversation,
 } from '../components/chat/ChatSidebar';
 import ChatTranscript from '../components/chat/ChatTranscript';
-import ChatWorkspaceHeader from '../components/chat/ChatWorkspaceHeader';
 import ChatWorkspacePanel from '../components/chat/ChatWorkspacePanel';
 import ConversationStatistics from '../components/chat/ConversationStatistics';
+import ConversationTabs, {
+  adjacentConversationTabId,
+  type ConversationTab,
+} from '../components/chat/ConversationTabs';
 import DictationDialog from '../components/chat/DictationDialog';
 import ExtensionWidgets from '../components/chat/ExtensionWidgets';
 import KeyboardShortcutsDialog from '../components/chat/KeyboardShortcutsDialog';
@@ -47,6 +51,11 @@ import {
   useConversationList,
 } from '../features/chat/useConversationList';
 import { useConversationSearch } from '../features/chat/useConversationSearch';
+import {
+  NEW_CHAT_TAB_ID,
+  routeTabKey,
+  useConversationTabs,
+} from '../features/chat/useConversationTabs';
 import { isVoiceCommand, useDictation } from '../features/chat/useDictation';
 import { useExtensionWidgets } from '../features/chat/useExtensionWidgets';
 import { useRealtime } from '../features/chat/useRealtime';
@@ -202,6 +211,27 @@ interface QueuedCommand {
   attachments: PendingImageAttachment[];
 }
 
+/** What finished in a conversation while its tab was in the background. */
+type TabActivity = 'unread' | 'error';
+
+const withoutKey = <T,>(record: Record<string, T>, key: string): Record<string, T> => {
+  if (!(key in record)) return record;
+  const next = { ...record };
+  delete next[key];
+  return next;
+};
+
+const conversationTabStep = (event: KeyboardEvent): number => {
+  if (!event.altKey || event.shiftKey || event.ctrlKey || event.metaKey) return 0;
+  // Option changes event.key on macOS; match the physical bracket keys.
+  if (event.code === 'BracketRight') return 1;
+  if (event.code === 'BracketLeft') return -1;
+  return 0;
+};
+
+const isMacPlatform = (): boolean =>
+  typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
+
 const slashCommandName = (message: string): string | undefined =>
   message.trim().match(/^\/(\S+)/)?.[1];
 
@@ -309,6 +339,40 @@ const ChatPage: React.FC = () => {
     confirmed: boolean;
   } | null>(null);
   const routerConversationIdRef = useRef<string | null>(conversationId);
+  const conversationTabs = useConversationTabs(conversationId);
+  const tabKey = conversationTabs.activeId;
+  const openTabIdsRef = useRef(new Set<string>());
+  openTabIdsRef.current = new Set(conversationTabs.tabs.map((tab) => tab.id));
+  const [tabActivity, setTabActivity] = useState<Record<string, TabActivity>>({});
+  // Unsent composer text and images, kept per open tab while another tab is shown.
+  const tabComposerRef = useRef(
+    new Map<string, { draft: string; attachments: PendingImageAttachment[] }>()
+  );
+  const composerStateRef = useRef({ draft, attachments });
+  composerStateRef.current = { draft, attachments };
+  const composerTabKeyRef = useRef(tabKey);
+  // Set when a tab turns into its started conversation, which is not a tab switch.
+  const replacedTabRef = useRef<{ from: string; to: string } | null>(null);
+  const replaceConversationTab = (from: string, to: string) => {
+    replacedTabRef.current = { from, to };
+    conversationTabs.replace(from, to);
+  };
+  useLayoutEffect(() => {
+    const previousKey = composerTabKeyRef.current;
+    if (previousKey === tabKey) return;
+    composerTabKeyRef.current = tabKey;
+    const replaced = replacedTabRef.current;
+    replacedTabRef.current = null;
+    if (replaced?.from === previousKey && replaced.to === tabKey) return;
+    // Closed and started-in-place tabs leave nothing behind.
+    if (openTabIdsRef.current.has(previousKey)) {
+      tabComposerRef.current.set(previousKey, composerStateRef.current);
+    }
+    const restored = tabComposerRef.current.get(tabKey);
+    tabComposerRef.current.delete(tabKey);
+    setDraft(restored?.draft ?? '');
+    setAttachments((current) => restored?.attachments ?? (current.length > 0 ? [] : current));
+  }, [tabKey, setAttachments]);
   const {
     conversations,
     setConversations,
@@ -511,10 +575,24 @@ const ChatPage: React.FC = () => {
     handleUIInputRequest(event)
   );
 
+  // Flags a run that finished while its tab was open but not shown.
+  const noteBackgroundRunFinished = useCallback((id: string, activity: TabActivity) => {
+    if (viewedConversationIdRef.current === id || !openTabIdsRef.current.has(id)) return;
+    setTabActivity((current) =>
+      current[id] === activity ? current : { ...current, [id]: activity }
+    );
+  }, []);
+
+  useEffect(() => {
+    if (conversationId) setTabActivity((current) => withoutKey(current, conversationId));
+  }, [conversationId]);
+
   const onObservedRunFinished = useEffectEvent(
     (id: string, event: ChatStreamEvent, controller: AbortController) => {
       const owner = commandObserversRef.current[id];
       if (owner && owner !== controller) return;
+      if (event.kind === 'error') noteBackgroundRunFinished(id, 'error');
+      else if (!event.cancelled) noteBackgroundRunFinished(id, 'unread');
       if (observedRunControllersRef.current[id] === controller) {
         delete observedRunControllersRef.current[id];
       }
@@ -1010,7 +1088,20 @@ const ChatPage: React.FC = () => {
     followTranscript();
   }, [messages, currentConversationIsStreaming, conversationLoading, followTranscript]);
 
+  const navigateToTab = (id: string) => {
+    startTransition(() => {
+      navigate(id === NEW_CHAT_TAB_ID ? '/' : `/c/${id}`);
+    });
+  };
+
   const handleNewChat = () => {
+    if (conversationId && conversationTabs.tabs.some((tab) => tab.id === NEW_CHAT_TAB_ID)) {
+      // One new chat at a time: return to it with its settings and unsent text.
+      closeMobileSidebar();
+      setStreamError(null);
+      navigateToTab(NEW_CHAT_TAB_ID);
+      return;
+    }
     discardDraftWorkspace();
     closeMobileSidebar();
     setConversation(null);
@@ -1037,6 +1128,44 @@ const ChatPage: React.FC = () => {
     startTransition(() => {
       navigate(`/c/${nextConversationId}`);
     });
+  };
+
+  const handleSelectTab = (id: string) => {
+    if (id !== NEW_CHAT_TAB_ID) {
+      handleSelectConversation(id);
+    } else if (conversationId) {
+      closeMobileSidebar();
+      setStreamError(null);
+      navigateToTab(NEW_CHAT_TAB_ID);
+    }
+  };
+
+  // Closing a tab only hides the conversation; a running agent keeps running.
+  const handleCloseTab = (id: string) => {
+    const nextTabId = conversationTabs.close(id);
+    tabComposerRef.current.delete(id);
+    setTabActivity((current) => withoutKey(current, id));
+    if (nextTabId === undefined) return;
+    if (nextTabId === NEW_CHAT_TAB_ID && !conversationId) {
+      // The only tab was the new chat: start it over.
+      setDraft('');
+      setAttachments([]);
+      return;
+    }
+    if (nextTabId === NEW_CHAT_TAB_ID) {
+      setStreamError(null);
+      navigateToTab(NEW_CHAT_TAB_ID);
+      return;
+    }
+    handleSelectConversation(nextTabId);
+  };
+
+  const [tabConfigRequested, setTabConfigRequested] = useState(false);
+  const handleOpenTabConfig = (id: string) => {
+    if (id !== NEW_CHAT_TAB_ID) return;
+    // Open the new chat settings once the new chat is shown.
+    setTabConfigRequested(true);
+    if (conversationId) handleSelectTab(id);
   };
 
   const handleSelectSearchResult = (nextConversationId: string) => {
@@ -1081,6 +1210,9 @@ const ChatPage: React.FC = () => {
 
     try {
       await apiService.deleteConversation(targetConversationId);
+      const nextTabId = conversationTabs.close(targetConversationId);
+      tabComposerRef.current.delete(targetConversationId);
+      setTabActivity((current) => withoutKey(current, targetConversationId));
 
       if (
         targetConversationId === conversationId ||
@@ -1105,9 +1237,7 @@ const ChatPage: React.FC = () => {
         setConversationError(null);
         setStreamError(null);
         clearRunningConversation(targetConversationId);
-        startTransition(() => {
-          navigate('/');
-        });
+        navigateToTab(nextTabId ?? NEW_CHAT_TAB_ID);
       }
 
       await refreshConversations();
@@ -1125,6 +1255,9 @@ const ChatPage: React.FC = () => {
 
   const updatePathForStartedConversation = (streamedId: string) => {
     const nextPath = `/c/${streamedId}`;
+
+    // The new chat tab becomes the started conversation in place.
+    replaceConversationTab(routeTabKey(routerConversationIdRef.current), streamedId);
 
     conversationPathOverrideRef.current = nextPath;
     viewedConversationIdRef.current = streamedId;
@@ -1423,6 +1556,7 @@ const ChatPage: React.FC = () => {
     let streamedConversationId = targetConversationId;
     let streamedError: string | null = null;
     let successful = false;
+    let cancelled = false;
     const clearConfirmedOptimisticConversation = () => {
       if (
         optimisticRemoteConversationRef.current?.conversationId === streamedConversationId &&
@@ -1566,7 +1700,10 @@ const ChatPage: React.FC = () => {
                 : { ...event, conversation_id: eventConversationId };
 
             handleResourcesReloaded(event, eventConversationId);
-            if (event.kind === 'done') successful = !event.cancelled && !streamedError;
+            if (event.kind === 'done') {
+              successful = !event.cancelled && !streamedError;
+              cancelled = Boolean(event.cancelled);
+            }
 
             if (isBlockingUIRequestEvent(event) && handleUIInputRequest(eventForConversation)) {
               return;
@@ -1662,6 +1799,10 @@ const ChatPage: React.FC = () => {
           viewedConversationIdRef.current === streamedConversationId &&
           streamedConversationId !== routerConversationIdRef.current
         ) {
+          replaceConversationTab(
+            routeTabKey(routerConversationIdRef.current),
+            streamedConversationId
+          );
           startTransition(() => {
             navigate(`/c/${streamedConversationId}`, { replace: true });
           });
@@ -1700,6 +1841,9 @@ const ChatPage: React.FC = () => {
       }
       clearRunningConversationForController(streamedConversationId, controller);
       setConversationStreamVersion((currentVersion) => currentVersion + 1);
+      if (ownsRun && !controller.signal.aborted && !cancelled) {
+        noteBackgroundRunFinished(streamedConversationId, successful ? 'unread' : 'error');
+      }
       if (ownsRun) {
         if (successful && !controller.signal.aborted) runNextQueuedCommand(streamedConversationId);
         else discardQueuedCommands(streamedConversationId, 'the run did not complete successfully');
@@ -2122,6 +2266,12 @@ const ChatPage: React.FC = () => {
     (conversationId ? 'Saved settings' : 'Model settings');
   const contextIsStatic = Boolean(conversationId) && !optimisticConversationContextEditable;
   const openChatContext = () => contextSettings.openDialog(currentProfileLabel);
+  const openRequestedTabConfig = useEffectEvent(() => contextSettings.openDialog(selectedProfile));
+  useEffect(() => {
+    if (!tabConfigRequested || conversationId) return;
+    setTabConfigRequested(false);
+    openRequestedTabConfig();
+  }, [tabConfigRequested, conversationId]);
 
   const patchOptimisticConversationContext = (update: Partial<Conversation>) => {
     const optimisticConversation = optimisticRemoteConversationRef.current;
@@ -2198,6 +2348,52 @@ const ChatPage: React.FC = () => {
       content: buildUserContent(command.prompt, command.attachments),
     })
   );
+
+  const conversationSummaries = useMemo(
+    () => new Map(conversations.map((listed) => [listed.id, listed])),
+    [conversations]
+  );
+  const draftTabRunner = runners.find((runner) => runner.id === selectedRunnerID);
+  const draftTabCWD = selectedRunnerID
+    ? selectedCWD || draftTabRunner?.workspace.path || ''
+    : selectedCWD || chatSettings.defaultCWD || '';
+  const tabSummaries = useMemo(
+    () =>
+      conversationTabs.tabs.flatMap((tab) => {
+        const summary =
+          conversationSummaries.get(tab.id) ?? (conversation?.id === tab.id ? conversation : null);
+        return summary
+          ? [{ id: tab.id, title: previewConversation(summary), cwd: summary.cwd }]
+          : [];
+      }),
+    [conversation, conversationSummaries, conversationTabs.tabs]
+  );
+  const { remember: rememberConversationTabs } = conversationTabs;
+  useEffect(() => {
+    // Keep titles for tabs whose conversation later leaves the sidebar list.
+    rememberConversationTabs(tabSummaries);
+  }, [rememberConversationTabs, tabSummaries]);
+  const knownTabSummaries = new Map(tabSummaries.map((summary) => [summary.id, summary]));
+  const conversationTabItems: ConversationTab[] = conversationTabs.tabs.map((tab) => {
+    if (tab.id === NEW_CHAT_TAB_ID) {
+      return { id: tab.id, title: 'New chat', cwd: draftTabCWD || undefined, draft: true };
+    }
+    const summary = knownTabSummaries.get(tab.id);
+    return {
+      id: tab.id,
+      title:
+        summary?.title ||
+        tab.title ||
+        (conversationLoading && tab.id === conversationId ? 'Loading…' : 'Untitled conversation'),
+      cwd: summary?.cwd || tab.cwd,
+      status:
+        uiRequestDialog?.request.conversationId === tab.id
+          ? 'attention'
+          : runningConversationIds.includes(tab.id) || activeRunningConversationId === tab.id
+            ? 'running'
+            : (tabActivity[tab.id] ?? 'idle'),
+    };
+  });
 
   const fetchGitDiff = async () => {
     const requestID = ++gitDiffRequestRef.current;
@@ -2288,7 +2484,22 @@ const ChatPage: React.FC = () => {
     }
 
     let action: (() => void) | undefined;
-    if (event.altKey) {
+    const tabStep = conversationTabStep(event);
+    if (tabStep !== 0) {
+      const target = event.target instanceof Element ? event.target : null;
+      // Shells own their keys, and on macOS Option+[ and ] type quotation marks.
+      if (
+        target?.closest('.workspace-terminal-host') ||
+        (isMacPlatform() &&
+          target?.closest('input, textarea, [contenteditable]:not([contenteditable="false"])'))
+      ) {
+        return;
+      }
+      action = () => {
+        const nextTabId = adjacentConversationTabId(conversationTabItems, tabKey, tabStep);
+        if (nextTabId && nextTabId !== tabKey) handleSelectTab(nextTabId);
+      };
+    } else if (event.altKey) {
       if (
         realtime.isBusy() ||
         !event.shiftKey ||
@@ -2570,18 +2781,14 @@ const ChatPage: React.FC = () => {
           className="chat-main-panel relative flex h-full min-w-0 flex-1 flex-col overflow-hidden"
           inert={workspaceOverlayOpen || sidebarOverlayOpen || undefined}
         >
-          <ChatWorkspaceHeader
-            conversationId={conversationId}
-            cwd={
-              conversationId
-                ? workspaceConversation?.cwd || currentRunner?.workspace.path || ''
-                : currentRunnerID
-                  ? currentCWDLabel
-                  : ''
-            }
-            loading={Boolean(conversationId && !workspaceConversation && !conversationError)}
-            disabled={currentConversationIsStreaming || steering}
-            onWorkspaceOpen={contextIsStatic ? undefined : openChatContext}
+          <ConversationTabs
+            activeId={tabKey}
+            onClose={handleCloseTab}
+            onConfigOpen={handleOpenTabConfig}
+            onNew={handleNewChat}
+            onReorder={conversationTabs.reorder}
+            onSelect={handleSelectTab}
+            tabs={conversationTabItems}
           />
           <div
             className="chat-main-scroll min-h-0 flex-1 overflow-y-auto"

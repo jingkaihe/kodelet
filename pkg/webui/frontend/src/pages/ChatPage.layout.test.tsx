@@ -5,6 +5,7 @@ import type { ChatStreamEvent } from '../types';
 import {
   ChatPage,
   flushAsyncUpdates,
+  getActiveTab,
   makeRunner,
   mockGetAnthropicProviderStatus,
   mockGetAuthPrincipal,
@@ -24,7 +25,7 @@ import {
 describe('ChatPage layout and accessibility', () => {
   setupChatPageTests();
 
-  it('copies the current conversation UUID by clicking the workspace icon or path', async () => {
+  it('copies the conversation ID and workspace path from the tab menu', async () => {
     const user = userEvent.setup();
     const writeText = vi.spyOn(navigator.clipboard, 'writeText');
     const conversationIds = [
@@ -33,6 +34,7 @@ describe('ChatPage layout and accessibility', () => {
     ];
     mockGetConversation.mockImplementation(async (id: string) => ({
       id,
+      summary: `Conversation ${id.slice(0, 8)}`,
       createdAt: '2026-09-10T00:00:00Z',
       updatedAt: '2026-09-10T00:00:00Z',
       messageCount: 0,
@@ -48,32 +50,34 @@ describe('ChatPage layout and accessibility', () => {
       rerender(<ChatPage />);
       await flushAsyncUpdates();
 
-      const header = within(screen.getByTestId('chat-workspace-header'));
-      const copyButton = header.getByRole('button', { name: 'Copy conversation ID' });
-      expect(header.getAllByRole('button')).toEqual([copyButton]);
-      expect(copyButton).toHaveAttribute('title', 'Copy conversation ID\n/runner/kodelet');
-      expect(copyButton).toHaveTextContent('/runner/kodelet');
-      expect(copyButton.querySelector('.lucide-copy')).toBeNull();
-      const folderIcon = copyButton.querySelector('svg');
-      assert(folderIcon);
-      await user.click(folderIcon);
+      const title = `Conversation ${id.slice(0, 8)}`;
+      expect(getActiveTab()).toHaveAttribute('title', `${title}\n/runner/kodelet`);
+      await user.click(screen.getByRole('button', { name: `${title} actions` }));
+      const menu = screen.getByRole('menu', { name: `${title} actions` });
+      expect(menu).toHaveTextContent('/runner/kodelet');
+      expect(within(menu).getAllByRole('menuitem')).toHaveLength(3);
+      expect(within(menu).getByRole('menuitem', { name: 'Close tab' })).toBeInTheDocument();
+      await user.click(within(menu).getByRole('menuitem', { name: 'Copy conversation ID' }));
       expect(writeText).toHaveBeenLastCalledWith(id);
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
 
-      await user.click(within(copyButton).getByText('kodelet'));
-      expect(writeText).toHaveBeenLastCalledWith(id);
-
-      copyButton.focus();
-      await user.keyboard('{Enter}');
-      expect(writeText).toHaveBeenLastCalledWith(id);
-      expect(writeText).toHaveBeenCalledTimes(3);
+      await user.click(screen.getByRole('button', { name: `${title} actions` }));
+      await user.click(screen.getByRole('menuitem', { name: 'Copy workspace path' }));
+      expect(writeText).toHaveBeenLastCalledWith('/runner/kodelet');
+      expect(writeText).toHaveBeenCalledTimes(2);
       writeText.mockClear();
     }
+    expect(screen.getAllByRole('tab')).toHaveLength(2);
   });
 
   it('does not offer to copy a conversation ID for a new chat draft', async () => {
     await renderChatWithRunner();
 
-    expect(screen.queryByRole('button', { name: 'Copy conversation ID' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'New chat actions' }));
+    const menu = screen.getByRole('menu', { name: 'New chat actions' });
+    expect(within(menu).getAllByRole('menuitem')).toHaveLength(2);
+    expect(within(menu).getByRole('menuitem', { name: 'Config' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'Close tab' })).toBeInTheDocument();
   });
 
   it('toggles the sidebar shell from the panel controls', async () => {

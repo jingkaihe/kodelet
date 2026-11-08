@@ -167,10 +167,22 @@ export const selectNewChatOption = (
 
 export const selectWorkspaceRunner = () => selectNewChatOption('Environment', 'runner-1');
 
+/** Opens the new chat settings from the new chat tab's menu. */
+export const openNewChatSettings = () => {
+  fireEvent.click(screen.getByRole('button', { name: 'New chat actions' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Config' }));
+};
+
+export const getActiveTab = () => screen.getByRole('tab', { selected: true });
+
+/** Opens the active tab's menu; it holds the copy and close actions. */
+export const openActiveTabMenu = () =>
+  fireEvent.click(screen.getByRole('button', { name: 'Current tab actions' }));
+
 export const renderChatWithRunner = async () => {
   const result = render(<ChatPage />);
   await flushAsyncUpdates();
-  fireEvent.click(screen.getByRole('button', { name: /^Change workspace:/ }));
+  openNewChatSettings();
   selectWorkspaceRunner();
   await flushAsyncUpdates();
   fireEvent.click(screen.getByRole('button', { name: 'Start' }));
@@ -294,6 +306,7 @@ export const setupChatPageTests = () => {
     mockNavigate.mockReset();
     setRouteParams({});
     window.localStorage.clear();
+    window.sessionStorage.clear();
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
     vi.stubGlobal(
       'ResizeObserver',

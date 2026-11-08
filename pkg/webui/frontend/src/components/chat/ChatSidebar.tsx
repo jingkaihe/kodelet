@@ -145,7 +145,7 @@ const getAccountPresentation = (principal: AuthPrincipal) => {
 const isOIDCPrincipal = (principal: AuthPrincipal | null | undefined): principal is AuthPrincipal =>
   Boolean(principal?.issuer?.trim() && principal.subject?.trim());
 
-const previewConversation = (conversation: Conversation): string => {
+export const previewConversation = (conversation: Conversation): string => {
   return (
     conversation.summary ||
     conversation.preview ||

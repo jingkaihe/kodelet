@@ -5,6 +5,7 @@ import type { ChatSettings } from '../types';
 import {
   ChatPage,
   flushAsyncUpdates,
+  getActiveTab,
   makeRunner,
   mockDiscardDraftWorkspace,
   mockGetAuthPrincipal,
@@ -17,6 +18,8 @@ import {
   mockGetTranscriptionCapabilities,
   mockHeartbeatDraftWorkspace,
   mockStreamChat,
+  openActiveTabMenu,
+  openNewChatSettings,
   renderChatWithRunner,
   selectNewChatOption,
   selectWorkspaceRunner,
@@ -118,7 +121,7 @@ describe('ChatPage workspace tools and browsers', () => {
     const { rerender } = await renderChatWithRunner();
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
     const conversationId = (await screen.findByTestId('browser-panel')).dataset.conversationId;
-    fireEvent.click(screen.getByRole('button', { name: /^Change workspace:/ }));
+    openNewChatSettings();
     selectNewChatOption('Environment', 'runner-2');
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
@@ -153,7 +156,7 @@ describe('ChatPage workspace tools and browsers', () => {
         runners: [makeRunner({ workspaceBrowser: true, workspaceCwd: true })],
       });
       const { unmount } = await renderChatWithRunner();
-      fireEvent.click(screen.getByRole('button', { name: /^Change workspace:/ }));
+      openNewChatSettings();
       fireEvent.change(screen.getByLabelText('Working directory'), {
         target: { value: '/runner/custom' },
       });
@@ -837,7 +840,7 @@ describe('ChatPage workspace tools and browsers', () => {
     expect(screen.getByTestId('composer-inline-context')).toHaveTextContent(
       /^remote-profile\/saved-remote-model$/
     );
-    expect(screen.getByTestId('chat-workspace-header')).toHaveTextContent('/runner/kodelet');
+    expect(getActiveTab().title).toContain('/runner/kodelet');
 
     setRouteParams({ id: 'conv-local' });
     rerender(<ChatPage />);
@@ -845,13 +848,8 @@ describe('ChatPage workspace tools and browsers', () => {
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-local'));
     expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
     expect(screen.getByTestId('composer-inline-context')).toHaveTextContent(/^Saved settings$/);
-    const header = screen.getByTestId('chat-workspace-header');
-    expect(header).toHaveTextContent('Loading workspace…');
-    expect(header).not.toHaveTextContent('/runner/kodelet');
-    expect(within(header).queryByTitle('/runner/kodelet')).not.toBeInTheDocument();
-    expect(
-      within(header).queryByRole('button', { name: /^Change workspace:/ })
-    ).not.toBeInTheDocument();
+    expect(getActiveTab()).toHaveTextContent('Loading…');
+    expect(getActiveTab().title).not.toContain('/runner/kodelet');
 
     await act(async () => {
       resolveLocalConversation?.({
@@ -874,8 +872,8 @@ describe('ChatPage workspace tools and browsers', () => {
     }
     expect(context).not.toHaveTextContent('profile-default-model');
     expect(context).not.toHaveTextContent('remote-profile');
-    expect(header).toHaveTextContent('/workspace/local');
-    expect(header).not.toHaveTextContent('/runner/kodelet');
+    expect(getActiveTab().title).toContain('/workspace/local');
+    expect(getActiveTab().title).not.toContain('/runner/kodelet');
     expect(context).not.toHaveTextContent('/workspace/local');
   });
 
@@ -926,16 +924,11 @@ describe('ChatPage workspace tools and browsers', () => {
     expect(screen.queryByText('Loading conversation…')).not.toBeInTheDocument();
     expect(mockGetConversation).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('composer-inline-context')).toHaveTextContent(/^Saved settings$/);
-    const header = screen.getByTestId('chat-workspace-header');
-    expect(header).toHaveTextContent('/workspace/project');
-    const copyButton = within(header).getByRole('button', { name: 'Copy conversation ID' });
-    expect(copyButton).toHaveAttribute('title', 'Copy conversation ID\n/workspace/project');
-    expect(within(header).getAllByRole('button')).toEqual([copyButton]);
-    await user.click(copyButton);
+    expect(getActiveTab().title).toContain('/workspace/project');
+    openActiveTabMenu();
+    expect(screen.queryByRole('menuitem', { name: 'Config' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('menuitem', { name: 'Copy conversation ID' }));
     expect(writeText).toHaveBeenCalledExactlyOnceWith('conv-123');
-    expect(
-      within(header).queryByRole('button', { name: /^Change workspace:/ })
-    ).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('This local conversation is read-only')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Dictate text' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();

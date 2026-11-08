@@ -5,6 +5,7 @@ import type { ChatSettings } from '../types';
 import {
   ChatPage,
   flushAsyncUpdates,
+  getActiveTab,
   makeRunner,
   mockGetChatSettings,
   mockGetConversation,
@@ -12,6 +13,7 @@ import {
   mockGetRunners,
   mockGetSlashCommands,
   mockStreamChat,
+  openActiveTabMenu,
   renderChatWithRunner,
   runCwdSuggestionDebounce,
   selectNewChatOption,
@@ -766,7 +768,10 @@ describe('ChatPage model and reasoning settings', () => {
       expect(screen.getByTestId('composer-inline-context').textContent).toBe(label)
     );
     expect(screen.queryByTestId('composer-context-button')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Change workspace:/ })).not.toBeInTheDocument();
+    openActiveTabMenu();
+    expect(screen.queryByRole('menuitem', { name: 'Config' })).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Profile')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Model')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Reasoning effort')).not.toBeInTheDocument();
@@ -817,16 +822,14 @@ describe('ChatPage model and reasoning settings', () => {
     fireEvent.change(screen.getByLabelText('Working directory'), { target: { value: cwd } });
     await user.click(screen.getByRole('button', { name: 'Start' }));
 
-    const header = screen.getByTestId('chat-workspace-header');
-    expect(within(header).getByTitle(cwd)).toHaveTextContent(cwd);
-    const workspaceButton = within(header).getByRole('button', {
-      name: `Change workspace: ${cwd}`,
-    });
+    expect(getActiveTab()).toHaveAttribute('title', `New chat\n${cwd}`);
     const contextButton = screen.getByTestId('composer-quick-pick');
     expect(contextButton).toHaveTextContent(/^work\/gpt-5-mini · high$/);
     expect(contextButton).not.toHaveTextContent(cwd);
 
-    await user.click(workspaceButton);
+    await user.click(screen.getByRole('button', { name: 'New chat actions' }));
+    expect(screen.getByRole('menu', { name: 'New chat actions' })).toHaveTextContent(cwd);
+    await user.click(screen.getByRole('menuitem', { name: 'Config' }));
     await waitFor(() => expect(screen.getByLabelText('Model')).toBeEnabled());
     expect(screen.getByLabelText('Working directory')).toHaveValue(cwd);
     expect(screen.getByLabelText('Profile')).toHaveTextContent('work');
@@ -839,9 +842,9 @@ describe('ChatPage model and reasoning settings', () => {
     });
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
 
-    await waitFor(() => expect(workspaceButton).toHaveFocus());
+    await waitFor(() => expect(getActiveTab()).toHaveFocus());
     expect(screen.queryByTestId('new-chat-dialog')).not.toBeInTheDocument();
-    expect(within(header).getByTitle(cwd)).toHaveTextContent(cwd);
+    expect(getActiveTab()).toHaveAttribute('title', `New chat\n${cwd}`);
     expect(screen.getByTestId('composer-quick-pick')).toHaveTextContent(
       /^work\/gpt-5-mini · high$/
     );

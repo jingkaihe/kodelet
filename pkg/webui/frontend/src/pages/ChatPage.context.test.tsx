@@ -5,6 +5,7 @@ import {
   ChatPage,
   flushAsyncUpdates,
   flushCwdBlurTimer,
+  getActiveTab,
   makeRunner,
   mockGetChatSettings,
   mockGetConversations,
@@ -12,6 +13,7 @@ import {
   mockGetRunners,
   mockGetSlashCommands,
   mockStreamChat,
+  openNewChatSettings,
   runCwdSuggestionDebounce,
   selectNewChatOption,
   selectWorkspaceRunner,
@@ -65,7 +67,7 @@ describe('ChatPage working directories and runner selection', () => {
       expect(mockGetCWDHints).not.toHaveBeenLastCalledWith('/workspace/kodelet', expect.anything());
       fireEvent.click(screen.getByRole('button', { name: 'Start' }));
       expect(screen.queryByTestId('new-chat-dialog')).not.toBeInTheDocument();
-      expect(screen.getByTestId('chat-workspace-header')).toHaveTextContent('/workspace/kodelet');
+      expect(getActiveTab()).toHaveAttribute('title', 'New chat\n/workspace/kodelet');
       await flushCwdBlurTimer();
     } finally {
       vi.useRealTimers();
@@ -106,7 +108,7 @@ describe('ChatPage working directories and runner selection', () => {
       fireEvent.keyDown(cwdInput, { key: 'Enter' });
       fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
-      expect(screen.getByTestId('chat-workspace-header')).toHaveTextContent('/workspace/kodelet');
+      expect(getActiveTab()).toHaveAttribute('title', 'New chat\n/workspace/kodelet');
       await flushCwdBlurTimer();
     } finally {
       vi.useRealTimers();
@@ -147,7 +149,7 @@ describe('ChatPage working directories and runner selection', () => {
       expect(cwdInput).toHaveValue('/workspace/kodelet');
       fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
-      expect(screen.getByTestId('chat-workspace-header')).toHaveTextContent('/workspace/kodelet');
+      expect(getActiveTab()).toHaveAttribute('title', 'New chat\n/workspace/kodelet');
       await flushCwdBlurTimer();
     } finally {
       vi.useRealTimers();
@@ -517,7 +519,7 @@ describe('ChatPage working directories and runner selection', () => {
 
         fireEvent.click(screen.getByRole('button', { name: 'Start' }));
         await act(async () => vi.advanceTimersByTimeAsync(5000));
-        fireEvent.click(screen.getByRole('button', { name: /\/runner\/kodelet/ }));
+        openNewChatSettings();
         expect(screen.getByLabelText('Environment')).toHaveTextContent(
           'kodelet-gpu — worker — idle'
         );

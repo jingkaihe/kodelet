@@ -95,8 +95,10 @@ const TabStatusIcon = ({ tab, reserve }: { tab: ConversationTab; reserve?: boole
 
 interface TabMenuState {
   id: string;
-  /** Element the menu is aligned to and returns focus to. */
+  /** Element the menu is aligned to. */
   anchor: HTMLElement;
+  /** Element focused again when the menu closes. */
+  returnFocus: HTMLElement;
 }
 
 interface ConversationTabsProps {
@@ -180,22 +182,22 @@ const ConversationTabs = ({
     if (next) focusTab(next.id);
   };
 
-  const openTabMenu = (id: string, anchor: HTMLElement | null) => {
-    if (!anchor || disabled) return;
+  /** Opens a tab's menu below `anchor`; focus returns to the tab, or to `returnFocus`. */
+  const openTabMenu = (id: string, anchor: HTMLElement | null, returnFocus?: HTMLElement) => {
+    const tabButton = tabRefs.current.get(id);
+    const focusTarget = returnFocus ?? tabButton;
+    if (!anchor || !focusTarget || disabled) return;
     setListOpen(false);
-    setTabMenu({ id, anchor });
+    setTabMenu({ id, anchor, returnFocus: focusTarget });
   };
 
-  const toggleTabMenu = (id: string, anchor: HTMLElement | null) => {
+  const toggleTabMenu = (id: string, anchor: HTMLElement | null, returnFocus?: HTMLElement) => {
     if (tabMenu?.id === id) setTabMenu(null);
-    else openTabMenu(id, anchor);
+    else openTabMenu(id, anchor, returnFocus);
   };
 
   const dismissTabMenu = (restoreFocus: boolean) => {
-    if (restoreFocus && tabMenu) {
-      const tabButton = tabRefs.current.get(tabMenu.id);
-      (tabButton?.isConnected && tabButton.offsetParent ? tabButton : tabMenu.anchor).focus();
-    }
+    if (restoreFocus && tabMenu?.returnFocus.isConnected) tabMenu.returnFocus.focus();
     setTabMenu(null);
   };
 
@@ -309,8 +311,8 @@ const ConversationTabs = ({
             menuItem(
               'Config',
               <SlidersHorizontal aria-hidden="true" size={14} strokeWidth={1.7} />,
-              () => onConfigOpen(menuTab.id),
-              { restoreFocus: false }
+              // Focus returns to the tab first, so the dialog restores it on close.
+              () => onConfigOpen(menuTab.id)
             )
           ) : null
         ) : (
@@ -518,10 +520,12 @@ const ConversationTabs = ({
             aria-controls={tabMenu?.id === activeTab.id ? tabMenuId : undefined}
             aria-expanded={tabMenu?.id === activeTab.id}
             aria-haspopup="menu"
-            aria-label={`${activeTab.title} actions`}
+            aria-label="Current tab actions"
             className="chat-tabs-icon-button chat-tabs-active-actions"
             disabled={disabled}
-            onClick={(event) => toggleTabMenu(activeTab.id, event.currentTarget)}
+            onClick={(event) =>
+              toggleTabMenu(activeTab.id, event.currentTarget, event.currentTarget)
+            }
             title="Copy or close"
             type="button"
           >

@@ -14,6 +14,7 @@ import type { ChatRequest, ChatStreamEvent, RealtimeEvent } from '../types';
 import {
   ChatPage,
   flushAsyncUpdates,
+  getActiveTab,
   makeRunner,
   mockEndRealtime,
   mockGetChatSettings,
@@ -30,6 +31,7 @@ import {
   mockStreamConversation,
   mockStreamRealtime,
   mockTranscribeAudio,
+  openNewChatSettings,
   renderChatWithRunner,
   setRouteParams,
   setupChatPageTests,
@@ -134,7 +136,7 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     });
     mockStreamConversation.mockImplementation(() => new Promise(() => {}));
     const view = await renderChatWithRunner();
-    fireEvent.click(screen.getByRole('button', { name: /^Change workspace:/ }));
+    openNewChatSettings();
     const voice = screen.getByRole('combobox', { name: 'Voice' });
     expect(voice).toHaveTextContent('Marin (default)');
     fireEvent.click(voice);
@@ -1039,14 +1041,14 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     expect(screen.queryByAltText('Uploaded content')).not.toBeInTheDocument();
   });
 
-  it('shows only effort for legacy model settings and keeps workspace context above the transcript', async () => {
+  it('shows only effort for legacy model settings and keeps the tabs above the transcript', async () => {
     await renderChatWithRunner();
 
-    const header = screen.getByTestId('chat-workspace-header');
+    const header = screen.getByTestId('chat-tabs-header');
     const transcript = screen.getByTestId('chat-transcript-scroll');
-    expect(header).toBe(screen.getByRole('region', { name: 'Workspace' }));
-    expect(header).toHaveTextContent(/^\/runner\/kodelet$/);
-    expect(within(header).getAllByRole('button')).toHaveLength(1);
+    expect(header).toBe(screen.getByRole('region', { name: 'Conversation tabs' }));
+    expect(getActiveTab()).toHaveTextContent(/^New chat$/);
+    expect(getActiveTab()).toHaveAttribute('title', 'New chat\n/runner/kodelet');
     expect(transcript).not.toContainElement(header);
     expect(header.parentElement).toBe(transcript.parentElement);
     expect(

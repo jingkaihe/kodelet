@@ -4,6 +4,7 @@ import type { ChatStreamEvent } from '../types';
 import {
   ChatPage,
   flushAsyncUpdates,
+  getActiveTab,
   makeRunner,
   mockDiscardDraftWorkspace,
   mockGetChatSettings,
@@ -16,6 +17,7 @@ import {
   mockNavigate,
   mockStopConversation,
   mockStreamChat,
+  openNewChatSettings,
   renderChatWithRunner,
   selectWorkspaceRunner,
   setRouteParams,
@@ -62,7 +64,7 @@ describe('ChatPage optimistic conversations and route handoff', () => {
 
     const { rerender } = await renderChatWithRunner();
     await waitForTerminalAccess();
-    fireEvent.click(screen.getByRole('button', { name: /^Change workspace:/ }));
+    openNewChatSettings();
     fireEvent.change(screen.getByLabelText('Working directory'), {
       target: { value: cwd },
     });
@@ -162,7 +164,7 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     expect(mockGetConversations).toHaveBeenCalledTimes(listRequests + 1);
     expect(screen.getByTestId(`conversation-row-${preallocatedId}`)).toBe(row);
 
-    fireEvent.click(screen.getByRole('button', { name: /^Change workspace:/ }));
+    fireEvent.click(screen.getByTestId('composer-context-button'));
     await screen.findByTestId('new-chat-dialog');
     fireEvent.change(screen.getByLabelText('Working directory'), {
       target: { value: '../corrected-project' },
@@ -211,12 +213,9 @@ describe('ChatPage optimistic conversations and route handoff', () => {
       });
     });
 
-    expect(screen.getByTestId('chat-workspace-header')).toHaveTextContent(
-      '/runner/canonical-project'
-    );
+    expect(getActiveTab().title).toContain('/runner/canonical-project');
     expect(screen.getByTestId('composer-inline-context')).toHaveTextContent(/^medium$/);
     expect(screen.queryByTestId('composer-context-button')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Change workspace:/ })).not.toBeInTheDocument();
   });
 
   it('keeps optimistic context editable until the server supplies a canonical cwd', async () => {
@@ -238,7 +237,6 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     });
 
     expect(screen.getByTestId('composer-context-button')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Change workspace:/ })).toBeInTheDocument();
   });
 
   it('clears confirmed optimistic parameters when the stream later reports an error', async () => {
@@ -440,7 +438,7 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     setRouteParams({ id: 'conv-123' });
     rerender(<ChatPage />);
 
-    expect(screen.getByTestId('chat-workspace-header')).toHaveTextContent('/workspace/alt');
+    expect(getActiveTab().title).toContain('/workspace/alt');
     expect(screen.getByTestId('composer-context-button')).toHaveTextContent(/^medium$/);
     expect(screen.queryByTestId('workspace-tools-toggle')).not.toBeInTheDocument();
     expect(mockGetGitDiff).not.toHaveBeenCalled();
