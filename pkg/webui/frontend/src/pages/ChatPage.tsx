@@ -810,7 +810,12 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     viewedConversationIdRef.current = conversationId;
     routerConversationIdRef.current = conversationId;
-    const discarded = conversationId ? discardDraftWorkspace() : false;
+    // A new chat kept in its tab keeps its sessions; once the tab is closed, replaced, or
+    // started, they are released.
+    const discarded =
+      conversationId && !openTabIdsRef.current.has(NEW_CHAT_TAB_ID)
+        ? discardDraftWorkspace()
+        : false;
     // Submitted and abandoned drafts both need a new identity when returning to new chat.
     setDraftConversationId((draftId) =>
       discarded || draftId === conversationId ? generateConversationId() : draftId
@@ -1139,9 +1144,21 @@ const ChatPage: React.FC = () => {
     });
   };
 
+  /** Releases the new chat's terminal and browser sessions and gives the next one a fresh identity. */
+  const abandonNewChat = () => {
+    discardDraftWorkspace();
+    setDraftConversationId(generateConversationId());
+    tabComposerRef.current.delete(NEW_CHAT_TAB_ID);
+  };
+
   // Opening from the sidebar or search replaces an untouched new chat, like a browser's new tab page.
   const handleOpenConversation = (nextConversationId: string) => {
-    if (!conversationId && !draft.trim() && attachments.length === 0) {
+    if (
+      !conversationId &&
+      !draft.trim() &&
+      attachments.length === 0 &&
+      !draftWorkspaceRef.current?.runnerIds.size
+    ) {
       if (conversationTabs.tabs.some((tab) => tab.id === nextConversationId)) {
         conversationTabs.close(NEW_CHAT_TAB_ID);
       } else {
@@ -1166,6 +1183,7 @@ const ChatPage: React.FC = () => {
     const nextTabId = conversationTabs.close(id);
     tabComposerRef.current.delete(id);
     setTabActivity((current) => withoutKey(current, id));
+    if (id === NEW_CHAT_TAB_ID) abandonNewChat();
     if (nextTabId === undefined) return;
     if (nextTabId === NEW_CHAT_TAB_ID && !conversationId) {
       // The only tab was the new chat: start it over.

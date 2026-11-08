@@ -111,7 +111,7 @@ describe('ChatPage workspace tools and browsers', () => {
     });
   });
 
-  it('discards visited runners sequentially on history navigation', async () => {
+  it("keeps a new chat's sessions while another tab is shown and discards visited runners when it closes", async () => {
     mockGetRunners.mockResolvedValue({
       runners: [
         makeRunner({ workspaceBrowser: true }),
@@ -138,6 +138,24 @@ describe('ChatPage workspace tools and browsers', () => {
     setRouteParams({ id: 'saved' });
     rerender(<ChatPage />);
     await flushAsyncUpdates();
+    expect(mockDiscardDraftWorkspace).not.toHaveBeenCalled();
+
+    // Returning to the new chat reattaches its draft browser.
+    setRouteParams({});
+    rerender(<ChatPage />);
+    await flushAsyncUpdates();
+    expect(await screen.findByTestId('browser-panel')).toHaveAttribute(
+      'data-conversation-id',
+      conversationId
+    );
+    setRouteParams({ id: 'saved' });
+    rerender(<ChatPage />);
+    await flushAsyncUpdates();
+    expect(mockDiscardDraftWorkspace).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'New chat actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Close tab' }));
+    await flushAsyncUpdates();
     expect(mockDiscardDraftWorkspace).toHaveBeenCalledExactlyOnceWith({
       runnerId: 'runner-1',
       conversationId,
@@ -147,6 +165,61 @@ describe('ChatPage workspace tools and browsers', () => {
       [{ runnerId: 'runner-1', conversationId }],
       [{ runnerId: 'runner-2', conversationId }],
     ]);
+  });
+
+  it("releases a closed new chat's sessions and starts the next one fresh", async () => {
+    mockGetRunners.mockResolvedValue({ runners: [makeRunner({ workspaceBrowser: true })] });
+    await renderChatWithRunner();
+    await waitForTerminalAccess();
+    fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+    const draftId = (await screen.findByTestId('browser-panel')).dataset.conversationId;
+
+    fireEvent.keyDown(getActiveTab(), { key: 'Delete' });
+    await flushAsyncUpdates();
+
+    expect(mockDiscardDraftWorkspace).toHaveBeenCalledExactlyOnceWith({
+      runnerId: 'runner-1',
+      conversationId: draftId,
+    });
+    const nextId = (await screen.findByTestId('browser-panel')).dataset.conversationId;
+    expect(nextId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
+    expect(nextId).not.toBe(draftId);
+  });
+
+  it('keeps a new chat with open sessions when a conversation opens from the sidebar', async () => {
+    mockGetRunners.mockResolvedValue({ runners: [makeRunner({ workspaceBrowser: true })] });
+    const saved = {
+      id: 'saved',
+      summary: 'Saved work',
+      createdAt: '2026-11-01T00:00:00Z',
+      updatedAt: '2026-11-01T00:00:00Z',
+      messageCount: 1,
+      cwd: '/runner/kodelet',
+      runnerId: 'runner-1',
+    };
+    mockGetConversations.mockResolvedValue({
+      conversations: [saved],
+      hasMore: false,
+      total: 1,
+      limit: 100,
+      offset: 0,
+    });
+    mockGetConversation.mockResolvedValue({ ...saved, messages: [], toolResults: {} });
+    const { rerender } = await renderChatWithRunner();
+    await waitForTerminalAccess();
+    fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+    await screen.findByTestId('browser-panel');
+
+    fireEvent.click(within(screen.getByTestId('conversation-row-saved')).getByText('Saved work'));
+    setRouteParams({ id: 'saved' });
+    rerender(<ChatPage />);
+    await flushAsyncUpdates();
+
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
+      'New chat',
+      'Saved work',
+    ]);
+    expect(mockDiscardDraftWorkspace).not.toHaveBeenCalled();
   });
 
   it('renews closed-panel drafts and recovers expired sessions on resume without losing text or settings', async () => {
