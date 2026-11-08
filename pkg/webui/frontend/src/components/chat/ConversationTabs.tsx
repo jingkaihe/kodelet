@@ -12,6 +12,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
   useEffect,
+  useEffectEvent,
   useId,
   useLayoutEffect,
   useRef,
@@ -183,10 +184,14 @@ const ConversationTabs = ({
 
   const focusTab = (id: string) => queueMicrotask(() => tabRefs.current.get(id)?.focus());
 
+  const isCompact = () => {
+    const strip = stripRef.current;
+    return Boolean(strip && getComputedStyle(strip).display === 'none');
+  };
+
   /** Focuses a tab, or the switcher while narrow layouts hide the tabs. */
   const focusVisibleTab = (id?: string) => {
-    const strip = stripRef.current;
-    if (strip && getComputedStyle(strip).display === 'none') {
+    if (isCompact()) {
       switcherRef.current?.focus();
       return;
     }
@@ -196,6 +201,46 @@ const ConversationTabs = ({
       tabRefs.current.values().next().value;
     target?.focus();
   };
+
+  // Focus on the active tab's control follows the layout between the tabs and the switcher,
+  // which can change after a selection settles. Clicking or focusing elsewhere releases it.
+  const focusFollowsLayoutRef = useRef(false);
+  const holdTabFocus = () => {
+    focusFollowsLayoutRef.current = true;
+  };
+  const compactRef = useRef<boolean | undefined>(undefined);
+  const followLayout = useEffectEvent(() => {
+    const compact = isCompact();
+    const changed = compactRef.current !== undefined && compact !== compactRef.current;
+    compactRef.current = compact;
+    if (!changed || !focusFollowsLayoutRef.current) return;
+    const focused = document.activeElement;
+    // A control hidden by the change has lost focus to the page, or still holds it unseen.
+    if (focused && focused !== document.body && !headerRef.current?.contains(focused)) return;
+    focusVisibleTab();
+  });
+
+  useEffect(() => {
+    const header = headerRef.current;
+    if (!header) return undefined;
+    const release = (event: Event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const onTabControl =
+        Boolean(target && switcherRef.current?.contains(target)) ||
+        Boolean(target?.closest('[role="tab"]') && header.contains(target));
+      if (!onTabControl) focusFollowsLayoutRef.current = false;
+    };
+    document.addEventListener('focusin', release);
+    document.addEventListener('pointerdown', release);
+    const observer =
+      typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(() => followLayout());
+    observer?.observe(header);
+    return () => {
+      document.removeEventListener('focusin', release);
+      document.removeEventListener('pointerdown', release);
+      observer?.disconnect();
+    };
+  }, []);
 
   const closeTab = (id: string) => {
     const index = tabs.findIndex((tab) => tab.id === id);
@@ -502,6 +547,7 @@ const ConversationTabs = ({
                     if (button) tabRefs.current.set(tab.id, button);
                     else tabRefs.current.delete(tab.id);
                   }}
+                  onFocus={holdTabFocus}
                   role="tab"
                   tabIndex={active ? 0 : -1}
                   title={tabTooltip(tab)}
@@ -559,6 +605,7 @@ const ConversationTabs = ({
           aria-label={`Switch conversation tab, ${tabs.length} open`}
           className="chat-tabs-switcher"
           onClick={(event) => (listOpen ? closeList(false) : openList(event.currentTarget))}
+          onFocus={holdTabFocus}
           ref={switcherRef}
           type="button"
         >

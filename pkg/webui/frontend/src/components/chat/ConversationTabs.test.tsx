@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type ComponentProps, useState } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import ConversationTabs, {
   adjacentConversationTabId,
   type ConversationTab,
@@ -53,9 +53,30 @@ const StatefulTabs = ({ initial }: { initial: ConversationTab[] }) => {
   );
 };
 
-const collapseTabStrip = () => {
+const setTabStripDisplay = (display: string) => {
   const strip = document.querySelector<HTMLElement>('.chat-tabs-strip');
-  if (strip) strip.style.display = 'none';
+  if (strip) strip.style.display = display;
+};
+const collapseTabStrip = () => setTabStripDisplay('none');
+const expandTabStrip = () => setTabStripDisplay('');
+
+/** Replaces ResizeObserver and returns a function that reports a header resize. */
+const stubResizeObserver = () => {
+  const callbacks: (() => void)[] = [];
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      constructor(callback: () => void) {
+        callbacks.push(callback);
+      }
+      observe() {}
+      disconnect() {}
+    }
+  );
+  return () =>
+    act(() => {
+      for (const callback of callbacks) callback();
+    });
 };
 
 describe('ConversationTabs', () => {
@@ -302,6 +323,64 @@ describe('ConversationTabs keyboard focus', () => {
     await user.click(screen.getByRole('menuitem', { name: 'Close tab' }));
 
     expect(screen.getByRole('button', { name: /Switch conversation tab, 1 open/ })).toHaveFocus();
+  });
+});
+
+describe('ConversationTabs focus across layout changes', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('moves focus between the switcher and the active tab as the tabs collapse and expand', async () => {
+    const user = userEvent.setup();
+    const resize = stubResizeObserver();
+    render(<StatefulTabs initial={tabs} />);
+    resize();
+    collapseTabStrip();
+    resize();
+    const switcher = screen.getByRole('button', { name: /Switch conversation tab/ });
+
+    await user.click(switcher);
+    await user.click(
+      within(screen.getByRole('dialog', { name: 'Open conversations' })).getByRole('button', {
+        name: /Beta/,
+      })
+    );
+    expect(switcher).toHaveFocus();
+
+    // The destination's layout leaves room for the tabs again.
+    expandTabStrip();
+    resize();
+    expect(tab('Beta')).toHaveFocus();
+
+    collapseTabStrip();
+    resize();
+    expect(switcher).toHaveFocus();
+  });
+
+  it('leaves focus alone once the user clicks or focuses something else', async () => {
+    const user = userEvent.setup();
+    const resize = stubResizeObserver();
+    render(
+      <>
+        <StatefulTabs initial={tabs} />
+        <button type="button">Elsewhere</button>
+      </>
+    );
+    resize();
+    const switcher = screen.getByRole('button', { name: /Switch conversation tab/ });
+
+    tab('Alpha').focus();
+    await user.click(document.body);
+    collapseTabStrip();
+    resize();
+    expect(switcher).not.toHaveFocus();
+
+    switcher.focus();
+    screen.getByRole('button', { name: 'Elsewhere' }).focus();
+    expandTabStrip();
+    resize();
+    expect(screen.getByRole('button', { name: 'Elsewhere' })).toHaveFocus();
   });
 });
 
