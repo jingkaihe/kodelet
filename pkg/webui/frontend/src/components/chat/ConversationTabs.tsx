@@ -70,7 +70,7 @@ const TabStatusIcon = ({ tab, reserve }: { tab: ConversationTab; reserve?: boole
     return (
       <span className="chat-tab-status is-running">
         <Spinner />
-        <span className="sr-only">{STATUS_LABELS.running}</span>
+        <span className="sr-only">{STATUS_LABELS.running}: </span>
       </span>
     );
   }
@@ -88,7 +88,7 @@ const TabStatusIcon = ({ tab, reserve }: { tab: ConversationTab; reserve?: boole
   return (
     <span className={cn('chat-tab-status', `is-${status}`)}>
       <span aria-hidden="true" className="chat-tab-dot" />
-      <span className="sr-only">{STATUS_LABELS[status]}</span>
+      <span className="sr-only">{STATUS_LABELS[status]}: </span>
     </span>
   );
 };

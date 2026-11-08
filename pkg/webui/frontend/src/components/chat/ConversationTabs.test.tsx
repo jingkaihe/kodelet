@@ -1,0 +1,215 @@
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import type { ComponentProps } from 'react';
+import { describe, expect, it, vi } from 'vitest';
+import ConversationTabs, {
+  adjacentConversationTabId,
+  type ConversationTab,
+} from './ConversationTabs';
+
+const tabs: ConversationTab[] = [
+  { id: 'conv-a', title: 'Alpha', cwd: '/work/alpha' },
+  { id: 'conv-b', title: 'Beta', cwd: '/work/beta', status: 'running' },
+  { id: 'conv-c', title: 'Gamma', status: 'unread' },
+  { id: 'conv-d', title: 'Delta', status: 'attention' },
+  { id: 'conv-e', title: 'Epsilon', status: 'error' },
+];
+
+const renderTabs = (props: Partial<ComponentProps<typeof ConversationTabs>> = {}) => {
+  const handlers = {
+    onSelect: vi.fn(),
+    onClose: vi.fn(),
+    onNew: vi.fn(),
+    onReorder: vi.fn(),
+    onConfigOpen: vi.fn(),
+  };
+  render(<ConversationTabs activeId="conv-a" tabs={tabs} {...handlers} {...props} />);
+  return handlers;
+};
+
+const tab = (name: string) => screen.getByRole('tab', { name: new RegExp(name) });
+
+describe('ConversationTabs', () => {
+  it('shows each open conversation with its background status', () => {
+    renderTabs();
+
+    expect(screen.getAllByRole('tab')).toHaveLength(5);
+    for (const name of [
+      'Alpha',
+      'Running: Beta',
+      'New activity: Gamma',
+      'Needs input: Delta',
+      'Failed: Epsilon',
+    ]) {
+      expect(screen.getByRole('tab', { name })).toBeInTheDocument();
+    }
+    expect(tab('Alpha')).toHaveAttribute('aria-selected', 'true');
+    expect(tab('Alpha')).toHaveAttribute('tabindex', '0');
+    expect(tab('Beta')).toHaveAttribute('tabindex', '-1');
+    expect(tab('Beta')).toHaveAttribute('title', 'Beta\nRunning\n/work/beta');
+  });
+
+  it('selects tabs by click and moves with the arrow, Home and End keys', () => {
+    const { onSelect } = renderTabs();
+
+    fireEvent.click(tab('Gamma'));
+    expect(onSelect).toHaveBeenLastCalledWith('conv-c');
+
+    fireEvent.keyDown(tab('Alpha'), { key: 'ArrowRight' });
+    expect(onSelect).toHaveBeenLastCalledWith('conv-b');
+    fireEvent.keyDown(tab('Alpha'), { key: 'ArrowLeft' });
+    expect(onSelect).toHaveBeenLastCalledWith('conv-e');
+    fireEvent.keyDown(tab('Alpha'), { key: 'End' });
+    expect(onSelect).toHaveBeenLastCalledWith('conv-e');
+    fireEvent.keyDown(tab('Gamma'), { key: 'Home' });
+    expect(onSelect).toHaveBeenLastCalledWith('conv-a');
+    // Modified keys belong to the page shortcuts.
+    fireEvent.keyDown(tab('Alpha'), { key: 'ArrowRight', altKey: true });
+    expect(onSelect).toHaveBeenCalledTimes(5);
+  });
+
+  it('closes tabs with Delete and middle-click without asking', () => {
+    const { onClose } = renderTabs();
+
+    fireEvent.keyDown(tab('Beta'), { key: 'Delete' });
+    expect(onClose).toHaveBeenLastCalledWith('conv-b');
+
+    fireEvent(tab('Gamma'), new MouseEvent('auxclick', { bubbles: true, button: 1 }));
+    expect(onClose).toHaveBeenLastCalledWith('conv-c');
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it('copies the ID and path or closes from a saved conversation menu', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText');
+    const { onClose } = renderTabs();
+
+    await user.click(screen.getByRole('button', { name: 'Beta actions' }));
+    const menu = screen.getByRole('menu', { name: 'Beta actions' });
+    expect(menu).toHaveTextContent('Beta/work/beta');
+    expect(
+      within(menu)
+        .getAllByRole('menuitem')
+        .map((item) => item.textContent)
+    ).toEqual(['Copy conversation ID', 'Copy workspace path', 'Close tabDel']);
+    expect(within(menu).getByRole('menuitem', { name: 'Copy conversation ID' })).toHaveFocus();
+
+    await user.keyboard('{ArrowDown}');
+    expect(within(menu).getByRole('menuitem', { name: 'Copy workspace path' })).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(writeText).toHaveBeenLastCalledWith('/work/beta');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(tab('Beta')).toHaveFocus();
+
+    await user.click(screen.getByRole('button', { name: 'Beta actions' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Copy conversation ID' }));
+    expect(writeText).toHaveBeenLastCalledWith('conv-b');
+
+    await user.click(screen.getByRole('button', { name: 'Beta actions' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Close tab' }));
+    expect(onClose).toHaveBeenCalledExactlyOnceWith('conv-b');
+  });
+
+  it('opens the menu from the keyboard or right-click and closes it with Escape', async () => {
+    const user = userEvent.setup();
+    renderTabs();
+
+    fireEvent.keyDown(tab('Alpha'), { key: 'F10', shiftKey: true });
+    expect(screen.getByRole('menu', { name: 'Alpha actions' })).toBeInTheDocument();
+    await user.keyboard('{End}');
+    expect(screen.getByRole('menuitem', { name: 'Close tab' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(tab('Alpha')).toHaveFocus();
+
+    fireEvent.contextMenu(tab('Gamma'));
+    expect(screen.getByRole('menu', { name: 'Gamma actions' })).toBeInTheDocument();
+    // A conversation without a workspace has no path to copy.
+    expect(screen.queryByRole('menuitem', { name: 'Copy workspace path' })).not.toBeInTheDocument();
+    await user.click(document.body);
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('offers only config and close for a new chat', async () => {
+    const user = userEvent.setup();
+    const { onConfigOpen } = renderTabs({
+      activeId: 'new',
+      tabs: [...tabs.slice(0, 2), { id: 'new', title: 'New chat', cwd: '/work/new', draft: true }],
+    });
+
+    await user.click(screen.getByRole('button', { name: 'New chat actions' }));
+    const menu = screen.getByRole('menu', { name: 'New chat actions' });
+    expect(menu).toHaveTextContent('/work/new');
+    expect(
+      within(menu)
+        .getAllByRole('menuitem')
+        .map((item) => item.textContent)
+    ).toEqual(['Config', 'Close tabDel']);
+
+    await user.click(within(menu).getByRole('menuitem', { name: 'Config' }));
+    expect(onConfigOpen).toHaveBeenCalledExactlyOnceWith('new');
+    // The tab takes focus first, so the settings dialog can return to it.
+    expect(tab('New chat')).toHaveFocus();
+  });
+
+  it('lists every tab, flags background tabs that need attention, and opens new chats', async () => {
+    const user = userEvent.setup();
+    const { onSelect, onNew } = renderTabs();
+
+    const trigger = screen.getByRole('button', { name: 'All conversation tabs' });
+    expect(trigger.querySelector('.chat-tabs-count-dot')).not.toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Switch conversation tab, 5 open' })
+    ).toHaveTextContent('Alpha5');
+
+    await user.click(trigger);
+    const list = screen.getByRole('dialog', { name: 'Open conversations' });
+    expect(within(list).getByRole('button', { name: /Alpha/ })).toHaveAttribute(
+      'aria-current',
+      'page'
+    );
+    await user.click(within(list).getByRole('button', { name: /Delta/ }));
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith('conv-d');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    await user.click(trigger);
+    await user.click(screen.getByRole('button', { name: 'New chat' }));
+    expect(onNew).toHaveBeenCalledOnce();
+  });
+
+  it('does not flag attention when only the active tab needs it', () => {
+    renderTabs({ activeId: 'conv-d', tabs: tabs.slice(0, 4) });
+
+    expect(
+      screen
+        .getByRole('button', { name: 'All conversation tabs' })
+        .querySelector('.chat-tabs-count-dot')
+    ).toBeNull();
+  });
+
+  it('reorders tabs by dragging', () => {
+    const { onReorder } = renderTabs();
+    const dataTransfer = { setData: vi.fn() };
+
+    fireEvent.dragStart(tab('Epsilon'), { dataTransfer });
+    fireEvent.dragOver(tab('Beta'));
+    fireEvent.drop(tab('Beta'));
+
+    expect(onReorder).toHaveBeenCalledExactlyOnceWith([
+      'conv-a',
+      'conv-e',
+      'conv-b',
+      'conv-c',
+      'conv-d',
+    ]);
+  });
+});
+
+describe('adjacentConversationTabId', () => {
+  it('wraps around both ends', () => {
+    expect(adjacentConversationTabId(tabs, 'conv-e', 1)).toBe('conv-a');
+    expect(adjacentConversationTabId(tabs, 'conv-a', -1)).toBe('conv-e');
+    expect(adjacentConversationTabId(tabs, 'missing', 1)).toBe('conv-b');
+    expect(adjacentConversationTabId([], 'conv-a', 1)).toBeUndefined();
+  });
+});

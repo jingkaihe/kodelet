@@ -14,6 +14,7 @@ const shortcutGroups = [
       { label: 'Toggle terminal', keys: 'Ctrl+`' },
       { label: 'Search conversations', keys: 'Ctrl/⌘+K' },
       { label: 'New chat', keys: 'Ctrl/⌘+Shift+O' },
+      { label: 'Previous / next tab', keys: 'Alt/⌥+[ / ]' },
       { label: 'Focus message', keys: 'Ctrl/⌘+Shift+L' },
       { label: 'Keyboard shortcuts', keys: 'Ctrl/⌘+/' },
     ],

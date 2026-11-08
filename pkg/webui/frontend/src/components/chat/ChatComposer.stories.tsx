@@ -12,7 +12,7 @@ import { showToast } from '../../utils';
 import ChatComposer from './ChatComposer';
 import ChatSidebar from './ChatSidebar';
 import ChatTranscript from './ChatTranscript';
-import ChatWorkspaceHeader from './ChatWorkspaceHeader';
+import ConversationTabs, { type ConversationTab } from './ConversationTabs';
 import ExtensionWidgets from './ExtensionWidgets';
 
 type ChatComposerStoryProps = React.ComponentProps<typeof ChatComposer> & {
@@ -59,12 +59,12 @@ const meta = {
         rootFontSize * editorFontScale,
         2
       );
-      const workspace = canvas.queryByTestId('chat-workspace-header');
-      if (workspace) {
-        const location = workspace.querySelector('.chat-workspace-location');
-        expect(location).not.toBeNull();
-        const styles = getComputedStyle(location as HTMLElement);
-        const headerStyles = getComputedStyle(workspace);
+      const tabsHeader = canvas.queryByTestId('chat-tabs-header');
+      if (tabsHeader) {
+        const tab = tabsHeader.querySelector('.chat-tab-select');
+        expect(tab).not.toBeNull();
+        const styles = getComputedStyle(tab as HTMLElement);
+        const headerStyles = getComputedStyle(tabsHeader);
         expect(styles.fontFamily).toBe(getComputedStyle(editor).fontFamily);
         expect(styles.fontWeight).toBe(headerStyles.fontWeight);
         expect(styles.letterSpacing).toBe(headerStyles.letterSpacing);
@@ -163,6 +163,27 @@ const meta = {
 export default meta;
 
 type Story = StoryObj<typeof meta>;
+
+const workspaceTabs: ConversationTab[] = [
+  {
+    id: 'conv-active',
+    title: 'Please make the composer and sidebar match the transcript',
+    cwd: '/home/jingkaihe/workspace/kodelet',
+  },
+  {
+    id: 'conv-review',
+    title: 'Review terminal session handling',
+    cwd: '/home/jingkaihe/workspace/kodelet',
+    status: 'running',
+  },
+];
+
+const newChatTab: ConversationTab = {
+  id: ':new',
+  title: 'New chat',
+  cwd: '/home/jingkaihe/workspace/kodelet',
+  draft: true,
+};
 
 export const ReadyToSend: Story = {};
 
@@ -359,9 +380,13 @@ export const InWorkspace: Story = {
         />
       </div>
       <main className="chat-main-panel flex min-w-0 flex-1 flex-col overflow-hidden">
-        <ChatWorkspaceHeader
-          cwd="/home/jingkaihe/workspace/kodelet"
-          onWorkspaceOpen={args.contextIsStatic ? undefined : args.onContextOpen}
+        <ConversationTabs
+          activeId={args.contextIsStatic ? workspaceTabs[0].id : newChatTab.id}
+          onClose={fn()}
+          onConfigOpen={args.onContextOpen}
+          onNew={fn()}
+          onSelect={fn()}
+          tabs={args.contextIsStatic ? workspaceTabs : [...workspaceTabs, newChatTab]}
         />
         <div className="chat-main-scroll min-h-0 flex-1 overflow-y-auto">
           <ChatTranscript
@@ -399,7 +424,13 @@ export const NarrowWorkspace: Story = {
   // Both side panels can leave a narrow composer even at desktop viewport widths.
   render: (args) => (
     <div className="chat-main-panel w-full max-w-[25rem]">
-      <ChatWorkspaceHeader cwd="/home/jingkaihe/workspace/projects/a-long-workspace-name" />
+      <ConversationTabs
+        activeId={workspaceTabs[0].id}
+        onClose={fn()}
+        onNew={fn()}
+        onSelect={fn()}
+        tabs={workspaceTabs}
+      />
       <InteractiveComposer {...args} />
     </div>
   ),

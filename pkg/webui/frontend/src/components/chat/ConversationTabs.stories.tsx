@@ -9,7 +9,6 @@ import GitDiffModal from '../workspace/GitDiffModal';
 import ChatComposer from './ChatComposer';
 import ChatSidebar from './ChatSidebar';
 import ChatTranscript from './ChatTranscript';
-import ChatWorkspaceHeader from './ChatWorkspaceHeader';
 import ConversationTabs, {
   adjacentConversationTabId,
   type ConversationTab,
@@ -22,13 +21,13 @@ const KODELET = '/home/jingkaihe/workspace/kodelet';
 const PLUGINS = '/home/jingkaihe/workspace/plugins';
 
 const DESIGN_NOTES = `
-Browser-style conversation tabs in the header strip above the transcript, which today only shows the workspace path.
+Browser-style conversation tabs in the header strip above the transcript.
 
-- **Placement:** tabs replace the strip; no extra vertical space is used.
+- **Placement:** tabs fill the strip; no extra vertical space is used.
 - **Tab menu:** each tab has a ▾ where a close button would be, shown on hover and on the active tab. It also opens on right-click or Shift+F10. The menu shows the full title and workspace path, then **Copy conversation ID**, **Copy workspace path** and **Close tab**, replacing today's hidden click-the-path-to-copy. A new chat has nothing to copy yet, so it offers **Config** (the new chat settings: profile, runner and workspace) and **Close tab**.
 - **Open conversations only:** a tab exists for each conversation you open. Clicking one in the sidebar opens it in a new tab, or focuses its tab if it is already open.
 - **Model:** a tab is just a conversation ID (or one unsaved draft). The URL \`/c/:id\` stays the source of truth for the active tab, and only the active conversation is mounted, so there is still one stream per window.
-- **Background status:** running, new activity, needs input and failed come from the conversation list the sidebar already polls, so background tabs need no extra streams.
+- **Background status:** running comes from the conversation list the sidebar already polls. New activity and failed mark a run that finished while its tab was in the background, and needs input marks a tab waiting on an extension prompt. Opening the tab clears them.
 - **Closing:** close from the tab menu, by middle-clicking the tab or with Delete. Closing never stops the agent. It keeps running in the background, the sidebar still shows it as running, and reopening it picks up the progress. There is no confirmation because nothing is lost.
 - **Keyboard:** arrow keys, Home and End move between tabs, Delete closes, Shift+F10 or the Menu key opens the tab menu, and Alt/⌥+[ and ] cycle tabs from anywhere.
 - **Narrow panels:** when the workspace panel or a small screen leaves less than ~34rem, the strip collapses into a single switcher with a count badge, plus a ▾ for the active tab's menu.
@@ -103,17 +102,15 @@ const initialTabIds = ['conv-active', 'conv-review', 'conv-docs', 'conv-release'
 const isDraft = (id: string) => id.startsWith('draft-');
 
 interface ShellProps {
-  variant: 'tabs' | 'current' | 'separate-row';
   workspacePanelOpen?: boolean;
 }
 
 /** Wires the real chat components together to show how tabs behave in the page. */
-const ChatShell = ({ variant, workspacePanelOpen = false }: ShellProps) => {
-  const tabsEnabled = variant !== 'current';
+const ChatShell = ({ workspacePanelOpen = false }: ShellProps) => {
   const [conversations, setConversations] = useState(baseConversations);
-  const [ids, setIds] = useState(tabsEnabled ? initialTabIds : ['conv-active']);
+  const [ids, setIds] = useState(initialTabIds);
   const [activeId, setActiveId] = useState('conv-active');
-  const [statuses, setStatuses] = useState(tabsEnabled ? initialStatuses : {});
+  const [statuses, setStatuses] = useState(initialStatuses);
   const [transcripts, setTranscripts] = useState(baseTranscripts);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [draftCwd, setDraftCwd] = useState(KODELET);
@@ -141,7 +138,6 @@ const ChatShell = ({ variant, workspacePanelOpen = false }: ShellProps) => {
           status: statuses[id] ?? 'idle',
         };
   });
-  const activeTab = tabs.find((tab) => tab.id === activeId);
   const activeIsDraft = isDraft(activeId);
 
   const select = (id: string) => {
@@ -170,15 +166,11 @@ const ChatShell = ({ variant, workspacePanelOpen = false }: ShellProps) => {
       return;
     }
     const draftId = `draft-${counterRef.current++}`;
-    if (!tabsEnabled) {
-      setIds([draftId]);
-    } else {
-      setIds((current) => {
-        const next = [...current];
-        next.splice(current.indexOf(activeRef.current) + 1, 0, draftId);
-        return next;
-      });
-    }
+    setIds((current) => {
+      const next = [...current];
+      next.splice(current.indexOf(activeRef.current) + 1, 0, draftId);
+      return next;
+    });
     setActiveId(draftId);
   };
 
@@ -190,8 +182,7 @@ const ChatShell = ({ variant, workspacePanelOpen = false }: ShellProps) => {
     setIds((current) => {
       const index = current.indexOf(activeRef.current);
       const next = [...current];
-      if (tabsEnabled) next.splice(index + 1, 0, id);
-      else next.splice(index, 1, id);
+      next.splice(index + 1, 0, id);
       return next;
     });
     select(id);
@@ -238,7 +229,6 @@ const ChatShell = ({ variant, workspacePanelOpen = false }: ShellProps) => {
   };
 
   useEffect(() => {
-    if (!tabsEnabled) return undefined;
     const cycle = (event: KeyboardEvent) => {
       if (!event.altKey || event.ctrlKey || event.metaKey) return;
       const delta =
@@ -251,14 +241,6 @@ const ChatShell = ({ variant, workspacePanelOpen = false }: ShellProps) => {
     window.addEventListener('keydown', cycle);
     return () => window.removeEventListener('keydown', cycle);
   });
-
-  const header = (
-    <ChatWorkspaceHeader
-      conversationId={activeIsDraft ? null : activeId}
-      cwd={activeTab?.cwd ?? ''}
-      onWorkspaceOpen={activeIsDraft ? openConfig : undefined}
-    />
-  );
 
   return (
     <div className="flex h-screen bg-transparent">
@@ -283,21 +265,18 @@ const ChatShell = ({ variant, workspacePanelOpen = false }: ShellProps) => {
       </section>
 
       <main className="chat-main-panel relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
-        {tabsEnabled ? (
-          <ConversationTabs
-            activeId={activeId}
-            onConfigOpen={(id) => {
-              select(id);
-              openConfig();
-            }}
-            onClose={close}
-            onNew={openNew}
-            onReorder={setIds}
-            onSelect={select}
-            tabs={tabs}
-          />
-        ) : null}
-        {variant === 'tabs' ? null : header}
+        <ConversationTabs
+          activeId={activeId}
+          onConfigOpen={(id) => {
+            select(id);
+            openConfig();
+          }}
+          onClose={close}
+          onNew={openNew}
+          onReorder={setIds}
+          onSelect={select}
+          tabs={tabs}
+        />
         <div className="chat-main-scroll min-h-0 flex-1 overflow-y-auto" key={activeId}>
           <ChatTranscript
             isStreaming={statuses[activeId] === 'running'}
@@ -447,7 +426,7 @@ const sampleTabs: ConversationTab[] = initialTabIds.map((id) => {
 });
 
 const meta = {
-  title: 'Prototypes/Conversation tabs',
+  title: 'Chat/ConversationTabs',
   component: ConversationTabs,
   tags: ['autodocs'],
   parameters: {
@@ -483,28 +462,16 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-/** The proposal: tabs take over the header strip; try the sidebar, composer and Alt+[ / ]. */
-export const Recommended: Story = {
+/** Tabs in the chat page; try the sidebar, the composer and Alt+[ / ]. */
+export const InChatPage: Story = {
   parameters: { shell: true },
-  render: () => <ChatShell variant="tabs" />,
-};
-
-/** Today's header, for comparison. */
-export const CurrentHeader: Story = {
-  parameters: { shell: true },
-  render: () => <ChatShell variant="current" />,
-};
-
-/** A separate tab row above the existing header; costs a second row of chrome. */
-export const AlternativeSeparateRow: Story = {
-  parameters: { shell: true },
-  render: () => <ChatShell variant="separate-row" />,
+  render: () => <ChatShell />,
 };
 
 /** With the workspace panel open the main panel narrows and tabs collapse into a switcher. */
 export const WithWorkspacePanelOpen: Story = {
   parameters: { shell: true },
-  render: () => <ChatShell variant="tabs" workspacePanelOpen />,
+  render: () => <ChatShell workspacePanelOpen />,
 };
 
 /** Idle, running, new activity, needs input and failed. */

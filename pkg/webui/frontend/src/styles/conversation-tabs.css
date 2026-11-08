@@ -433,6 +433,20 @@
   font-size: 0.74rem;
 }
 
+/* Tabs and menus stay put: opt out of the global button lift and spacing. */
+.chat-tabs-header button {
+  letter-spacing: inherit;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease,
+    opacity 140ms ease;
+}
+
+.chat-tabs-header button:hover,
+.chat-tabs-header button:active {
+  transform: none;
+}
+
 .chat-tabs-header button:focus-visible {
   outline: 2px solid var(--kodelet-link);
   outline-offset: -2px;
