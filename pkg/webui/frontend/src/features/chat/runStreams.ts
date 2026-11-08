@@ -1,5 +1,11 @@
 import { useState } from 'react';
-import type { ChatStreamEvent } from '../../types';
+import type { ChatStreamEvent, PendingImageAttachment } from '../../types';
+
+/** A slash command waiting for its conversation's run to finish successfully. */
+export interface QueuedCommand {
+  prompt: string;
+  attachments: PendingImageAttachment[];
+}
 
 /**
  * The chat page's event streams for running conversations, by role. Each entry

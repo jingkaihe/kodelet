@@ -2,6 +2,22 @@ import type { Conversation, PendingImageAttachment } from '../../types';
 
 /** Conversation data helpers for the chat page. */
 
+/** A new conversation on a remote runner, shown before the server confirms its directory. */
+export interface OptimisticRemoteConversation {
+  conversationId: string;
+  runnerId: string;
+  environmentProfile?: string;
+  cwd?: string;
+  confirmed: boolean;
+}
+
+/** Terminal and browser sessions opened for a new chat before its first turn. */
+export interface DraftWorkspace {
+  conversationId: string;
+  runnerIds: Set<string>;
+  submitted: boolean;
+}
+
 export const normalizeConversation = (conversation: Conversation): Conversation => ({
   ...conversation,
   cwd:

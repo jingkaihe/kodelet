@@ -34,22 +34,14 @@ import ProviderSettingsDialog from '../components/chat/ProviderSettingsDialog';
 import UIInputDialog from '../components/chat/UIInputDialog';
 import { discardTerminalPopOuts } from '../components/workspace/terminalPopOut';
 import {
-  buildConversationPreview,
+  type DraftWorkspace,
   generateConversationId,
-  mergeConversationUsage,
   normalizeConversation,
-  reconcileStreamCWDForDisplay,
+  type OptimisticRemoteConversation,
 } from '../features/chat/conversationModel';
-import {
-  abortRunStreams,
-  isBlockingUIRequestEvent,
-  useRunStreams,
-} from '../features/chat/runStreams';
-import {
-  applyChatStreamEvent,
-  applyRealtimeTranscript,
-  conversationToChatMessages,
-} from '../features/chat/state';
+import { createMessageSender } from '../features/chat/messageSender';
+import { abortRunStreams, type QueuedCommand, useRunStreams } from '../features/chat/runStreams';
+import { applyRealtimeTranscript, conversationToChatMessages } from '../features/chat/state';
 import { useBackgroundRunMonitors } from '../features/chat/useBackgroundRunMonitors';
 import { buildUserContent, useChatAttachments } from '../features/chat/useChatAttachments';
 import {
@@ -75,6 +67,7 @@ import { useRealtime } from '../features/chat/useRealtime';
 import { useSlashCommands } from '../features/chat/useSlashCommands';
 import { useTranscriptAutoScroll } from '../features/chat/useTranscriptAutoScroll';
 import { useUIRequestDialog } from '../features/chat/useUIRequestDialog';
+import { useViewedConversationStream } from '../features/chat/useViewedConversationStream';
 import { useWorkspaceResize } from '../features/chat/useWorkspaceResize';
 import apiService from '../services/api';
 import type {
@@ -89,11 +82,6 @@ import type {
   WorkspaceTarget,
 } from '../types';
 import { cn, showToast } from '../utils';
-
-interface QueuedCommand {
-  prompt: string;
-  attachments: PendingImageAttachment[];
-}
 
 /** What finished in a conversation while its tab was in the background. */
 type TabActivity = 'unread' | 'error';
@@ -134,11 +122,7 @@ const ChatPage: React.FC = () => {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(conversationId);
   const [draftConversationId, setDraftConversationId] = useState(generateConversationId);
   const sessionConversationId = conversationId || draftConversationId;
-  const draftWorkspaceRef = useRef<{
-    conversationId: string;
-    runnerIds: Set<string>;
-    submitted: boolean;
-  } | null>(null);
+  const draftWorkspaceRef = useRef<DraftWorkspace | null>(null);
   const draftHeartbeatInFlightRef = useRef(false);
   const [runners, setRunners] = useState<Runner[]>([]);
   const [draft, setDraft] = useState('');
@@ -208,13 +192,7 @@ const ChatPage: React.FC = () => {
     },
   } = contextSettings;
   const conversationPathOverrideRef = useRef<string | null>(null);
-  const optimisticRemoteConversationRef = useRef<{
-    conversationId: string;
-    runnerId: string;
-    environmentProfile?: string;
-    cwd?: string;
-    confirmed: boolean;
-  } | null>(null);
+  const optimisticRemoteConversationRef = useRef<OptimisticRemoteConversation | null>(null);
   const routerConversationIdRef = useRef<string | null>(conversationId);
   const conversationTabs = useConversationTabs(conversationId);
   const tabKey = conversationTabs.activeId;
@@ -462,8 +440,6 @@ const ChatPage: React.FC = () => {
     return Array.from(new Set([...runningIds, ...locallyRunningConversationIds]));
   }, [conversations, locallyRunningConversationIds]);
 
-  const onStreamUIInputRequest = useEffectEvent(uiRequest.handleEvent);
-
   // Flags a run that finished while its tab was open but not shown.
   const noteBackgroundRunFinished = useCallback((id: string, activity: TabActivity) => {
     if (viewedConversationIdRef.current === id || !openTabIdsRef.current.has(id)) return;
@@ -489,7 +465,6 @@ const ChatPage: React.FC = () => {
     if (event.kind === 'done' && !event.cancelled) runNextQueuedCommand(id);
     else discardQueuedCommands(id, 'the run failed or was cancelled');
   };
-  const onObservedRunFinished = useEffectEvent(finishObservedRun);
 
   useBackgroundRunMonitors({
     streams: runStreams,
@@ -661,215 +636,26 @@ const ChatPage: React.FC = () => {
       });
   }, [conversationId, resetExtensionWidgets, resetTranscriptScroll, projectConversation]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies(conversationStreamVersion): Completing a submitted stream must reattach the conversation watcher even when its ID is unchanged.
-  useEffect(() => {
-    if (
-      !conversationId ||
-      conversationLoading ||
-      loadedConversationId !== conversationId ||
-      runStreams.sends[conversationId]
-    ) {
-      return;
-    }
-
-    const streamInstance = runStreams.viewedGeneration + 1;
-    runStreams.viewedGeneration = streamInstance;
-    const controller = new AbortController();
-    runStreams.viewed = controller;
-    let sawEvent = false;
-    let watchedTurn = 0;
-    let terminalSeen = false;
-
-    void apiService
-      .streamConversation(conversationId, {
-        signal: controller.signal,
-        onEvent: (event: ChatStreamEvent) => {
-          if (controller.signal.aborted && !isBlockingUIRequestEvent(event)) return;
-          if (event.conversation_id && event.conversation_id !== conversationId) {
-            return;
-          }
-          if (runStreams.sends[conversationId]) {
-            return;
-          }
-
-          const eventForConversation = event.conversation_id
-            ? event
-            : { ...event, conversation_id: conversationId };
-
-          if (isBlockingUIRequestEvent(event) && onStreamUIInputRequest(eventForConversation)) {
-            sawEvent = true;
-            return;
-          }
-
-          // A queued command keeps its original completion subscription alive
-          // across navigation. The server does not replay missed terminal events.
-          if (
-            runStreams.commandObservers[conversationId] === controller &&
-            runStreams.viewedGeneration !== streamInstance
-          ) {
-            handleResourcesReloaded(event, conversationId);
-            if (!terminalSeen && (event.kind === 'done' || event.kind === 'error')) {
-              terminalSeen = true;
-              onObservedRunFinished(conversationId, event, controller);
-            }
-            return;
-          }
-
-          if (
-            runStreams.viewedGeneration !== streamInstance ||
-            viewedConversationIdRef.current !== conversationId
-          ) {
-            return;
-          }
-
-          sawEvent = true;
-          if (handleExtensionWidgetEvent(event)) {
-            return;
-          }
-          if (event.kind === 'conversation' && event.conversation_id) {
-            conversationRunVersion.current += 1;
-            watchedTurn += 1;
-            terminalSeen = false;
-            runStreams.observers[conversationId] = controller;
-            setActiveConversationId(event.conversation_id);
-            markConversationRunning(event.conversation_id);
-            return;
-          }
-
-          handleResourcesReloaded(event, conversationId);
-
-          if (event.kind === 'usage' && event.usage) {
-            setConversation((currentConversation) =>
-              mergeConversationUsage(currentConversation, event.usage)
-            );
-            return;
-          }
-
-          if (event.kind === 'done') {
-            if (terminalSeen) return;
-            terminalSeen = true;
-            onObservedRunFinished(conversationId, event, controller);
-            const completedTurn = watchedTurn;
-            const runVersion = conversationRunVersion.current;
-            void reconcileCompletedConversation(
-              conversationId,
-              () =>
-                !controller.signal.aborted &&
-                runStreams.viewedGeneration === streamInstance &&
-                viewedConversationIdRef.current === conversationId &&
-                !runStreams.sends[conversationId] &&
-                completedTurn === watchedTurn &&
-                conversationRunVersion.current === runVersion
-            );
-          } else if (event.kind === 'error') {
-            if (terminalSeen) return;
-            terminalSeen = true;
-            onObservedRunFinished(conversationId, event, controller);
-          }
-
-          if (event.kind === 'error') {
-            setStreamError(event.error || 'Chat request failed');
-          }
-
-          if (event.kind === 'user-message' && !event.extensionId) {
-            setConversation((currentConversation) =>
-              currentConversation
-                ? { ...currentConversation, pendingSteer: [] }
-                : currentConversation
-            );
-          }
-
-          if (onStreamUIInputRequest(eventForConversation)) {
-            return;
-          }
-
-          setMessages((currentMessages) => applyChatStreamEvent(currentMessages, event));
-        },
-      })
-      .catch((error) => {
-        if (controller.signal.aborted) {
-          return;
-        }
-
-        if (
-          runStreams.viewedGeneration !== streamInstance ||
-          viewedConversationIdRef.current !== conversationId
-        ) {
-          return;
-        }
-
-        const message =
-          error instanceof Error ? error.message : 'Failed to resume conversation stream';
-        if (message === 'conversation is not actively streaming') {
-          if (!runStreams.sends[conversationId]) {
-            clearRunningConversation(conversationId);
-          }
-          return;
-        }
-
-        console.error('Failed to resume conversation stream', error);
-        setStreamError(message);
-      })
-      .finally(() => {
-        if (runStreams.observers[conversationId] === controller) {
-          delete runStreams.observers[conversationId];
-        }
-        const activeObserver = runStreams.observers[conversationId];
-        if (runStreams.commandObservers[conversationId] === controller && !terminalSeen) {
-          discardQueuedCommands(
-            conversationId,
-            'the connection ended before completion was confirmed'
-          );
-          if (
-            !runStreams.sends[conversationId] &&
-            (!activeObserver || activeObserver.signal.aborted)
-          ) {
-            clearRunningConversation(conversationId);
-          }
-        }
-        if (runStreams.viewed === controller) {
-          runStreams.viewed = null;
-        }
-
-        if (
-          controller.signal.aborted ||
-          runStreams.viewedGeneration !== streamInstance ||
-          viewedConversationIdRef.current !== conversationId
-        ) {
-          return;
-        }
-
-        if (!runStreams.sends[conversationId] && !runStreams.commandObservers[conversationId]) {
-          if (!terminalSeen) {
-            discardQueuedCommands(
-              conversationId,
-              'the connection ended before completion was confirmed'
-            );
-          }
-          if (sawEvent && (!activeObserver || activeObserver.signal.aborted)) {
-            clearRunningConversation(conversationId);
-          }
-        }
-      });
-
-    return () => {
-      if (runStreams.commandObservers[conversationId] !== controller) controller.abort();
-      if (runStreams.viewed === controller) {
-        runStreams.viewed = null;
-      }
-    };
-  }, [
-    clearRunningConversation,
+  useViewedConversationStream({
     conversationId,
-    conversationLoading,
+    loaded: !conversationLoading && loadedConversationId === conversationId,
     conversationStreamVersion,
-    discardQueuedCommands,
-    handleExtensionWidgetEvent,
-    handleResourcesReloaded,
-    loadedConversationId,
+    runStreams,
+    viewedConversationIdRef,
+    conversationRunVersion,
     markConversationRunning,
+    clearRunningConversation,
+    discardQueuedCommands,
+    handleResourcesReloaded,
+    finishObservedRun,
     reconcileCompletedConversation,
-  ]);
+    handleUIRequest: uiRequest.handleEvent,
+    handleExtensionWidgetEvent,
+    setActiveConversationId,
+    setConversation,
+    setMessages,
+    setStreamError,
+  });
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(messages): New transcript content triggers scrolling when the reader is following the bottom.
   // biome-ignore lint/correctness/useExhaustiveDependencies(currentConversationIsStreaming): Starting or stopping the streaming indicator changes the transcript height.
@@ -1188,406 +974,6 @@ const ChatPage: React.FC = () => {
     await sendMessage(prompt, attachmentsForSend);
   };
 
-  const sendMessage = async (
-    prompt: string,
-    attachmentsForSend: PendingImageAttachment[],
-    queuedConversationId?: string
-  ) => {
-    conversationRunVersion.current += 1;
-    const targetConversationId = queuedConversationId || conversationId || draftConversationId;
-    const viewConversationIdAtStart = queuedConversationId || conversationId;
-    const isNewConversation = !queuedConversationId && !conversationId;
-    const isTargetViewed = () =>
-      viewedConversationIdRef.current === targetConversationId ||
-      (isNewConversation && viewedConversationIdRef.current === null);
-    const initialUserContent = buildUserContent(prompt, attachmentsForSend);
-    if (isTargetViewed()) {
-      setStreamError(null);
-      setMessages((currentMessages) => [
-        ...currentMessages,
-        { role: 'user', content: initialUserContent },
-      ]);
-    }
-    const existingOptimisticRemoteConversation =
-      !queuedConversationId &&
-      conversationId &&
-      optimisticRemoteConversationRef.current?.conversationId === conversationId
-        ? optimisticRemoteConversationRef.current
-        : null;
-    const requestRunnerID = existingOptimisticRemoteConversation?.runnerId || selectedRunnerID;
-    const requestEnvironmentProfile =
-      existingOptimisticRemoteConversation?.environmentProfile || selectedEnvironmentProfile;
-    const requestCWD = existingOptimisticRemoteConversation
-      ? existingOptimisticRemoteConversation.cwd
-      : isNewConversation
-        ? selectedCWD.trim() || undefined
-        : undefined;
-    if (isNewConversation) {
-      if (draftWorkspaceRef.current?.conversationId === targetConversationId) {
-        draftWorkspaceRef.current.submitted = true;
-      }
-      optimisticRemoteConversationRef.current = requestRunnerID
-        ? {
-            conversationId: targetConversationId,
-            runnerId: requestRunnerID,
-            environmentProfile: requestEnvironmentProfile || undefined,
-            cwd: requestCWD,
-            confirmed: false,
-          }
-        : null;
-      setActiveConversationId(targetConversationId);
-      updatePathForStartedConversation(targetConversationId);
-    }
-
-    const controller = new AbortController();
-    if (isTargetViewed()) runStreams.viewedSend = controller;
-    registerSendController(targetConversationId, controller);
-    runStreams.commandObservers[targetConversationId]?.abort();
-    delete runStreams.commandObservers[targetConversationId];
-    delete runStreams.observers[targetConversationId];
-    // Only the submitting stream may complete this run. Retire any observers
-    // before starting it so stale events cannot drain a second queued command.
-    runStreams.monitors[targetConversationId]?.abort();
-    delete runStreams.monitors[targetConversationId];
-    if (isTargetViewed()) runStreams.viewed?.abort();
-    markConversationRunning(targetConversationId);
-    const userPreview = buildConversationPreview(prompt, attachmentsForSend);
-    if (isNewConversation) {
-      const now = new Date().toISOString();
-      const newConversation = {
-        id: targetConversationId,
-        createdAt: now,
-        updatedAt: now,
-        messageCount: 1,
-        summary: userPreview,
-        preview: userPreview,
-        cwd: currentCWDLabel,
-        runnerId: requestRunnerID || undefined,
-        environmentProfile: requestRunnerID ? requestEnvironmentProfile || undefined : undefined,
-        runner: requestRunnerID ? currentRunner : undefined,
-        profile: selectedProfile,
-        model: selectedModel || undefined,
-        reasoningEffort: chatSettingsLoaded ? selectedReasoningEffort : undefined,
-        isRunning: true,
-        messages: [{ role: 'user' as const, content: initialUserContent }],
-        pendingSteer: [],
-        toolResults: {},
-      };
-      setConversation(newConversation);
-      setConversations((currentConversations) =>
-        upsertConversationSummary(currentConversations, newConversation)
-      );
-    }
-
-    let streamedConversationId = targetConversationId;
-    let streamedError: string | null = null;
-    let successful = false;
-    let cancelled = false;
-    const clearConfirmedOptimisticConversation = () => {
-      if (
-        optimisticRemoteConversationRef.current?.conversationId === streamedConversationId &&
-        optimisticRemoteConversationRef.current.confirmed
-      ) {
-        optimisticRemoteConversationRef.current = null;
-      }
-    };
-
-    try {
-      await apiService.streamChat(
-        {
-          message: prompt,
-          content: initialUserContent,
-          conversationId: targetConversationId,
-          runnerId: existingOptimisticRemoteConversation
-            ? existingOptimisticRemoteConversation.runnerId
-            : isNewConversation
-              ? requestRunnerID || undefined
-              : undefined,
-          environmentProfile:
-            existingOptimisticRemoteConversation || (isNewConversation && requestRunnerID)
-              ? requestEnvironmentProfile || undefined
-              : undefined,
-          profile:
-            !isNewConversation && !existingOptimisticRemoteConversation
-              ? undefined
-              : selectedProfile,
-          options:
-            (!isNewConversation && !existingOptimisticRemoteConversation) || !selectedModel
-              ? undefined
-              : { model: selectedModel },
-          reasoningEffort:
-            (!isNewConversation && !existingOptimisticRemoteConversation) || !chatSettingsLoaded
-              ? undefined
-              : selectedReasoningEffort,
-          clientCapabilities: {
-            interactiveUI: true,
-            persistentWidgets: true,
-            persistentSurfaces: false,
-          },
-          cwd: requestCWD,
-        },
-        {
-          signal: controller.signal,
-          onEvent: (event: ChatStreamEvent) => {
-            if (controller.signal.aborted && !isBlockingUIRequestEvent(event)) return;
-            if (event.kind === 'conversation' && event.conversation_id) {
-              const streamedId = event.conversation_id;
-              const canonicalCWD = event.cwd?.trim();
-              const effectiveCWD = reconcileStreamCWDForDisplay(
-                canonicalCWD,
-                isTargetViewed() ? currentCWDLabel : '',
-                isRemoteConversation
-              );
-              const previousStreamedId = streamedConversationId;
-              const shouldAdoptStreamedConversation =
-                viewedConversationIdRef.current === viewConversationIdAtStart ||
-                (!viewConversationIdAtStart &&
-                  viewedConversationIdRef.current === previousStreamedId) ||
-                (!viewConversationIdAtStart && viewedConversationIdRef.current === streamedId);
-              const shouldUpdatePath =
-                !viewConversationIdAtStart &&
-                streamedId !== streamedConversationId &&
-                shouldAdoptStreamedConversation;
-              streamedConversationId = streamedId;
-              if (
-                previousStreamedId &&
-                optimisticRemoteConversationRef.current?.conversationId === previousStreamedId
-              ) {
-                optimisticRemoteConversationRef.current = {
-                  ...optimisticRemoteConversationRef.current,
-                  conversationId: streamedId,
-                  cwd: effectiveCWD || optimisticRemoteConversationRef.current.cwd,
-                  confirmed:
-                    optimisticRemoteConversationRef.current.confirmed || Boolean(canonicalCWD),
-                };
-              }
-              if (shouldAdoptStreamedConversation) {
-                setActiveConversationId(streamedId);
-                setConversation((currentConversation) =>
-                  currentConversation
-                    ? { ...currentConversation, id: streamedId, cwd: effectiveCWD }
-                    : currentConversation
-                );
-              }
-              if (
-                previousStreamedId &&
-                previousStreamedId !== streamedId &&
-                runStreams.sends[previousStreamedId] === controller
-              ) {
-                delete runStreams.sends[previousStreamedId];
-                const pending = queuedCommandsRef.current[previousStreamedId];
-                if (pending) {
-                  replaceQueuedCommands(previousStreamedId, []);
-                  replaceQueuedCommands(streamedId, pending);
-                }
-              }
-              registerSendController(streamedId, controller);
-              replaceRunningConversation(previousStreamedId, streamedId);
-              if (shouldUpdatePath) {
-                updatePathForStartedConversation(streamedId);
-              }
-              if (!viewConversationIdAtStart) {
-                const now = new Date().toISOString();
-                setConversations((currentConversations) =>
-                  upsertConversationSummary(
-                    previousStreamedId && previousStreamedId !== streamedId
-                      ? currentConversations.filter(
-                          (currentConversation) => currentConversation.id !== previousStreamedId
-                        )
-                      : currentConversations,
-                    {
-                      id: streamedId,
-                      createdAt: now,
-                      updatedAt: now,
-                      messageCount: 1,
-                      summary: userPreview,
-                      preview: userPreview,
-                      cwd: effectiveCWD,
-                      runnerId: selectedRunnerID || undefined,
-                      environmentProfile: selectedRunnerID
-                        ? selectedEnvironmentProfile || undefined
-                        : undefined,
-                      runner: selectedRunnerID ? currentRunner : undefined,
-                      profile: selectedProfile,
-                      isRunning: true,
-                    }
-                  )
-                );
-              }
-            }
-
-            const eventConversationId = event.conversation_id || streamedConversationId;
-            const shouldUpdateCurrentView = Boolean(
-              eventConversationId && viewedConversationIdRef.current === eventConversationId
-            );
-            const eventForConversation =
-              event.conversation_id || !eventConversationId
-                ? event
-                : { ...event, conversation_id: eventConversationId };
-
-            handleResourcesReloaded(event, eventConversationId);
-            if (event.kind === 'done') {
-              successful = !event.cancelled && !streamedError;
-              cancelled = Boolean(event.cancelled);
-            }
-
-            if (isBlockingUIRequestEvent(event) && handleUIInputRequest(eventForConversation)) {
-              return;
-            }
-
-            if (shouldUpdateCurrentView && handleExtensionWidgetEvent(event)) {
-              return;
-            }
-
-            if (event.kind === 'usage' && event.usage) {
-              if (shouldUpdateCurrentView) {
-                setConversation((currentConversation) =>
-                  mergeConversationUsage(currentConversation, event.usage)
-                );
-              }
-              return;
-            }
-
-            if (event.kind === 'error') {
-              successful = false;
-              streamedError = event.error || 'Chat request failed';
-              if (shouldUpdateCurrentView) {
-                setStreamError(streamedError);
-              }
-              return;
-            }
-
-            if (event.kind === 'user-message' && !event.extensionId) {
-              if (shouldUpdateCurrentView) {
-                setConversation((currentConversation) =>
-                  currentConversation
-                    ? { ...currentConversation, pendingSteer: [] }
-                    : currentConversation
-                );
-              }
-            }
-
-            if (shouldUpdateCurrentView && handleUIInputRequest(event)) {
-              return;
-            }
-
-            if (shouldUpdateCurrentView) {
-              setMessages((currentMessages) => applyChatStreamEvent(currentMessages, event));
-            }
-          },
-        }
-      );
-
-      const finishedOnStartedConversation = Boolean(
-        !viewConversationIdAtStart &&
-          streamedConversationId &&
-          viewedConversationIdRef.current === streamedConversationId
-      );
-
-      if (streamedError) {
-        clearConfirmedOptimisticConversation();
-        if (
-          viewedConversationIdRef.current === viewConversationIdAtStart ||
-          finishedOnStartedConversation
-        ) {
-          conversationPathOverrideRef.current = null;
-          showToast(streamedError, 'error');
-        }
-        await refreshConversations();
-        return;
-      }
-
-      if (optimisticRemoteConversationRef.current?.conversationId === streamedConversationId) {
-        optimisticRemoteConversationRef.current = null;
-      }
-
-      if (
-        streamedConversationId &&
-        (viewedConversationIdRef.current === streamedConversationId ||
-          finishedOnStartedConversation)
-      ) {
-        conversationPathOverrideRef.current = null;
-        try {
-          const captionSeq = realtimeCaptionSeq.current;
-          const latestConversation = normalizeConversation(
-            await apiService.getConversation(streamedConversationId)
-          );
-          if (viewedConversationIdRef.current === streamedConversationId) {
-            setConversation(latestConversation);
-            setMessages(projectConversation(latestConversation, captionSeq));
-          }
-        } catch {
-          // The streamed conversation is already authoritative enough to continue. A later
-          // conversation load will reconcile the persisted snapshot.
-        }
-        if (
-          !queuedConversationId &&
-          viewedConversationIdRef.current === streamedConversationId &&
-          streamedConversationId !== routerConversationIdRef.current
-        ) {
-          replaceConversationTab(
-            routeTabKey(routerConversationIdRef.current),
-            streamedConversationId
-          );
-          startTransition(() => {
-            navigate(`/c/${streamedConversationId}`, { replace: true });
-          });
-        }
-      }
-
-      await refreshConversations();
-    } catch (error) {
-      successful = false;
-      if (error instanceof DOMException && error.name === 'AbortError') {
-        return;
-      }
-
-      clearConfirmedOptimisticConversation();
-
-      const failedOnStartedConversation = Boolean(
-        !viewConversationIdAtStart &&
-          streamedConversationId &&
-          viewedConversationIdRef.current === streamedConversationId
-      );
-
-      const message = error instanceof Error ? error.message : 'Failed to send message';
-      if (
-        viewedConversationIdRef.current === viewConversationIdAtStart ||
-        failedOnStartedConversation
-      ) {
-        conversationPathOverrideRef.current = null;
-        if (!queuedConversationId) setAttachments(attachmentsForSend);
-        setStreamError(message);
-        showToast(message, 'error');
-      }
-    } finally {
-      const ownsRun = runStreams.sends[streamedConversationId] === controller;
-      if (runStreams.viewedSend === controller) {
-        runStreams.viewedSend = null;
-      }
-      clearRunningConversationForController(streamedConversationId, controller);
-      setConversationStreamVersion((currentVersion) => currentVersion + 1);
-      if (ownsRun && !controller.signal.aborted && !cancelled) {
-        noteBackgroundRunFinished(streamedConversationId, successful ? 'unread' : 'error');
-      }
-      if (ownsRun) {
-        if (successful && !controller.signal.aborted) runNextQueuedCommand(streamedConversationId);
-        else discardQueuedCommands(streamedConversationId, 'the run did not complete successfully');
-      }
-    }
-  };
-
-  const runNextQueuedCommand = (id: string) => {
-    if (runStreams.sends[id]) return;
-    const pending = queuedCommandsRef.current[id];
-    if (!pending?.length) return;
-    const [command, ...remaining] = pending;
-    replaceQueuedCommands(id, remaining);
-    // sendMessage acquires the per-conversation controller synchronously, before
-    // any network await, and never reads or clears the current composer draft.
-    void sendMessage(command.prompt, command.attachments, id);
-  };
-
   const handleStop = () => {
     const conversationToStop = activeRunningConversationId;
     if (!conversationToStop) {
@@ -1679,6 +1065,52 @@ const ChatPage: React.FC = () => {
     selectedCWD,
     workspaceConversation?.cwd,
   ]);
+  const { sendMessage, runNextQueuedCommand } = createMessageSender({
+    conversationId,
+    draftConversationId,
+    selectedRunnerID,
+    selectedEnvironmentProfile,
+    selectedCWD,
+    selectedProfile,
+    selectedModel,
+    selectedReasoningEffort,
+    chatSettingsLoaded,
+    currentCWDLabel,
+    currentRunner,
+    isRemoteConversation,
+    runStreams,
+    queuedCommandsRef,
+    viewedConversationIdRef,
+    routerConversationIdRef,
+    conversationPathOverrideRef,
+    optimisticRemoteConversationRef,
+    draftWorkspaceRef,
+    conversationRunVersion,
+    realtimeCaptionSeq,
+    markConversationRunning,
+    replaceRunningConversation,
+    registerSendController,
+    clearRunningConversationForController,
+    noteBackgroundRunFinished,
+    replaceQueuedCommands,
+    discardQueuedCommands,
+    handleResourcesReloaded,
+    handleUIInputRequest,
+    handleExtensionWidgetEvent,
+    projectConversation,
+    setActiveConversationId,
+    setConversation,
+    setConversations,
+    setMessages,
+    setStreamError,
+    setAttachments,
+    setConversationStreamVersion,
+    refreshConversations,
+    updatePathForStartedConversation,
+    replaceConversationTab,
+    navigate,
+  });
+
   const runnerDirectoryAvailable =
     currentCWDLabel === currentRunner?.workspace.path || Boolean(currentRunner?.workspaceCwd);
   const workspaceTerminalAvailable = Boolean(
