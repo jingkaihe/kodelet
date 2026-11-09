@@ -90,6 +90,10 @@ type Manager struct {
 	closed    bool
 	closeOnce sync.Once
 	closeErr  error
+
+	userAgentMu     sync.Mutex
+	userAgentProbed bool
+	userAgent       string
 }
 
 type session struct {
@@ -528,7 +532,7 @@ func (m *Manager) run(openCtx context.Context, s *session) {
 	}()
 	ctx, cancel := context.WithTimeout(openCtx, startupTimeout)
 	stopCancel := context.AfterFunc(s.ctx, cancel)
-	s.startErr = s.start(ctx, m.config.Executable)
+	s.startErr = s.start(ctx, m.config.Executable, m.launchUserAgent)
 	if s.startErr == nil {
 		s.startErr = ctx.Err()
 	}
@@ -599,7 +603,7 @@ func canonicalCWD(cwd string) (string, error) {
 	return canonical, nil
 }
 
-func (s *session) start(ctx context.Context, executable string) error {
+func (s *session) start(ctx context.Context, executable string, launchUserAgent func(context.Context, string) string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -611,16 +615,26 @@ func (s *session) start(ctx context.Context, executable string) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to resolve Chrome executable")
 	}
+	userAgent := launchUserAgent(ctx, executable)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.profile, err = os.MkdirTemp("", "kodelet-browser-")
 	if err != nil {
 		return errors.Wrap(err, "failed to create isolated browser profile")
 	}
 	// Screencast resolution follows Chrome's native scale, not emulated DPR alone.
 	// Render at 2x while retaining CSS-sized frame metadata for input mapping.
-	s.cmd = exec.Command(executable,
+	args := []string{
 		"--headless", "--force-device-scale-factor=2",
 		"--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0",
-		"--user-data-dir="+s.profile, "--no-first-run", "--no-default-browser-check", "about:blank")
+		"--user-data-dir=" + s.profile, "--no-first-run", "--no-default-browser-check",
+	}
+	if userAgent != "" {
+		// Headless Chrome's default "HeadlessChrome" user agent is rejected by some CDNs.
+		args = append(args, "--user-agent="+userAgent)
+	}
+	s.cmd = exec.Command(executable, append(args, "about:blank")...)
 	s.cmd.Dir = s.info.CWD
 	s.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	s.cmd.Stderr = &s.stderr

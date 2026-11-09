@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +34,10 @@ import (
 func TestBrowserHelperProcess(t *testing.T) {
 	if os.Getenv("KODELET_BROWSER_HELPER_PROCESS") != "1" {
 		return
+	}
+	if slices.Contains(os.Args, "--version") {
+		_, _ = fmt.Println("Chromium 156.0.8078.73 fake")
+		os.Exit(0)
 	}
 	profile := ""
 	for _, arg := range os.Args {
