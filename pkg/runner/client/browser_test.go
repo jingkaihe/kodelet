@@ -573,3 +573,42 @@ func TestUngrantedRunKeepsIdleManifestDigest(t *testing.T) {
 		callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: runID})
 	}
 }
+
+func TestUngrantedCodeExecutionAcceptsServerPinnedDigest(t *testing.T) {
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	service := newRegisteredTestService(t, t.TempDir(), ServiceOptions{
+		Browser: browser.Config{Executable: "/not/an/installed/browser"},
+		ConfigLoader: func(string) (llmtypes.Config, error) {
+			return llmtypes.Config{
+				CodeMode:          "on",
+				Skills:            &llmtypes.SkillsConfig{Enabled: false},
+				ExtensionSettings: map[string]any{"enabled": false},
+			}, nil
+		},
+	})
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1, CodeExecution: true}))
+	opened := callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+		RunID: "run", ConversationID: "conversation", CodeExecution: true,
+	})
+	// The server withholds the browser from ungranted runs and pins code_execute to the rehashed manifest.
+	pinned := opened
+	pinned.Tools = slices.DeleteFunc(slices.Clone(opened.Tools), func(tool runnerpayload.ToolDefinition) bool {
+		return tool.Name == "browser"
+	})
+	digest, err := runnerpayload.ComputeManifestDigest(pinned)
+	require.NoError(t, err)
+	service.mu.Lock()
+	run := service.runs["run"]
+	service.mu.Unlock()
+	authority, err := service.codeExecutionContext(t.Context(), run, runnerpayload.ToolExecuteParams{
+		RunID:          "run",
+		ToolCallID:     "code",
+		Name:           "code_execute",
+		ManifestDigest: digest,
+		CallableTools:  new([]string{"bash"}),
+	})
+	require.NoError(t, err)
+	require.Len(t, authority.Definitions, 1)
+	assert.Equal(t, "bash", authority.Definitions[0].Name)
+	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run"})
+}
