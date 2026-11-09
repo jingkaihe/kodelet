@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -517,4 +518,31 @@ func TestBrowserRunnerRelayRejectsInvalidTicketAndEndpoint(t *testing.T) {
 	service.artifactBaseURL = "http://public.example"
 	err = service.connectBrowser(t.Context(), protocol.WorkspaceBrowserConnectParams{ConversationID: "conversation", SessionID: "session", RelayToken: strings.Repeat("t", 43)})
 	assert.ErrorContains(t, err, "require https")
+}
+
+func TestRunManifestListsBrowserOnlyWithServerGrant(t *testing.T) {
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	service := newRegisteredTestService(t, t.TempDir(), ServiceOptions{
+		Browser: browser.Config{Executable: "/not/an/installed/browser"},
+		ConfigLoader: func(string) (llmtypes.Config, error) {
+			return llmtypes.Config{
+				Skills:            &llmtypes.SkillsConfig{Enabled: false},
+				ExtensionSettings: map[string]any{"enabled": false},
+			}, nil
+		},
+	})
+	for _, grant := range []bool{false, true} {
+		runID := fmt.Sprintf("grant-%t", grant)
+		opened := callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+			RunID: runID, ConversationID: runID, EnvironmentReload: true, BrowserEnabled: grant,
+		})
+		// Reload rebuilds from the stored open params, so it must keep honoring the grant.
+		reloaded := callService[runnerpayload.RunReloadResult](t, service, protocol.MethodRunReload, protocol.RunReloadParams{
+			RunID: runID, ExpectedEnvironmentRevision: opened.EnvironmentRevision,
+		})
+		require.Empty(t, reloaded.Refusal)
+		assert.Equal(t, grant, slices.Contains(manifestToolNames(opened), "browser"))
+		assert.Equal(t, grant, slices.Contains(manifestToolNames(reloaded.Manifest), "browser"))
+		callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: runID})
+	}
 }

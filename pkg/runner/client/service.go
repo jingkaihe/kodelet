@@ -1112,6 +1112,12 @@ func (s *Service) initializeRunEnvironment(ctx context.Context, run *activeRun, 
 	if err != nil {
 		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to open runner environment")
 	}
+	if !params.BrowserEnabled {
+		// Without the server's grant the run never sees the browser, so every digest of its manifest agrees.
+		localManifest.Tools = slices.DeleteFunc(slices.Clone(localManifest.Tools), func(tool agentenv.ToolDefinition) bool {
+			return tool.Name == "browser"
+		})
+	}
 	manifest, err := buildWireManifest(localManifest, config, runtime, runnerID, run.id, generation, params.ReservedToolNames)
 	if err != nil {
 		return runnerpayload.Manifest{}, err
