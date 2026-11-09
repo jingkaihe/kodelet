@@ -67,8 +67,11 @@ func detectUserAgent(ctx context.Context, executable string) (string, error) {
 
 // launchUserAgent returns the cached user agent, or "" to keep Chrome's default. Canceled and timed-out probes are not cached.
 func (m *Manager) launchUserAgent(ctx context.Context, executable string) string {
-	m.userAgentMu.Lock()
-	defer m.userAgentMu.Unlock()
+	// A canceled launch stops waiting for another launch's probe instead of blocking until it finishes.
+	if err := m.userAgentGate.Acquire(ctx, 1); err != nil {
+		return ""
+	}
+	defer m.userAgentGate.Release(1)
 	if m.userAgentProbed {
 		return m.userAgent
 	}

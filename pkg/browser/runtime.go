@@ -21,6 +21,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/pkg/errors"
+	"golang.org/x/sync/semaphore"
 )
 
 const (
@@ -91,7 +92,8 @@ type Manager struct {
 	closeOnce sync.Once
 	closeErr  error
 
-	userAgentMu     sync.Mutex
+	// userAgentGate serializes the version probe and protects its result; unlike a mutex, waiters honor cancellation.
+	userAgentGate   *semaphore.Weighted
 	userAgentProbed bool
 	userAgent       string
 }
@@ -132,7 +134,13 @@ func NewManager(ctx context.Context, config Config) *Manager {
 	if config.IdleTimeout <= 0 {
 		config.IdleTimeout = defaultIdleTimeout
 	}
-	m := &Manager{ctx: ctx, cancel: cancel, config: config, sessions: make(map[Scope]*session)}
+	m := &Manager{
+		ctx:           ctx,
+		cancel:        cancel,
+		config:        config,
+		sessions:      make(map[Scope]*session),
+		userAgentGate: semaphore.NewWeighted(1),
+	}
 	go func() {
 		<-ctx.Done()
 		_ = m.Close()

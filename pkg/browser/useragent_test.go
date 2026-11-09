@@ -135,3 +135,35 @@ fi`)
 	require.NoError(t, err)
 	assert.Equal(t, want, m.launchUserAgent(t.Context(), config.Executable))
 }
+
+func TestCanceledLaunchStopsWaitingForAnotherProbe(t *testing.T) {
+	config, _ := fakeBrowserConfig(t)
+	dir := t.TempDir()
+	started, release := filepath.Join(dir, "started"), filepath.Join(dir, "release")
+	config = wrapFakeBrowser(t, config, `if [ "$1" = "--version" ]; then
+  : > '`+started+`'
+  while [ ! -e '`+release+`' ]; do sleep 0.01; done
+fi`)
+	m := testManager(t, config)
+	first := make(chan string, 1)
+	go func() { first <- m.launchUserAgent(t.Context(), config.Executable) }()
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(started)
+		return err == nil
+	}, 5*time.Second, 10*time.Millisecond)
+
+	waiting, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	assert.Empty(t, m.launchUserAgent(waiting, config.Executable))
+	select {
+	case <-first:
+		require.FailNow(t, "the canceled launch waited for the probe to finish")
+	default:
+	}
+
+	require.NoError(t, os.WriteFile(release, nil, 0o600))
+	want, err := reducedUserAgent(runtime.GOOS, 156)
+	require.NoError(t, err)
+	assert.Equal(t, want, <-first)
+	assert.Equal(t, want, m.launchUserAgent(t.Context(), config.Executable), "the probe result is cached")
+}
