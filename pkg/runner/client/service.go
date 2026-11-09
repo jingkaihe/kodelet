@@ -165,6 +165,7 @@ type activeRun struct {
 	commandAllowedTools    []string
 	commandAllowedCommands []string
 	browserEnabled         bool
+	withheldBrowser        bool // The manifest omits the browser tool that idle probes list; protected by Service.mu.
 	config                 llmtypes.Config
 	runtime                *extensions.Runtime
 	instance               ExecutionInstance
@@ -816,7 +817,8 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		s.workspaceSessionLeases[params.ConversationID] = time.Time{}
 	}
 	s.activateBackgroundTasksLocked(run)
-	if workingDirectory == s.workspace && params.Agent.Profile == "" && variant == "" && params.Options == nil {
+	// Idle probes list the browser regardless of grants, so only a manifest that kept it can stand in for them.
+	if !run.withheldBrowser && workingDirectory == s.workspace && params.Agent.Profile == "" && variant == "" && params.Options == nil {
 		s.lastManifestDigest = wireManifest.Digest
 	}
 	s.mu.Unlock()
@@ -994,9 +996,10 @@ func (s *Service) reloadRun(ctx context.Context, params protocol.RunReloadParams
 	run.runtime = candidate.runtime
 	run.config = candidate.config
 	run.manifest = manifest
+	run.withheldBrowser = candidate.withheldBrowser
 	run.codeAllowedTools = nil
 	s.activateBackgroundTasksLocked(run)
-	if resources.workingDirectory == s.workspace && openParams.Agent.Profile == "" && resources.variant == "" && openParams.Options == nil {
+	if !run.withheldBrowser && resources.workingDirectory == s.workspace && openParams.Agent.Profile == "" && resources.variant == "" && openParams.Options == nil {
 		s.lastManifestDigest = manifest.Digest
 	}
 	committed = true
@@ -1112,12 +1115,18 @@ func (s *Service) initializeRunEnvironment(ctx context.Context, run *activeRun, 
 	if err != nil {
 		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to open runner environment")
 	}
+	withheldBrowser := false
 	if !params.BrowserEnabled {
 		// Without the server's grant the run never sees the browser, so every digest of its manifest agrees.
-		localManifest.Tools = slices.DeleteFunc(slices.Clone(localManifest.Tools), func(tool agentenv.ToolDefinition) bool {
+		visibleTools := slices.DeleteFunc(slices.Clone(localManifest.Tools), func(tool agentenv.ToolDefinition) bool {
 			return tool.Name == "browser"
 		})
+		withheldBrowser = len(visibleTools) != len(localManifest.Tools)
+		localManifest.Tools = visibleTools
 	}
+	s.mu.Lock()
+	run.withheldBrowser = withheldBrowser
+	s.mu.Unlock()
 	manifest, err := buildWireManifest(localManifest, config, runtime, runnerID, run.id, generation, params.ReservedToolNames)
 	if err != nil {
 		return runnerpayload.Manifest{}, err

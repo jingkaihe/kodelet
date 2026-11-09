@@ -520,9 +520,10 @@ func TestBrowserRunnerRelayRejectsInvalidTicketAndEndpoint(t *testing.T) {
 	assert.ErrorContains(t, err, "require https")
 }
 
-func TestRunManifestListsBrowserOnlyWithServerGrant(t *testing.T) {
+func newBrowserGrantTestService(t *testing.T) *Service {
+	t.Helper()
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
-	service := newRegisteredTestService(t, t.TempDir(), ServiceOptions{
+	return newRegisteredTestService(t, t.TempDir(), ServiceOptions{
 		Browser: browser.Config{Executable: "/not/an/installed/browser"},
 		ConfigLoader: func(string) (llmtypes.Config, error) {
 			return llmtypes.Config{
@@ -531,6 +532,10 @@ func TestRunManifestListsBrowserOnlyWithServerGrant(t *testing.T) {
 			}, nil
 		},
 	})
+}
+
+func TestRunManifestListsBrowserOnlyWithServerGrant(t *testing.T) {
+	service := newBrowserGrantTestService(t)
 	for _, grant := range []bool{false, true} {
 		runID := fmt.Sprintf("grant-%t", grant)
 		opened := callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
@@ -543,6 +548,28 @@ func TestRunManifestListsBrowserOnlyWithServerGrant(t *testing.T) {
 		require.Empty(t, reloaded.Refusal)
 		assert.Equal(t, grant, slices.Contains(manifestToolNames(opened), "browser"))
 		assert.Equal(t, grant, slices.Contains(manifestToolNames(reloaded.Manifest), "browser"))
+		callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: runID})
+	}
+}
+
+func TestUngrantedRunKeepsIdleManifestDigest(t *testing.T) {
+	service := newBrowserGrantTestService(t)
+	idle, err := service.ProbeManifestDigest(t.Context())
+	require.NoError(t, err)
+	for _, grant := range []bool{false, true} {
+		runID := fmt.Sprintf("grant-%t", grant)
+		opened := callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+			RunID: runID, ConversationID: runID, EnvironmentReload: true, BrowserEnabled: grant,
+		})
+		assert.Equal(t, grant, opened.Digest == idle, "only a granted run matches the idle probe")
+		// Heartbeats and busy manifest checks advertise this digest, so a withheld browser must not replace it.
+		_, _, advertised := service.HeartbeatSnapshotRuns()
+		assert.Equal(t, idle, advertised)
+		callService[runnerpayload.RunReloadResult](t, service, protocol.MethodRunReload, protocol.RunReloadParams{
+			RunID: runID, ExpectedEnvironmentRevision: opened.EnvironmentRevision,
+		})
+		_, _, advertised = service.HeartbeatSnapshotRuns()
+		assert.Equal(t, idle, advertised)
 		callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: runID})
 	}
 }
