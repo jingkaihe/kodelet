@@ -14,7 +14,8 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 )
 
-const versionProbeTimeout = 5 * time.Second
+// versionProbeTimeout bounds Chrome's --version; tests shorten it.
+var versionProbeTimeout = 5 * time.Second
 
 var chromeVersionPattern = regexp.MustCompile(`\b(\d+)\.\d+\.\d+\.\d+\b`)
 
@@ -45,11 +46,15 @@ func parseChromeMajorVersion(output string) (int, error) {
 }
 
 func detectUserAgent(ctx context.Context, executable string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, versionProbeTimeout)
+	probeCtx, cancel := context.WithTimeout(ctx, versionProbeTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, executable, "--version")
+	cmd := exec.CommandContext(probeCtx, executable, "--version")
 	cmd.WaitDelay = processGracePeriod
 	output, err := cmd.Output()
+	if probeErr := probeCtx.Err(); probeErr != nil {
+		// A killed probe reports only its exit status, so surface why it was killed.
+		return "", errors.Wrap(probeErr, "Chrome version probe did not finish")
+	}
 	if err != nil {
 		return "", errors.Wrap(err, "failed to read Chrome version")
 	}
@@ -60,7 +65,7 @@ func detectUserAgent(ctx context.Context, executable string) (string, error) {
 	return reducedUserAgent(runtime.GOOS, major)
 }
 
-// launchUserAgent returns the cached user agent, or "" to keep Chrome's default. Canceled probes are not cached.
+// launchUserAgent returns the cached user agent, or "" to keep Chrome's default. Canceled and timed-out probes are not cached.
 func (m *Manager) launchUserAgent(ctx context.Context, executable string) string {
 	m.userAgentMu.Lock()
 	defer m.userAgentMu.Unlock()
@@ -73,6 +78,10 @@ func (m *Manager) launchUserAgent(ctx context.Context, executable string) string
 	}
 	if err != nil {
 		logger.G(ctx).WithError(err).Warn("could not determine browser version; keeping the default user agent")
+		if errors.Is(err, context.DeadlineExceeded) {
+			// A slow cold start may answer in time on the next launch.
+			return ""
+		}
 	}
 	m.userAgent, m.userAgentProbed = userAgent, true
 	return userAgent

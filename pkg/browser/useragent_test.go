@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -113,6 +114,24 @@ func TestCanceledVersionProbeIsNotCached(t *testing.T) {
 	cancel()
 	assert.Empty(t, m.launchUserAgent(canceled, config.Executable))
 	want, err := reducedUserAgent(runtime.GOOS, 156)
+	require.NoError(t, err)
+	assert.Equal(t, want, m.launchUserAgent(t.Context(), config.Executable))
+}
+
+func TestTimedOutVersionProbeIsRetried(t *testing.T) {
+	original := versionProbeTimeout
+	versionProbeTimeout = 500 * time.Millisecond
+	t.Cleanup(func() { versionProbeTimeout = original })
+	config, _ := fakeBrowserConfig(t)
+	slowOnce := filepath.Join(t.TempDir(), "slow-once")
+	// The retry answers from the shell so it does not wait on the helper binary's startup.
+	config = wrapFakeBrowser(t, config, `if [ "$1" = "--version" ]; then
+  if [ ! -e '`+slowOnce+`' ]; then : > '`+slowOnce+`'; exec sleep 5; fi
+  echo 'Chromium 157.0.1.2'; exit 0
+fi`)
+	m := testManager(t, config)
+	assert.Empty(t, m.launchUserAgent(t.Context(), config.Executable))
+	want, err := reducedUserAgent(runtime.GOOS, 157)
 	require.NoError(t, err)
 	assert.Equal(t, want, m.launchUserAgent(t.Context(), config.Executable))
 }
