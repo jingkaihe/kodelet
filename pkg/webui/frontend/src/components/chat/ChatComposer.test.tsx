@@ -212,6 +212,30 @@ describe('ChatComposer', () => {
     expect(textarea.style.overflowY).toBe('');
   });
 
+  it('clears retained editor sizing before checking whether an empty draft fits', () => {
+    const composer = renderComposer();
+    const textarea = screen.getByTestId('composer-textarea');
+
+    textarea.style.height = '208px';
+    textarea.style.overflowY = 'auto';
+    textarea.scrollTop = 120;
+    Object.defineProperties(textarea, {
+      clientHeight: {
+        configurable: true,
+        get: () => Number.parseFloat(textarea.style.height) || 44,
+      },
+      scrollHeight: { configurable: true, get: () => textarea.clientHeight },
+    });
+
+    composer.rerenderComposer({ draft: '' });
+
+    expect(textarea.parentElement).not.toHaveClass('is-multiline');
+    expect(textarea.style.height).toBe('');
+    expect(textarea.style.overflowY).toBe('');
+    expect(textarea.scrollTop).toBe(0);
+    expect(textarea.clientHeight).toBe(44);
+  });
+
   it('fits a wrapped empty placeholder and shrinks when it fits on one line again', () => {
     const composer = renderComposer({ draft: '', placeholder: 'A long placeholder that wraps…' });
     const textarea = screen.getByTestId('composer-textarea');
@@ -236,7 +260,8 @@ describe('ChatComposer', () => {
       composer.rerenderComposer({ draft: '', placeholder: 'Ask anything…' });
 
       expect(textarea.parentElement).not.toHaveClass('is-multiline');
-      expect(textarea.style.height).toBe('44px');
+      expect(textarea.style.height).toBe('');
+      expect(textarea.clientHeight).toBe(44);
     } finally {
       computedStyles.mockRestore();
     }

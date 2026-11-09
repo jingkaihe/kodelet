@@ -135,6 +135,15 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
       return;
     }
 
+    if (!draft) {
+      // Start empty drafts from the CSS baseline, not the previous draft's scroll box.
+      // Otherwise the fit shortcut can preserve an oversized editor after submission.
+      controlGrid.classList.remove('is-multiline');
+      editor.style.height = '';
+      editor.style.overflowY = '';
+      editor.scrollTop = 0;
+    }
+
     const hasExplicitLineBreak = draft.includes('\n');
     const singleLineDraftStillFits =
       !hasExplicitLineBreak &&
@@ -142,6 +151,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
       editor.clientHeight > 0 &&
       editor.scrollHeight <= editor.clientHeight + 1;
     if (singleLineDraftStillFits) {
+      setMultiline(false);
       return;
     }
 

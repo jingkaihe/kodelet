@@ -32,6 +32,10 @@ const InteractiveComposer = (args: ChatComposerStoryProps) => {
         void args.onAttachImages(files);
       }}
       onDraftChange={setDraft}
+      onSubmit={async () => {
+        await args.onSubmit();
+        setDraft('');
+      }}
       onRemoveAttachment={(attachmentId) => {
         setAttachments((currentAttachments) =>
           currentAttachments.filter((attachment) => attachment.id !== attachmentId)
@@ -274,6 +278,39 @@ export const WithDictation: Story = {
 export const Multiline: Story = {
   args: {
     draft: 'Review these points:\n- mobile layout\n- terminal behavior',
+  },
+};
+
+export const ShrinksAfterSubmission: Story = {
+  args: {
+    draft: Array.from({ length: 20 }, (_, index) => `Review point ${index + 1}`).join('\n'),
+  },
+  play: async (context) => {
+    await context.canvasElement.ownerDocument.fonts.ready;
+    const canvas = within(context.canvasElement);
+    const editor = canvas.getByTestId<HTMLTextAreaElement>('composer-textarea');
+    await userEvent.type(editor, '{End}{Enter}One more point');
+    const expandedHeight = editor.clientHeight;
+    expect(editor.parentElement).toHaveClass('is-multiline');
+
+    await userEvent.click(canvas.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(editor).toHaveValue('');
+      expect(editor.parentElement).not.toHaveClass('is-multiline');
+      expect(editor.clientHeight).toBeLessThan(expandedHeight);
+      expect(editor.clientHeight).toBeCloseTo(
+        Number.parseFloat(getComputedStyle(editor).minHeight),
+        0
+      );
+    });
+
+    await userEvent.type(editor, 'Next message');
+    expect(editor.parentElement).not.toHaveClass('is-multiline');
+    expect(editor.clientHeight).toBeCloseTo(
+      Number.parseFloat(getComputedStyle(editor).minHeight),
+      0
+    );
   },
 };
 
