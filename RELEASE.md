@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.8.26-beta
+
+Improved built-in browser compatibility with sites that reject headless Chrome by using a desktop user agent matching the installed browser's major version and platform.
+
+Fixed code-mode tool execution failures caused by manifest digest mismatches when browser access is not granted, including after resource reloads.
+
+Fixed the Web UI composer remaining oversized after sending or clearing multiline text, and restored the compact layout when text fits on one line.
+
 ## 0.8.25-beta
 
 Added a searchable Tools tab to About Kodelet in the TUI and Web UI, listing built-in tools, plugins, extensions, and skills for the selected workspace and profiles. The inventory shows descriptions, installation paths, global or local scope, disabled items, and extension startup failures without starting a model turn.
