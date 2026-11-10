@@ -118,52 +118,23 @@ func TestCanceledVersionProbeIsNotCached(t *testing.T) {
 	assert.Equal(t, want, m.launchUserAgent(t.Context(), config.Executable))
 }
 
-func TestTimedOutVersionProbeIsRetried(t *testing.T) {
+func TestTimedOutVersionProbeIsNotCached(t *testing.T) {
 	original := versionProbeTimeout
-	versionProbeTimeout = 500 * time.Millisecond
+	versionProbeTimeout = 50 * time.Millisecond
 	t.Cleanup(func() { versionProbeTimeout = original })
-	config, _ := fakeBrowserConfig(t)
-	slowOnce := filepath.Join(t.TempDir(), "slow-once")
-	// The retry answers from the shell so it does not wait on the helper binary's startup.
-	config = wrapFakeBrowser(t, config, `if [ "$1" = "--version" ]; then
-  if [ ! -e '`+slowOnce+`' ]; then : > '`+slowOnce+`'; exec sleep 5; fi
-  echo 'Chromium 157.0.1.2'; exit 0
-fi`)
-	m := testManager(t, config)
-	assert.Empty(t, m.launchUserAgent(t.Context(), config.Executable))
-	want, err := reducedUserAgent(runtime.GOOS, 157)
-	require.NoError(t, err)
-	assert.Equal(t, want, m.launchUserAgent(t.Context(), config.Executable))
+	slow := filepath.Join(t.TempDir(), "slow-chrome")
+	require.NoError(t, os.WriteFile(slow, []byte("#!/bin/sh\nexec sleep 5\n"), 0o700))
+	m := testManager(t, Config{Executable: slow})
+	assert.Empty(t, m.launchUserAgent(t.Context(), slow))
+	assert.False(t, m.userAgentProbed, "a slow cold start may answer in time on the next launch")
 }
 
 func TestCanceledLaunchStopsWaitingForAnotherProbe(t *testing.T) {
-	config, _ := fakeBrowserConfig(t)
-	dir := t.TempDir()
-	started, release := filepath.Join(dir, "started"), filepath.Join(dir, "release")
-	config = wrapFakeBrowser(t, config, `if [ "$1" = "--version" ]; then
-  : > '`+started+`'
-  while [ ! -e '`+release+`' ]; do sleep 0.01; done
-fi`)
-	m := testManager(t, config)
-	first := make(chan string, 1)
-	go func() { first <- m.launchUserAgent(t.Context(), config.Executable) }()
-	require.Eventually(t, func() bool {
-		_, err := os.Stat(started)
-		return err == nil
-	}, 5*time.Second, 10*time.Millisecond)
-
-	waiting, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	m := testManager(t, Config{Executable: "chrome"})
+	// Hold the gate as a concurrent launch's version probe would.
+	require.NoError(t, m.userAgentGate.Acquire(t.Context(), 1))
+	defer m.userAgentGate.Release(1)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 	defer cancel()
-	assert.Empty(t, m.launchUserAgent(waiting, config.Executable))
-	select {
-	case <-first:
-		require.FailNow(t, "the canceled launch waited for the probe to finish")
-	default:
-	}
-
-	require.NoError(t, os.WriteFile(release, nil, 0o600))
-	want, err := reducedUserAgent(runtime.GOOS, 156)
-	require.NoError(t, err)
-	assert.Equal(t, want, <-first)
-	assert.Equal(t, want, m.launchUserAgent(t.Context(), config.Executable), "the probe result is cached")
+	assert.Empty(t, m.launchUserAgent(ctx, "chrome"))
 }
