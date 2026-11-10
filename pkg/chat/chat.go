@@ -1377,7 +1377,8 @@ func snapshotBaseConfig(ctx context.Context, snapshot *llmtypes.ConversationConf
 }
 
 // ConversationReasoningEffortOptions lists efforts for a conversation's next
-// turn, or nil for legacy conversations without a config snapshot.
+// turn, or nil for legacy conversations without a config snapshot. Extension
+// profiles need the caller's profile resolver installed in ctx.
 func ConversationReasoningEffortOptions(ctx context.Context, record *conversationservice.GetConversationResponse) []string {
 	if record == nil {
 		return nil
@@ -1386,8 +1387,14 @@ func ConversationReasoningEffortOptions(ctx context.Context, record *conversatio
 	if err != nil || !hasSnapshot {
 		return nil
 	}
+	base, policy, err := snapshotBaseConfig(ctx, snapshot)
+	if err != nil {
+		// Without the live policy, offer nothing the next turn might reject.
+		effort, _ := llmtypes.NormalizeReasoningEffort(snapshot.ReasoningEffort)
+		return []string{effort}
+	}
 	var allowed []string
-	if base, policy, err := snapshotBaseConfig(ctx, snapshot); err == nil && policy {
+	if policy {
 		allowed = base.AllowedReasoningEfforts
 	}
 	return llmtypes.ResumeReasoningEffortOptions(snapshot.Provider, snapshot.ReasoningEffort, allowed)

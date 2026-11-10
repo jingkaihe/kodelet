@@ -387,3 +387,34 @@ func TestProfileRegisteringControllerReloadRegistersProfilesOrStopsRun(t *testin
 		})
 	}
 }
+
+func TestConversationReasoningEffortOptionsUseCallersExtensionProfile(t *testing.T) {
+	server := newRunnerTestServer(t, "")
+	alice := contextWithPrincipal(t.Context(), administrativePrincipal("alice"))
+	runner, err := server.runnerRegistry.Register(protocol.RegisterParams{
+		ProtocolVersions: []int{protocol.Version},
+		Host:             protocol.Host{InstanceID: "one", Hostname: "one", OS: "linux", Arch: "amd64"},
+		Workspace:        protocol.Workspace{Path: "/workspace", Name: "workspace"},
+	}, newRunnerAPITestLink())
+	require.NoError(t, err)
+	profile := extensions.Profile{
+		Name: "code-search", ExtensionID: "skills/code-search", Hidden: true,
+		Options: llmtypes.ProfileConfig{
+			"provider": "openai", "model": "copilot-private-model", "reasoning_effort": "high",
+			"allowed_reasoning_efforts": []string{"medium", "high"},
+			"openai":                    map[string]any{"platform": "copilot"},
+		},
+	}
+	manifest := runnerpayload.Manifest{RunnerID: runner.RunnerID, Generation: runner.Generation, Profiles: []extensions.Profile{profile}}
+	require.NoError(t, server.registerExtensionProfiles(alice, manifest))
+	config, err := server.resolveModelProfile(alice, runner.RunnerID, profile.Name, "")
+	require.NoError(t, err)
+	metadata, err := conversations.AddConfigSnapshot(nil, config)
+	require.NoError(t, err)
+	record := &conversations.GetConversationResponse{ID: "conv", Provider: "openai", Metadata: metadata}
+
+	assert.Equal(t, []string{"medium", "high"}, server.conversationReasoningEffortOptions(alice, record, runner.RunnerID))
+	bob := contextWithPrincipal(t.Context(), administrativePrincipal("bob"))
+	assert.Equal(t, []string{"high"}, server.conversationReasoningEffortOptions(bob, record, runner.RunnerID),
+		"an unresolvable extension policy offers only the current effort")
+}

@@ -1720,28 +1720,25 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 
 	// Convert to web response format
 
-	reasoningEffortOptions := chat.ConversationReasoningEffortOptions(ctx, response)
 	webResponse := &WebConversationResponse{
-		ID:                     response.ID,
-		ParentConversationID:   conversationtypes.ParentConversationIDFromMetadata(response.Metadata),
-		CreatedAt:              response.CreatedAt,
-		UpdatedAt:              response.UpdatedAt,
-		Provider:               providerLabel,
-		Model:                  resolveConversationModel(response.Metadata),
-		CWD:                    response.CWD,
-		CWDLocked:              response.ID != "" && strings.TrimSpace(response.CWD) != "",
-		Profile:                resolveConversationProfile(response.Metadata),
-		ProfileLocked:          response.ID != "",
-		ReasoningEffort:        resolveConversationReasoningEffort(response),
-		ReasoningEffortOptions: reasoningEffortOptions,
-		ReasoningEffortLocked:  len(reasoningEffortOptions) < 2,
-		Summary:                response.Summary,
-		IsRunning:              s.isActiveChat(response.ID),
-		Usage:                  response.Usage.ForDisplay(),
-		Messages:               webMessages,
-		PendingSteer:           pendingSteer,
-		ToolResults:            response.ToolResults,
-		MessageCount:           len(webMessages),
+		ID:                   response.ID,
+		ParentConversationID: conversationtypes.ParentConversationIDFromMetadata(response.Metadata),
+		CreatedAt:            response.CreatedAt,
+		UpdatedAt:            response.UpdatedAt,
+		Provider:             providerLabel,
+		Model:                resolveConversationModel(response.Metadata),
+		CWD:                  response.CWD,
+		CWDLocked:            response.ID != "" && strings.TrimSpace(response.CWD) != "",
+		Profile:              resolveConversationProfile(response.Metadata),
+		ProfileLocked:        response.ID != "",
+		ReasoningEffort:      resolveConversationReasoningEffort(response),
+		Summary:              response.Summary,
+		IsRunning:            s.isActiveChat(response.ID),
+		Usage:                response.Usage.ForDisplay(),
+		Messages:             webMessages,
+		PendingSteer:         pendingSteer,
+		ToolResults:          response.ToolResults,
+		MessageCount:         len(webMessages),
 	}
 	if s.runnerRegistry != nil {
 		affinity, ok, affinityErr := s.runnerRegistry.ResolveConversationAffinity(ctx, response.ID)
@@ -1757,8 +1754,20 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	webResponse.ReasoningEffortOptions = s.conversationReasoningEffortOptions(ctx, response, webResponse.RunnerID)
+	webResponse.ReasoningEffortLocked = len(webResponse.ReasoningEffortOptions) < 2
 
 	s.writeJSONResponse(w, webResponse)
+}
+
+// conversationReasoningEffortOptions resolves extension profiles the caller
+// registered on the conversation's runner, as turns do, but without discovery.
+func (s *Server) conversationReasoningEffortOptions(ctx context.Context, response *conversations.GetConversationResponse, runnerID string) []string {
+	lookupCtx := ctx
+	ctx = chat.ContextWithProfileResolver(ctx, func(profile, effort string) (llmtypes.Config, error) {
+		return s.resolveModelProfile(lookupCtx, runnerID, profile, effort)
+	})
+	return chat.ConversationReasoningEffortOptions(ctx, response)
 }
 
 func (s *Server) writeConversationHistoryResponse(w http.ResponseWriter, r *http.Request, response *conversations.GetConversationResponse) {
@@ -1772,18 +1781,17 @@ func (s *Server) writeConversationHistoryResponse(w http.ResponseWriter, r *http
 		return
 	}
 	history := conversationHistoryResponse{
-		ParentConversationID:   conversationtypes.ParentConversationIDFromMetadata(response.Metadata),
-		ID:                     response.ID,
-		UpdatedAt:              response.UpdatedAt,
-		Provider:               response.Provider,
-		Model:                  resolveConversationModel(response.Metadata),
-		CWD:                    response.CWD,
-		Profile:                resolveConversationProfile(response.Metadata),
-		ReasoningEffort:        resolveConversationReasoningEffort(response),
-		ReasoningEffortOptions: chat.ConversationReasoningEffortOptions(r.Context(), response),
-		Summary:                response.Summary,
-		Usage:                  response.Usage.ForDisplay(),
-		Entries:                entries,
+		ParentConversationID: conversationtypes.ParentConversationIDFromMetadata(response.Metadata),
+		ID:                   response.ID,
+		UpdatedAt:            response.UpdatedAt,
+		Provider:             response.Provider,
+		Model:                resolveConversationModel(response.Metadata),
+		CWD:                  response.CWD,
+		Profile:              resolveConversationProfile(response.Metadata),
+		ReasoningEffort:      resolveConversationReasoningEffort(response),
+		Summary:              response.Summary,
+		Usage:                response.Usage.ForDisplay(),
+		Entries:              entries,
 	}
 	if s.runnerRegistry != nil {
 		affinity, ok, affinityErr := s.runnerRegistry.ResolveConversationAffinity(r.Context(), response.ID)
@@ -1796,6 +1804,7 @@ func (s *Server) writeConversationHistoryResponse(w http.ResponseWriter, r *http
 			history.EnvironmentProfile = affinity.EnvironmentProfile
 		}
 	}
+	history.ReasoningEffortOptions = s.conversationReasoningEffortOptions(r.Context(), response, history.RunnerID)
 	s.writeJSONResponse(w, history)
 }
 
