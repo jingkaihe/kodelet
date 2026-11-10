@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { ChatSettings } from '../types';
+import type { ChatRequest, ChatSettings } from '../types';
 import {
   ChatPage,
   flushAsyncUpdates,
@@ -21,6 +21,17 @@ import {
   setRouteParams,
   setupChatPageTests,
 } from './ChatPage.testSupport';
+
+const realtimeOptions = vi.hoisted(() => ({ chat: undefined as ChatRequest | undefined }));
+vi.mock('../features/chat/useRealtime', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../features/chat/useRealtime')>();
+  return {
+    useRealtime: (options: Parameters<typeof original.useRealtime>[0]) => {
+      realtimeOptions.chat = options.chat;
+      return original.useRealtime(options);
+    },
+  };
+});
 
 describe('ChatPage model and reasoning settings', () => {
   setupChatPageTests();
@@ -824,6 +835,7 @@ describe('ChatPage model and reasoning settings', () => {
     const saved = await screen.findByTestId('composer-saved-context');
     expect(saved).toHaveTextContent(/^work\/gpt-5 · high$/);
     expect(screen.queryByRole('combobox', { name: 'Model quick pick' })).not.toBeInTheDocument();
+    expect(realtimeOptions.chat?.reasoningEffort).toBeUndefined();
 
     fireEvent.click(screen.getByRole('combobox', { name: 'Reasoning effort quick pick' }));
     const effortList = screen.getByRole('listbox', { name: 'Reasoning effort quick pick' });
@@ -834,6 +846,10 @@ describe('ChatPage model and reasoning settings', () => {
     ).toEqual(['low', 'medium', 'high']);
     fireEvent.click(within(effortList).getByRole('option', { name: 'low' }));
     expect(saved).toHaveTextContent(/^work\/gpt-5 · low$/);
+    expect(realtimeOptions.chat).toMatchObject({
+      conversationId: 'conv-123',
+      reasoningEffort: 'low',
+    });
 
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'continue' },

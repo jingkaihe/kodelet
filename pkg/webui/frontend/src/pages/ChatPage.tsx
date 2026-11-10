@@ -1209,6 +1209,8 @@ const ChatPage: React.FC = () => {
     chat: {
       message: '',
       conversationId: sessionConversationId,
+      // Voice turns honour a saved conversation's unsent effort pick, like typed turns.
+      reasoningEffort: conversationId ? reasoningEffortChoices[conversationId] : undefined,
       ...(!conversationId && {
         runnerId: selectedRunnerID || undefined,
         environmentProfile: selectedEnvironmentProfile || undefined,
