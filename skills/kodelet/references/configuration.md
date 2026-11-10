@@ -147,7 +147,7 @@ Model fields, including weak-model settings, token limits, reasoning settings, a
 
 Pickers display plain profile names and indicate the current selection without a default label. Changing `profile:` does not change an explicitly selected profile's model settings. Restart the daemon after changing its configuration; existing conversations retain their saved model configuration. `kodelet setup` generates named `openai` and `anthropic` profiles and selects `openai`.
 
-`allowed_reasoning_efforts` defines the ordered reasoning-effort choices available for new conversations in the TUI and Web UI. When omitted or empty, all efforts supported by the configured provider are available.
+`allowed_reasoning_efforts` defines the ordered reasoning-effort choices available in the TUI and Web UI, both for new conversations and when switching effort between turns of an existing one. When omitted or empty, all efforts supported by the configured provider are available. An existing conversation can always keep its current effort, even if the list no longer includes it.
 
 Profile definitions support `hidden: true` to omit them from normal pickers without preventing explicit selection. Extensions can [register self-contained profiles](sdk.md#registered-model-profiles) using ordinary configuration keys and built-in defaults, without editing daemon configuration.
 

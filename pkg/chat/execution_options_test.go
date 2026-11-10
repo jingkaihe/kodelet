@@ -476,11 +476,14 @@ func TestApplyExecutionOptionsSnapshotLock(t *testing.T) {
 		{MaxTokens: new(8192)},
 		{WeakModelMaxTokens: new(4096)},
 		{ThinkingBudgetTokens: new(0)},
-		{ReasoningEffort: new("high")},
+		{ReasoningEffort: new("high"), MaxTokens: new(8192)},
 	} {
 		_, err := applyExecutionOptions(base, options, record)
 		require.ErrorContains(t, err, "model settings cannot be changed")
 	}
+	switched, err := applyExecutionOptions(base, &llmtypes.ExecutionOptions{ReasoningEffort: new("high")}, record)
+	require.NoError(t, err, "reasoning effort may change between turns")
+	assert.Equal(t, "high", switched.ReasoningEffort)
 	unchanged := &llmtypes.ExecutionOptions{
 		Provider: new("anthropic"), Model: new("private-main"), WeakModel: new("private-weak"),
 		MaxTokens: new(4096), WeakModelMaxTokens: new(2048), ThinkingBudgetTokens: new(1024),

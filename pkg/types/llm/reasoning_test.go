@@ -267,3 +267,11 @@ func TestConversationConfigSnapshotPreservesUnsetOpenAITextVerbosity(t *testing.
 	require.NoError(t, err)
 	assert.NotContains(t, string(rawSnapshot), "text_verbosity")
 }
+
+func TestResumeReasoningEffortOptions(t *testing.T) {
+	assert.Equal(t, []string{"none", "low", "medium", "high", "xhigh", "max"}, ResumeReasoningEffortOptions("anthropic", "medium", nil))
+	assert.Equal(t, []string{"high", "low", "max"}, ResumeReasoningEffortOptions("anthropic", "max", []string{"HIGH", "minimal", "low"}),
+		"policy keeps its order, is filtered to provider support, and keeps the current effort")
+	assert.Equal(t, []string{"none", "low", "medium", "high", "xhigh", "max"}, ResumeReasoningEffortOptions("anthropic", "low", []string{"minimal"}),
+		"a policy with no supported efforts falls back to the provider's")
+}

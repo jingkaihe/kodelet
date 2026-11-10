@@ -165,8 +165,12 @@ func applyExecutionOptions(config llmtypes.Config, options *llmtypes.ExecutionOp
 	if err != nil {
 		return llmtypes.Config{}, err
 	}
-	if original != nil && !reflect.DeepEqual(original, updated) {
-		return llmtypes.Config{}, errors.New("model settings cannot be changed for this conversation; start a new conversation to change them")
+	if original != nil {
+		// Effort may change between turns; config resolution validated it.
+		updated.ReasoningEffort = original.ReasoningEffort
+		if !reflect.DeepEqual(original, updated) {
+			return llmtypes.Config{}, errors.New("model settings cannot be changed for this conversation; start a new conversation to change them")
+		}
 	}
 	return config, nil
 }

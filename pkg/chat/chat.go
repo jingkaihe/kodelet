@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -218,19 +219,20 @@ type ConversationSearchResults struct {
 
 // ConversationHistory is the client-facing persisted state needed to resume a conversation.
 type ConversationHistory struct {
-	ID                   string
-	ParentConversationID string
-	CWD                  string
-	Title                string
-	Provider             string
-	Model                string
-	Profile              string
-	ReasoningEffort      string
-	RunnerID             string
-	EnvironmentProfile   string
-	UpdatedAt            time.Time
-	Usage                llmtypes.Usage
-	Messages             []conversationservice.StreamableMessage
+	ID                     string
+	ParentConversationID   string
+	CWD                    string
+	Title                  string
+	Provider               string
+	Model                  string
+	Profile                string
+	ReasoningEffort        string
+	ReasoningEffortOptions []string
+	RunnerID               string
+	EnvironmentProfile     string
+	UpdatedAt              time.Time
+	Usage                  llmtypes.Usage
+	Messages               []conversationservice.StreamableMessage
 }
 
 // ExtensionRuntimeProvider supplies extension runtimes for chat turns.
@@ -1269,33 +1271,31 @@ func resolveConfigForExistingConversation(ctx context.Context, record *conversat
 			return llmtypes.Config{}, errors.Wrap(err, "failed to load the conversation's saved settings")
 		}
 		if hasSnapshot {
-			if strings.TrimSpace(requestedReasoningEffort) != "" {
-				requested, err := llmtypes.NormalizeReasoningEffort(requestedReasoningEffort)
-				if err != nil {
-					return llmtypes.Config{}, err
-				}
-				stored, err := llmtypes.NormalizeReasoningEffort(snapshot.ReasoningEffort)
-				if err != nil {
-					return llmtypes.Config{}, err
-				}
-				if requested != stored {
-					return llmtypes.Config{}, errors.Errorf("conversation reasoning_effort is locked to %q; cannot resume with %q", stored, requested)
-				}
-			}
-
-			profileName := NormalizeRequestedProfile(snapshot.Profile)
-			var config llmtypes.Config
-			if snapshot.ExtensionProfile {
-				config, err = extensionSnapshotBase(ctx, snapshot)
-			} else if profileName != "" && llm.HasConfiguredProfile(profileName) {
-				config, err = llm.GetConfigFromViperWithProfile(profileName)
-			} else {
-				config, err = llm.GetConfigFromViperWithoutProfile()
-			}
+			requested, err := llmtypes.NormalizeReasoningEffort(requestedReasoningEffort)
 			if err != nil {
 				return llmtypes.Config{}, err
 			}
-			return snapshot.Apply(config)
+			base, policy, err := snapshotBaseConfig(ctx, snapshot)
+			if err != nil {
+				return llmtypes.Config{}, err
+			}
+			var allowed []string
+			if policy {
+				allowed = slices.Clone(base.AllowedReasoningEfforts)
+			}
+			config, err := snapshot.Apply(base)
+			if err != nil {
+				return llmtypes.Config{}, err
+			}
+			// Effort may change between turns; the next save updates the snapshot.
+			if requested != "" && requested != config.ReasoningEffort {
+				options := llmtypes.ResumeReasoningEffortOptions(snapshot.Provider, snapshot.ReasoningEffort, allowed)
+				if !slices.Contains(options, requested) {
+					return llmtypes.Config{}, errors.Errorf("reasoning effort %q is not available for this conversation; choose one of: %s", requested, strings.Join(options, ", "))
+				}
+				config.ReasoningEffort = requested
+			}
+			return config, nil
 		}
 	}
 
@@ -1357,6 +1357,40 @@ func resolveConfigForExistingConversation(ctx context.Context, record *conversat
 
 func NormalizeRequestedProfile(profile string) string {
 	return strings.TrimSpace(profile)
+}
+
+// snapshotBaseConfig loads the live config a snapshot overlays; policy reports
+// whether its allowed_reasoning_efforts still apply to the conversation.
+func snapshotBaseConfig(ctx context.Context, snapshot *llmtypes.ConversationConfigSnapshot) (config llmtypes.Config, policy bool, err error) {
+	profileName := NormalizeRequestedProfile(snapshot.Profile)
+	switch {
+	case snapshot.ExtensionProfile:
+		config, err = extensionSnapshotBase(ctx, snapshot)
+		return config, true, err
+	case profileName != "" && llm.HasConfiguredProfile(profileName):
+		config, err = llm.GetConfigFromViperWithProfile(profileName)
+		return config, true, err
+	default:
+		config, err = llm.GetConfigFromViperWithoutProfile()
+		return config, profileName == "", err
+	}
+}
+
+// ConversationReasoningEffortOptions lists efforts for a conversation's next
+// turn, or nil for legacy conversations without a config snapshot.
+func ConversationReasoningEffortOptions(ctx context.Context, record *conversationservice.GetConversationResponse) []string {
+	if record == nil {
+		return nil
+	}
+	snapshot, hasSnapshot, err := conversationservice.ConfigSnapshotFromMetadata(record.Metadata)
+	if err != nil || !hasSnapshot {
+		return nil
+	}
+	var allowed []string
+	if base, policy, err := snapshotBaseConfig(ctx, snapshot); err == nil && policy {
+		allowed = base.AllowedReasoningEfforts
+	}
+	return llmtypes.ResumeReasoningEffortOptions(snapshot.Provider, snapshot.ReasoningEffort, allowed)
 }
 
 func NormalizeRequest(req ChatRequest) (string, []string, error) {

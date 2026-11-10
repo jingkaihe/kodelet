@@ -137,6 +137,7 @@ export interface Conversation {
   profile?: string;
   profileLocked?: boolean;
   reasoningEffort?: string;
+  reasoningEffortOptions?: string[];
   reasoningEffortLocked?: boolean;
   runnerId?: string;
   environmentProfile?: string;

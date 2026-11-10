@@ -849,6 +849,7 @@ func TestConfiguredChatRunnerAppliesPickedModelOverCLIOptions(t *testing.T) {
 	for _, test := range []struct {
 		name       string
 		cliOptions *llmtypes.ExecutionOptions
+		effort     string
 		want       *llmtypes.ExecutionOptions
 	}{
 		{
@@ -859,6 +860,12 @@ func TestConfiguredChatRunnerAppliesPickedModelOverCLIOptions(t *testing.T) {
 			name:       "CLI options are preserved and not mutated",
 			cliOptions: &llmtypes.ExecutionOptions{Model: new("central"), NoTools: new(false), NoSkills: new(true)},
 			want:       &llmtypes.ExecutionOptions{Model: new("picked-model"), NoTools: new(false), NoSkills: new(true)},
+		},
+		{
+			name:       "picked effort replaces the CLI effort",
+			cliOptions: &llmtypes.ExecutionOptions{ReasoningEffort: new("high")},
+			effort:     "low",
+			want:       &llmtypes.ExecutionOptions{Model: new("picked-model")},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -885,8 +892,9 @@ func TestConfiguredChatRunnerAppliesPickedModelOverCLIOptions(t *testing.T) {
 			require.NoError(t, err)
 			runner := &configuredChatRunner{Client: client, options: test.cliOptions.Clone()}
 			_, err = runner.Run(t.Context(), chatpkg.ChatRequest{
-				ConversationID: "saved",
-				Message:        "continue",
+				ConversationID:  "saved",
+				Message:         "continue",
+				ReasoningEffort: test.effort,
 				Options: &llmtypes.ExecutionOptions{
 					Model:   new("picked-model"),
 					NoTools: new(true),
@@ -894,6 +902,7 @@ func TestConfiguredChatRunnerAppliesPickedModelOverCLIOptions(t *testing.T) {
 			}, &remoteRunSink{output: io.Discard, diagnostics: io.Discard})
 			require.NoError(t, err)
 			assert.Equal(t, test.want, submitted.Options)
+			assert.Equal(t, test.effort, submitted.ReasoningEffort)
 			assert.Equal(t, test.cliOptions, runner.options, "selection must not mutate shared CLI defaults")
 		})
 	}

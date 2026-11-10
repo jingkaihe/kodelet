@@ -145,7 +145,7 @@ func TestResolveConfigForNewConversationReasoningOverrideRespectsPolicy(t *testi
 	require.ErrorContains(t, err, "not included in allowed_reasoning_efforts")
 }
 
-func TestResolveConfigForExistingConversationUsesSnapshotAndLocksReasoning(t *testing.T) {
+func TestResolveConfigForExistingConversationUsesSnapshot(t *testing.T) {
 	originalSettings := viper.AllSettings()
 	defer func() {
 		viper.Reset()
@@ -194,8 +194,10 @@ func TestResolveConfigForExistingConversationUsesSnapshotAndLocksReasoning(t *te
 	require.NotNil(t, config.OpenAI)
 	assert.Equal(t, llmtypes.OpenAIAPIModeResponses, config.OpenAI.APIMode)
 
-	_, err = ResolveConfigForExistingConversation(record, "low")
-	require.ErrorContains(t, err, "locked to \"max\"")
+	config, err = ResolveConfigForExistingConversation(record, "low")
+	require.NoError(t, err)
+	assert.Equal(t, "low", config.ReasoningEffort, "effort may change between turns")
+	assert.Equal(t, "persisted-model", config.Model)
 
 	delete(viper.GetStringMap("profiles"), "work")
 	viper.Set("profiles", map[string]any{})
@@ -728,4 +730,39 @@ func writeWebChatRecipe(t *testing.T, workspace, name, content string) {
 	recipeDir := filepath.Join(workspace, ".kodelet", "recipes")
 	require.NoError(t, os.MkdirAll(recipeDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(recipeDir, name+".md"), []byte(content), 0o644))
+}
+
+func TestExistingConversationReasoningEffortFollowsLiveProfilePolicy(t *testing.T) {
+	previous := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() { viper.Reset(); require.NoError(t, viper.MergeConfigMap(previous)) })
+	viper.Set("profiles", map[string]any{
+		"work": map[string]any{
+			"provider":                  "openai",
+			"model":                     "work-model",
+			"reasoning_effort":          "medium",
+			"allowed_reasoning_efforts": []string{"low", "medium", "high"},
+		},
+	})
+	metadata, err := conversations.AddConfigSnapshot(nil, llmtypes.Config{
+		Profile: "work", Provider: "openai", Model: "work-model", ReasoningEffort: "max",
+	})
+	require.NoError(t, err)
+	record := &conversations.GetConversationResponse{ID: "conv", Provider: "openai", Metadata: metadata}
+
+	assert.Equal(t, []string{"low", "medium", "high", "max"}, ConversationReasoningEffortOptions(t.Context(), record))
+	config, err := ResolveConfigForExistingConversation(record, "high")
+	require.NoError(t, err)
+	assert.Equal(t, "high", config.ReasoningEffort)
+	_, err = ResolveConfigForExistingConversation(record, "xhigh")
+	require.ErrorContains(t, err, "not available for this conversation")
+
+	legacy := &conversations.GetConversationResponse{ID: "legacy", Provider: "openai", Metadata: map[string]any{"profile": "work", "model": "work-model"}}
+	assert.Nil(t, ConversationReasoningEffortOptions(t.Context(), legacy))
+	_, err = ResolveConfigForExistingConversation(legacy, "high")
+	require.ErrorContains(t, err, "legacy conversation")
+
+	viper.Set("profiles", map[string]any{})
+	assert.Equal(t, []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}, ConversationReasoningEffortOptions(t.Context(), record),
+		"a removed profile's policy no longer applies")
 }

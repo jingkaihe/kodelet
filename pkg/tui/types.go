@@ -413,20 +413,21 @@ type conversationHistoryRefreshMsg struct {
 }
 
 type initialHistoryMsg struct {
-	conversationKey      string
-	conversationID       string
-	parentConversationID string
-	loaded               bool
-	entries              []chatEntry
-	usage                llmtypes.Usage
-	cwd                  string
-	title                string
-	updatedAt            time.Time
-	profile              string
-	provider             string
-	model                string
-	reasoningEffort      string
-	err                  error
+	conversationKey        string
+	conversationID         string
+	parentConversationID   string
+	loaded                 bool
+	entries                []chatEntry
+	usage                  llmtypes.Usage
+	cwd                    string
+	title                  string
+	updatedAt              time.Time
+	profile                string
+	provider               string
+	model                  string
+	reasoningEffort        string
+	reasoningEffortOptions []string
+	err                    error
 }
 
 type extensionLifecycleMsg struct {

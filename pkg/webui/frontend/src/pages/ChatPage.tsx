@@ -158,6 +158,7 @@ const ChatPage: React.FC = () => {
   const [streamError, setStreamError] = useState<string | null>(null);
   const [conversationStreamVersion, setConversationStreamVersion] = useState(0);
   const [steering, setSteering] = useState(false);
+  const [reasoningEffortChoices, setReasoningEffortChoices] = useState<Record<string, string>>({});
   const [queuedCommands, setQueuedCommands] = useState<Record<string, QueuedCommand[]>>({});
   const queuedCommandsRef = useRef(queuedCommands);
   const [resourceVersions, setResourceVersions] = useState<Record<string, number>>({});
@@ -1022,7 +1023,7 @@ const ChatPage: React.FC = () => {
     ? workspaceConversation?.model?.trim() || ''
     : selectedModel;
   const currentReasoningEffortLabel = conversationId
-    ? workspaceConversation?.reasoningEffort || ''
+    ? reasoningEffortChoices[conversationId] || workspaceConversation?.reasoningEffort || ''
     : selectedReasoningEffort;
   const currentRunnerID = conversationId ? workspaceConversation?.runnerId || '' : selectedRunnerID;
   const currentRunner = useMemo(
@@ -1078,6 +1079,7 @@ const ChatPage: React.FC = () => {
     selectedModel,
     selectedReasoningEffort,
     chatSettingsLoaded,
+    reasoningEffortChoices,
     currentCWDLabel,
     currentRunner,
     isRemoteConversation,
@@ -1465,6 +1467,18 @@ const ChatPage: React.FC = () => {
   const handleQuickReasoningEffortChange = (effort: string) => {
     patchOptimisticConversationContext(contextSettings.selectReasoningEffort(effort));
   };
+
+  const savedReasoningEffortOptions = workspaceConversation?.reasoningEffortOptions || [];
+  const composerSavedReasoningEffort =
+    conversationId && isRemoteConversation && savedReasoningEffortOptions.length > 1
+      ? {
+          modelLabel: composerModelLabel,
+          value: currentReasoningEffortLabel,
+          options: savedReasoningEffortOptions,
+          onChange: (effort: string) =>
+            setReasoningEffortChoices((choices) => ({ ...choices, [conversationId]: effort })),
+        }
+      : undefined;
 
   const composerQuickPick =
     !contextIsStatic && contextSettings.quickPick
@@ -2008,6 +2022,7 @@ const ChatPage: React.FC = () => {
             editorRef={composerRef}
             placeholder={composerPlaceholder}
             quickPick={composerQuickPick}
+            savedReasoningEffort={composerSavedReasoningEffort}
             showStop={currentConversationIsStreaming}
             stopActionLabel="Stop"
             streamError={streamError || workspaceExecutionMessage}

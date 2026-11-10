@@ -31,6 +31,14 @@ export interface ComposerQuickPick {
   onReasoningEffortChange: (value: string) => void;
 }
 
+/** A saved conversation's fixed model with its changeable reasoning effort. */
+export interface ComposerSavedReasoningEffort {
+  modelLabel: string;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+}
+
 const composerSelectClassNames = {
   shell: 'composer-select-shell',
   trigger: 'composer-inline-context composer-select-trigger',
@@ -54,6 +62,7 @@ interface ChatComposerProps {
   realtime?: ReturnType<typeof useRealtime>;
   placeholder: string;
   quickPick?: ComposerQuickPick;
+  savedReasoningEffort?: ComposerSavedReasoningEffort;
   showStop: boolean;
   slashCommandIndex: number;
   slashCommandSuggestions: SlashCommandOption[];
@@ -93,6 +102,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
   realtime,
   placeholder,
   quickPick,
+  savedReasoningEffort,
   showStop,
   slashCommandIndex,
   slashCommandSuggestions,
@@ -119,6 +129,24 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
 }) => {
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const controlGridRef = React.useRef<HTMLDivElement | null>(null);
+  const reasoningEffortSelect = (
+    value: string,
+    options: string[],
+    onChange: (value: string) => void
+  ) => (
+    <ListboxSelect
+      classNames={composerSelectClassNames}
+      disabled={contextDisabled}
+      label="Reasoning effort quick pick"
+      onChange={onChange}
+      options={options.map((effort) => ({ value: effort, label: effort }))}
+      renderValue={(selected) => (
+        <span className="composer-inline-context-value">{selected?.label ?? value}</span>
+      )}
+      testId="composer-reasoning-effort-select"
+      value={value}
+    />
+  );
   const localTextareaRef = React.useRef<HTMLTextAreaElement | null>(null);
   const textareaRef = editorRef ?? localTextareaRef;
   const [multiline, setMultiline] = React.useState(() => draft.includes('\n'));
@@ -474,7 +502,34 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
             <div className="composer-footer-divider" />
 
             <div className="composer-context-cluster">
-              {contextIsStatic ? (
+              {contextIsStatic && savedReasoningEffort ? (
+                <div
+                  className="composer-quick-pick"
+                  data-testid="composer-saved-context"
+                  title={contextText}
+                >
+                  {savedReasoningEffort.modelLabel ? (
+                    <>
+                      <div
+                        className="composer-inline-context is-static"
+                        data-testid="composer-inline-context"
+                      >
+                        <span className="composer-inline-context-value">
+                          {savedReasoningEffort.modelLabel}
+                        </span>
+                      </div>
+                      <span aria-hidden="true" className="composer-quick-pick-separator">
+                        {' · '}
+                      </span>
+                    </>
+                  ) : null}
+                  {reasoningEffortSelect(
+                    savedReasoningEffort.value,
+                    savedReasoningEffort.options,
+                    savedReasoningEffort.onChange
+                  )}
+                </div>
+              ) : contextIsStatic ? (
                 <div
                   className="composer-inline-context is-static"
                   data-testid="composer-inline-context"
@@ -523,23 +578,11 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
                   <span aria-hidden="true" className="composer-quick-pick-separator">
                     {' · '}
                   </span>
-                  <ListboxSelect
-                    classNames={composerSelectClassNames}
-                    disabled={contextDisabled}
-                    label="Reasoning effort quick pick"
-                    onChange={quickPick.onReasoningEffortChange}
-                    options={quickPick.reasoningEffortOptions.map((effort) => ({
-                      value: effort,
-                      label: effort,
-                    }))}
-                    renderValue={(selected) => (
-                      <span className="composer-inline-context-value">
-                        {selected?.label ?? quickPick.reasoningEffort}
-                      </span>
-                    )}
-                    testId="composer-reasoning-effort-select"
-                    value={quickPick.reasoningEffort}
-                  />
+                  {reasoningEffortSelect(
+                    quickPick.reasoningEffort,
+                    quickPick.reasoningEffortOptions,
+                    quickPick.onReasoningEffortChange
+                  )}
                   <button
                     aria-haspopup="dialog"
                     aria-label="Model settings"

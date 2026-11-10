@@ -37,6 +37,8 @@ export interface MessageSenderOptions {
   selectedModel: string;
   selectedReasoningEffort: string;
   chatSettingsLoaded: boolean;
+  /** Reasoning efforts chosen for saved conversations' next turns, by ID. */
+  reasoningEffortChoices: Record<string, string>;
   currentCWDLabel: string;
   currentRunner?: Runner;
   isRemoteConversation: boolean;
@@ -100,6 +102,7 @@ export const createMessageSender = ({
   selectedModel,
   selectedReasoningEffort,
   chatSettingsLoaded,
+  reasoningEffortChoices,
   currentCWDLabel,
   currentRunner,
   isRemoteConversation,
@@ -263,9 +266,11 @@ export const createMessageSender = ({
               ? undefined
               : { model: selectedModel },
           reasoningEffort:
-            (!isNewConversation && !existingOptimisticRemoteConversation) || !chatSettingsLoaded
-              ? undefined
-              : selectedReasoningEffort,
+            !isNewConversation && !existingOptimisticRemoteConversation
+              ? reasoningEffortChoices[targetConversationId]
+              : chatSettingsLoaded
+                ? selectedReasoningEffort
+                : undefined,
           clientCapabilities: {
             interactiveUI: true,
             persistentWidgets: true,

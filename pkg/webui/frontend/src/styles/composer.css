@@ -239,7 +239,7 @@
   flex: 0 1 auto;
 }
 
-.composer-select-shell + .composer-quick-pick-separator + .composer-select-shell {
+.composer-quick-pick-separator + .composer-select-shell {
   flex: none;
 }
 

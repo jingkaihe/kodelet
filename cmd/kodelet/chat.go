@@ -213,6 +213,7 @@ func (r *configuredChatRunner) AppendMessageHistory(ctx context.Context, target 
 
 func (r *configuredChatRunner) executionOptions(
 	selected *llmtypes.ExecutionOptions,
+	reasoningEffort string,
 ) *llmtypes.ExecutionOptions {
 	// The TUI only sends the model it selected; every other option comes from the CLI.
 	options := r.options.Clone()
@@ -221,6 +222,10 @@ func (r *configuredChatRunner) executionOptions(
 			options = &llmtypes.ExecutionOptions{}
 		}
 		options.Model = new(*selected.Model)
+	}
+	// A TUI-selected effort replaces --reasoning-effort.
+	if options != nil && strings.TrimSpace(reasoningEffort) != "" {
+		options.ReasoningEffort = nil
 	}
 	return options
 }
@@ -274,7 +279,7 @@ func (r *configuredChatRunner) prepareRequest(
 	ctx context.Context,
 	request chatpkg.ChatRequest,
 ) (chatpkg.ChatRequest, error) {
-	request.Options = r.executionOptions(request.Options)
+	request.Options = r.executionOptions(request.Options, request.ReasoningEffort)
 	var history chatpkg.ConversationHistory
 	var err error
 	if request.ConversationID != "" {
@@ -421,7 +426,10 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 		runner.runnerID = history.RunnerID
 		result.ProfileOptions = []string{history.Profile}
 		result.ModelOptions = []string{history.Model}
-		result.ReasoningEffortOptions = []string{history.ReasoningEffort}
+		result.ReasoningEffortOptions = history.ReasoningEffortOptions
+		if len(result.ReasoningEffortOptions) == 0 {
+			result.ReasoningEffortOptions = []string{history.ReasoningEffort}
+		}
 		target.ConversationID = history.ID
 	} else {
 		result.Profile, result.ProfileOptions, result.ProfileSettings, _, err = prepareRemoteChatSettings(ctx, client, result.Profile)

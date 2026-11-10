@@ -425,7 +425,12 @@ func TestInitialHistoryUpdatesDisplayedProfileAndLocksPicker(t *testing.T) {
 	assert.False(t, m.canChangeModel())
 	assert.Equal(t, "max", m.reasoningEffort)
 	assert.False(t, m.reasoningPickerOpen)
-	assert.False(t, m.canChangeReasoningEffort())
+	assert.False(t, m.canChangeReasoningEffort(), "legacy conversations offer no other effort")
+
+	updated, _ = m.Update(initialHistoryMsg{loaded: true, reasoningEffort: "max", reasoningEffortOptions: []string{"low", "max"}})
+	m = updated.(model)
+	assert.Equal(t, []string{"low", "max"}, m.reasoningEffortOptions)
+	assert.True(t, m.canChangeReasoningEffort())
 }
 
 func TestInitialHistoryUpdatesDisplayedCWDForEmptyConversation(t *testing.T) {

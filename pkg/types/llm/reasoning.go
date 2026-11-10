@@ -115,3 +115,24 @@ func ReasoningEffortOptions(config Config) []string {
 	}
 	return append([]string(nil), options...)
 }
+
+// ResumeReasoningEffortOptions lists efforts a persisted conversation may switch
+// to: the live allowed policy if any, else every provider-supported effort,
+// always including the current one.
+func ResumeReasoningEffortOptions(provider, current string, allowed []string) []string {
+	supported := ReasoningEffortOptions(Config{Provider: provider, ReasoningEffort: current})
+	var options []string
+	for _, raw := range allowed {
+		effort, err := NormalizeReasoningEffort(raw)
+		if err == nil && slices.Contains(supported, effort) && !slices.Contains(options, effort) {
+			options = append(options, effort)
+		}
+	}
+	if len(options) == 0 {
+		options = supported
+	}
+	if effort, err := NormalizeReasoningEffort(current); err == nil && effort != "" && !slices.Contains(options, effort) {
+		options = append(options, effort)
+	}
+	return options
+}

@@ -1226,7 +1226,8 @@ func TestServer_handleGetConversation(t *testing.T) {
 	assert.Equal(t, "codex", response.Profile)
 	assert.True(t, response.ProfileLocked)
 	assert.Equal(t, "high", response.ReasoningEffort)
-	assert.True(t, response.ReasoningEffortLocked)
+	assert.Equal(t, []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}, response.ReasoningEffortOptions)
+	assert.False(t, response.ReasoningEffortLocked)
 	assert.True(t, response.IsRunning)
 	assert.Equal(t, 1, response.MessageCount)
 }

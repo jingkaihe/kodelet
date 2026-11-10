@@ -321,6 +321,9 @@ func (m model) conversationRequest(state *conversationState) chat.ChatRequest {
 		if m.remote {
 			request.EnvironmentProfile = m.environmentProfile
 		}
+	} else if state.reasoningEffortExplicit {
+		// Resumed conversations keep their saved effort unless one is chosen.
+		request.ReasoningEffort = state.reasoningEffort
 	}
 	return request
 }

@@ -55,8 +55,24 @@ func resolveReasoningSettings(profile, requested string) (string, []string, erro
 	return config.ReasoningEffort, llmtypes.ReasoningEffortOptions(config), nil
 }
 
+// Unlike the model, effort may change between turns.
 func (m model) canChangeReasoningEffort() bool {
-	return strings.TrimSpace(m.conversationID) == "" && !m.running && len(m.reasoningEffortOptions) > 1
+	return !m.running && len(m.reasoningEffortOptions) > 1
+}
+
+// adoptConversationReasoningEffort shows a saved conversation's effort; an
+// explicit choice that is still available survives history refreshes.
+func (m *model) adoptConversationReasoningEffort(effort string, options []string) {
+	effort = strings.TrimSpace(effort)
+	if effort == "" {
+		return
+	}
+	m.reasoningEffortOptions = normalizeReasoningEffortOptions(options, effort)
+	if m.reasoningEffortExplicit && slices.Contains(m.reasoningEffortOptions, normalizeReasoningEffort(m.reasoningEffort)) {
+		m.setReasoningEffort(m.reasoningEffort, true)
+		return
+	}
+	m.setReasoningEffort(effort, false)
 }
 
 func (m *model) setReasoningEffort(effort string, explicit bool) {

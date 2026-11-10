@@ -314,10 +314,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedModel = strings.TrimSpace(msg.model)
 				m.modelOptions = normalizeModelOptions(nil, m.selectedModel)
 				m.modelPickerOpen = false
-				if strings.TrimSpace(msg.reasoningEffort) != "" {
-					m.reasoningEffortOptions = []string{msg.reasoningEffort}
-					m.setReasoningEffort(msg.reasoningEffort, false)
-				}
+				m.adoptConversationReasoningEffort(msg.reasoningEffort, msg.reasoningEffortOptions)
 				m.reasoningPickerOpen = false
 			}
 			if strings.TrimSpace(msg.cwd) != "" {
@@ -515,10 +512,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selectedModel = strings.TrimSpace(history.model)
 			m.modelOptions = normalizeModelOptions(nil, m.selectedModel)
 		}
-		if strings.TrimSpace(history.reasoningEffort) != "" {
-			m.reasoningEffortOptions = []string{history.reasoningEffort}
-			m.setReasoningEffort(history.reasoningEffort, false)
-		}
+		m.adoptConversationReasoningEffort(history.reasoningEffort, history.reasoningEffortOptions)
 		m.conversationState = currentState
 		if active {
 			m.refreshViewport(true)

@@ -1353,45 +1353,47 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 
 // WebConversationResponse represents a conversation response for the web UI.
 type WebConversationResponse struct {
-	ID                    string                 `json:"id"`
-	ParentConversationID  string                 `json:"parentConversationId,omitempty"`
-	CreatedAt             time.Time              `json:"createdAt"`
-	UpdatedAt             time.Time              `json:"updatedAt"`
-	Provider              string                 `json:"provider"`
-	Model                 string                 `json:"model,omitempty"`
-	CWD                   string                 `json:"cwd,omitempty"`
-	CWDLocked             bool                   `json:"cwdLocked,omitempty"`
-	Profile               string                 `json:"profile,omitempty"`
-	ProfileLocked         bool                   `json:"profileLocked,omitempty"`
-	ReasoningEffort       string                 `json:"reasoningEffort,omitempty"`
-	ReasoningEffortLocked bool                   `json:"reasoningEffortLocked,omitempty"`
-	RunnerID              string                 `json:"runnerId,omitempty"`
-	EnvironmentProfile    string                 `json:"environmentProfile,omitempty"`
-	Runner                *runnerregistry.Runner `json:"runner,omitempty"`
-	Summary               string                 `json:"summary,omitempty"`
-	IsRunning             bool                   `json:"isRunning,omitempty"`
-	Usage                 any                    `json:"usage"`
-	Messages              []WebMessage           `json:"messages"`
-	PendingSteer          []WebMessage           `json:"pendingSteer,omitempty"`
-	ToolResults           any                    `json:"toolResults,omitempty"`
-	MessageCount          int                    `json:"messageCount"`
+	ID                     string                 `json:"id"`
+	ParentConversationID   string                 `json:"parentConversationId,omitempty"`
+	CreatedAt              time.Time              `json:"createdAt"`
+	UpdatedAt              time.Time              `json:"updatedAt"`
+	Provider               string                 `json:"provider"`
+	Model                  string                 `json:"model,omitempty"`
+	CWD                    string                 `json:"cwd,omitempty"`
+	CWDLocked              bool                   `json:"cwdLocked,omitempty"`
+	Profile                string                 `json:"profile,omitempty"`
+	ProfileLocked          bool                   `json:"profileLocked,omitempty"`
+	ReasoningEffort        string                 `json:"reasoningEffort,omitempty"`
+	ReasoningEffortOptions []string               `json:"reasoningEffortOptions,omitempty"`
+	ReasoningEffortLocked  bool                   `json:"reasoningEffortLocked,omitempty"`
+	RunnerID               string                 `json:"runnerId,omitempty"`
+	EnvironmentProfile     string                 `json:"environmentProfile,omitempty"`
+	Runner                 *runnerregistry.Runner `json:"runner,omitempty"`
+	Summary                string                 `json:"summary,omitempty"`
+	IsRunning              bool                   `json:"isRunning,omitempty"`
+	Usage                  any                    `json:"usage"`
+	Messages               []WebMessage           `json:"messages"`
+	PendingSteer           []WebMessage           `json:"pendingSteer,omitempty"`
+	ToolResults            any                    `json:"toolResults,omitempty"`
+	MessageCount           int                    `json:"messageCount"`
 }
 
 type conversationHistoryResponse struct {
-	ID                   string                                    `json:"id"`
-	ParentConversationID string                                    `json:"parentConversationId,omitempty"`
-	UpdatedAt            time.Time                                 `json:"updatedAt"`
-	Provider             string                                    `json:"provider"`
-	Model                string                                    `json:"model,omitempty"`
-	CWD                  string                                    `json:"cwd,omitempty"`
-	Profile              string                                    `json:"profile,omitempty"`
-	ReasoningEffort      string                                    `json:"reasoningEffort,omitempty"`
-	RunnerID             string                                    `json:"runnerId,omitempty"`
-	EnvironmentProfile   string                                    `json:"environmentProfile,omitempty"`
-	Summary              string                                    `json:"summary,omitempty"`
-	Usage                llmtypes.Usage                            `json:"usage"`
-	Entries              []conversations.StreamableMessage         `json:"entries"`
-	ToolResults          map[string]tooltypes.StructuredToolResult `json:"toolResults,omitempty"`
+	ID                     string                                    `json:"id"`
+	ParentConversationID   string                                    `json:"parentConversationId,omitempty"`
+	UpdatedAt              time.Time                                 `json:"updatedAt"`
+	Provider               string                                    `json:"provider"`
+	Model                  string                                    `json:"model,omitempty"`
+	CWD                    string                                    `json:"cwd,omitempty"`
+	Profile                string                                    `json:"profile,omitempty"`
+	ReasoningEffort        string                                    `json:"reasoningEffort,omitempty"`
+	ReasoningEffortOptions []string                                  `json:"reasoningEffortOptions,omitempty"`
+	RunnerID               string                                    `json:"runnerId,omitempty"`
+	EnvironmentProfile     string                                    `json:"environmentProfile,omitempty"`
+	Summary                string                                    `json:"summary,omitempty"`
+	Usage                  llmtypes.Usage                            `json:"usage"`
+	Entries                []conversations.StreamableMessage         `json:"entries"`
+	ToolResults            map[string]tooltypes.StructuredToolResult `json:"toolResults,omitempty"`
 }
 
 // ChatProfileOption represents a selectable profile in the web UI.
@@ -1718,26 +1720,28 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 
 	// Convert to web response format
 
+	reasoningEffortOptions := chat.ConversationReasoningEffortOptions(ctx, response)
 	webResponse := &WebConversationResponse{
-		ID:                    response.ID,
-		ParentConversationID:  conversationtypes.ParentConversationIDFromMetadata(response.Metadata),
-		CreatedAt:             response.CreatedAt,
-		UpdatedAt:             response.UpdatedAt,
-		Provider:              providerLabel,
-		Model:                 resolveConversationModel(response.Metadata),
-		CWD:                   response.CWD,
-		CWDLocked:             response.ID != "" && strings.TrimSpace(response.CWD) != "",
-		Profile:               resolveConversationProfile(response.Metadata),
-		ProfileLocked:         response.ID != "",
-		ReasoningEffort:       resolveConversationReasoningEffort(response),
-		ReasoningEffortLocked: response.ID != "",
-		Summary:               response.Summary,
-		IsRunning:             s.isActiveChat(response.ID),
-		Usage:                 response.Usage.ForDisplay(),
-		Messages:              webMessages,
-		PendingSteer:          pendingSteer,
-		ToolResults:           response.ToolResults,
-		MessageCount:          len(webMessages),
+		ID:                     response.ID,
+		ParentConversationID:   conversationtypes.ParentConversationIDFromMetadata(response.Metadata),
+		CreatedAt:              response.CreatedAt,
+		UpdatedAt:              response.UpdatedAt,
+		Provider:               providerLabel,
+		Model:                  resolveConversationModel(response.Metadata),
+		CWD:                    response.CWD,
+		CWDLocked:              response.ID != "" && strings.TrimSpace(response.CWD) != "",
+		Profile:                resolveConversationProfile(response.Metadata),
+		ProfileLocked:          response.ID != "",
+		ReasoningEffort:        resolveConversationReasoningEffort(response),
+		ReasoningEffortOptions: reasoningEffortOptions,
+		ReasoningEffortLocked:  len(reasoningEffortOptions) < 2,
+		Summary:                response.Summary,
+		IsRunning:              s.isActiveChat(response.ID),
+		Usage:                  response.Usage.ForDisplay(),
+		Messages:               webMessages,
+		PendingSteer:           pendingSteer,
+		ToolResults:            response.ToolResults,
+		MessageCount:           len(webMessages),
 	}
 	if s.runnerRegistry != nil {
 		affinity, ok, affinityErr := s.runnerRegistry.ResolveConversationAffinity(ctx, response.ID)
@@ -1768,17 +1772,18 @@ func (s *Server) writeConversationHistoryResponse(w http.ResponseWriter, r *http
 		return
 	}
 	history := conversationHistoryResponse{
-		ParentConversationID: conversationtypes.ParentConversationIDFromMetadata(response.Metadata),
-		ID:                   response.ID,
-		UpdatedAt:            response.UpdatedAt,
-		Provider:             response.Provider,
-		Model:                resolveConversationModel(response.Metadata),
-		CWD:                  response.CWD,
-		Profile:              resolveConversationProfile(response.Metadata),
-		ReasoningEffort:      resolveConversationReasoningEffort(response),
-		Summary:              response.Summary,
-		Usage:                response.Usage.ForDisplay(),
-		Entries:              entries,
+		ParentConversationID:   conversationtypes.ParentConversationIDFromMetadata(response.Metadata),
+		ID:                     response.ID,
+		UpdatedAt:              response.UpdatedAt,
+		Provider:               response.Provider,
+		Model:                  resolveConversationModel(response.Metadata),
+		CWD:                    response.CWD,
+		Profile:                resolveConversationProfile(response.Metadata),
+		ReasoningEffort:        resolveConversationReasoningEffort(response),
+		ReasoningEffortOptions: chat.ConversationReasoningEffortOptions(r.Context(), response),
+		Summary:                response.Summary,
+		Usage:                  response.Usage.ForDisplay(),
+		Entries:                entries,
 	}
 	if s.runnerRegistry != nil {
 		affinity, ok, affinityErr := s.runnerRegistry.ResolveConversationAffinity(r.Context(), response.ID)

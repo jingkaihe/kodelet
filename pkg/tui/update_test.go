@@ -1756,20 +1756,45 @@ func TestCtrlYReasoningPickerSelectsEffortForNewConversation(t *testing.T) {
 	assert.Equal(t, "high", runner.req.ReasoningEffort)
 }
 
-func TestReasoningPickerLockedForExistingConversation(t *testing.T) {
+func TestReasoningPickerChangesExistingConversationBetweenRuns(t *testing.T) {
+	runner := &recordingRunner{conversationID: "conversation-123"}
 	m := newModel(context.Background(), Config{
 		ConversationID:         "conversation-123",
+		CWD:                    "/tmp",
 		ReasoningEffort:        "high",
 		ReasoningEffortOptions: []string{"low", "high"},
+		Runner:                 runner,
 	})
 	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 30
+	m.resize()
 
-	assert.False(t, m.canChangeReasoningEffort())
+	m.running = true
+	assert.False(t, m.canChangeReasoningEffort(), "effort is fixed while a run is in progress")
+	m.running = false
+	require.True(t, m.canChangeReasoningEffort())
+
 	updated, cmd := m.Update(keyPressWithMod('y', tea.ModCtrl))
 	m = updated.(model)
 	require.Nil(t, cmd)
-	assert.False(t, m.reasoningPickerOpen)
-	assert.Equal(t, "high", m.reasoningEffort)
+	require.True(t, m.reasoningPickerOpen)
+	updated, _ = m.Update(keyPress(tea.KeyUp))
+	m = updated.(model)
+	updated, _ = m.Update(keyPress(tea.KeyEnter))
+	m = updated.(model)
+	assert.Equal(t, "low", m.reasoningEffort)
+
+	m.adoptConversationReasoningEffort("high", []string{"low", "high"})
+	assert.Equal(t, "low", m.reasoningEffort, "an explicit choice survives history refreshes")
+
+	m.textarea.SetValue("hello")
+	runCmd := m.submit()
+	require.NotNil(t, runCmd)
+	assert.Nil(t, runCmd())
+	_ = receiveRunMsg(t, m.runCh)
+	_ = receiveRunMsg(t, m.runCh)
+	assert.Equal(t, "low", runner.req.ReasoningEffort)
 }
 
 func TestSubmitRecordsAndPersistsRawMessageHistory(t *testing.T) {

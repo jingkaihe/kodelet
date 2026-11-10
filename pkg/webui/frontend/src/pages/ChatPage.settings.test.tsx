@@ -801,6 +801,54 @@ describe('ChatPage model and reasoning settings', () => {
     expect(mockStreamChat.mock.calls[0][0].options).toBeUndefined();
   });
 
+  it('changes the reasoning effort of a saved conversation for its next turn', async () => {
+    setRouteParams({ id: 'conv-123' });
+    mockGetConversation.mockResolvedValue({
+      runnerId: 'runner-1',
+      id: 'conv-123',
+      createdAt: '2023-01-01T00:00:00Z',
+      updatedAt: '2023-01-02T00:00:00Z',
+      messageCount: 1,
+      profile: 'work',
+      model: 'gpt-5',
+      profileLocked: true,
+      reasoningEffort: 'high',
+      reasoningEffortOptions: ['low', 'medium', 'high'],
+      messages: [{ role: 'user', content: 'hello' }],
+      toolResults: {},
+    });
+    mockStreamChat.mockResolvedValue(undefined);
+
+    render(<ChatPage />);
+
+    const saved = await screen.findByTestId('composer-saved-context');
+    expect(saved).toHaveTextContent(/^work\/gpt-5 · high$/);
+    expect(screen.queryByRole('combobox', { name: 'Model quick pick' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Reasoning effort quick pick' }));
+    const effortList = screen.getByRole('listbox', { name: 'Reasoning effort quick pick' });
+    expect(
+      within(effortList)
+        .getAllByRole('option')
+        .map((option) => option.textContent)
+    ).toEqual(['low', 'medium', 'high']);
+    fireEvent.click(within(effortList).getByRole('option', { name: 'low' }));
+    expect(saved).toHaveTextContent(/^work\/gpt-5 · low$/);
+
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
+      target: { value: 'continue' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+    expect(mockStreamChat.mock.calls[0][0]).toMatchObject({
+      conversationId: 'conv-123',
+      reasoningEffort: 'low',
+    });
+    expect(mockStreamChat.mock.calls[0][0].profile).toBeUndefined();
+    expect(mockStreamChat.mock.calls[0][0].options).toBeUndefined();
+  });
+
   it('shows the full workspace path title and reopens settings without losing the draft or selection', async () => {
     const user = userEvent.setup();
     const cwd = '/runner/a-very-long-workspace-name/another-long-directory/kodelet';

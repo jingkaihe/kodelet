@@ -203,7 +203,7 @@ The default `auto` theme follows the terminal's light or dark appearance. Use `-
 
 Customize the static welcome logo with `--welcome-style` and `--welcome-effect`; see [config.sample.yaml](../config.sample.yaml) for options and defaults.
 
-Before the first message, use `Ctrl+T`, `/model`, or click the model name to choose a `profile/model`; use `Ctrl+Y` for reasoning effort. Type to filter, use arrow keys to navigate, and press `Enter` to select or `Esc` to cancel. `/model <profile/model>` selects directly; `/model <id>` uses the current profile. Selection applies the profile and model only to this conversation, without editing configuration. Settings lock after the first message.
+Before the first message, use `Ctrl+T`, `/model`, or click the model name to choose a `profile/model`; use `Ctrl+Y` for reasoning effort. Type to filter, use arrow keys to navigate, and press `Enter` to select or `Esc` to cancel. `/model <profile/model>` selects directly; `/model <id>` uses the current profile. Selection applies the profile and model only to this conversation, without editing configuration. The profile and model lock after the first message, but `Ctrl+Y` can still change the reasoning effort between turns; the new effort applies from the next turn.
 
 While a turn is running, `Enter` queues steering. `/sessions`, `/new`, `/stop`, `/theme`, and `/about` run immediately; `/model` reports that the model is locked. Other slash commands are queued for the next turn. `Ctrl+C` exits without stopping the turn. Extension prompts appear only in the submitting client and are dismissed on disconnect, not restored on reconnect. Other clients can watch, steer, and stop.
 
@@ -1075,7 +1075,7 @@ aliases:
     sonnet-55: claude-sonnet-5-5
 ```
 
-`allowed_reasoning_efforts` defines the ordered reasoning-effort choices available for new conversations in the TUI and Web UI. When omitted or empty, all efforts supported by the configured provider are available.
+`allowed_reasoning_efforts` defines the ordered reasoning-effort choices available in the TUI and Web UI, both for new conversations and when switching effort between turns of an existing one. When omitted or empty, all efforts supported by the configured provider are available. An existing conversation can always keep its current effort, even if the list no longer includes it.
 
 Set `hidden: true` to omit a profile from pickers without preventing explicit selection. Extensions can also [register model profiles](extension-design.md#registered-model-profiles) without editing configuration.
 

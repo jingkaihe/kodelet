@@ -40,6 +40,7 @@ func loadConversationHistoryFromSource(ctx context.Context, conversationKey, con
 		result.provider = strings.TrimSpace(history.Provider)
 		result.model = strings.TrimSpace(history.Model)
 		result.reasoningEffort = strings.TrimSpace(history.ReasoningEffort)
+		result.reasoningEffortOptions = append([]string(nil), history.ReasoningEffortOptions...)
 		return result
 	}
 }
