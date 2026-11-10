@@ -91,8 +91,10 @@ type Config struct {
 	Bash                    *BashConfig        `mapstructure:"bash" json:"bash,omitempty" yaml:"bash,omitempty"`                               // Bash contains bash tool configuration
 
 	// Profile system configuration
-	Profile             string                   `mapstructure:"profile" json:"profile,omitempty" yaml:"profile,omitempty"` // Active model profile name
-	ExtensionProfile    bool                     `mapstructure:"-" json:"-" yaml:"-"`
+	Profile          string `mapstructure:"profile" json:"profile,omitempty" yaml:"profile,omitempty"` // Active model profile name
+	ExtensionProfile bool   `mapstructure:"-" json:"-" yaml:"-"`
+	// ExtensionToolMode preserves an explicitly declared extension preference; nil inherits the runner's mode.
+	ExtensionToolMode   *ToolMode                `mapstructure:"-" json:"-" yaml:"-"`
 	Profiles            map[string]ProfileConfig `mapstructure:"profiles" json:"profiles,omitempty" yaml:"profiles,omitempty"`                                     // Named model configuration profiles
 	EnvironmentProfiles map[string]ProfileConfig `mapstructure:"environment_profiles" json:"environment_profiles,omitempty" yaml:"environment_profiles,omitempty"` // Named runner-local environment profiles
 
@@ -125,6 +127,7 @@ func (c Config) Clone() Config {
 	c.SyspromptArgs = maps.Clone(c.SyspromptArgs)
 	c.SystemInformation = c.SystemInformation.Clone()
 	c.ExecutionOptions = c.ExecutionOptions.Clone()
+	c.ExtensionToolMode = cloneOption(c.ExtensionToolMode)
 	c.ExtensionSettings = cloneConfigMap(c.ExtensionSettings)
 	c.Profiles = cloneProfiles(c.Profiles)
 	c.EnvironmentProfiles = cloneProfiles(c.EnvironmentProfiles)

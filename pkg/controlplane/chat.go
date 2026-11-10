@@ -130,7 +130,8 @@ func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.Chat
 	}
 	var profileOption agentenv.RemoteEnvironmentOption
 	if config.ExtensionProfile {
-		// Registered profiles carry model settings only, never runner preferences.
+		// Registered profiles are not in the embedded runner's configured-profile
+		// table. Keep their identity and explicit preferences in the run request.
 		profileOption = agentenv.WithRemoteModelProfile("")
 	} else if r.server.missingEmbeddedModelProfile(runnerID, config.Profile) {
 		if r.server.conversationService == nil {

@@ -344,13 +344,19 @@ func TestRemoteEnvironmentSendsResolvedProfile(t *testing.T) {
 		name     string
 		profile  string
 		override *string
-		want     string
+		toolMode *llmtypes.ToolMode
 	}{
 		{name: "shared settings"},
-		{name: "ordinary default name", profile: "default", want: "default"},
-		{name: "named profile", profile: "deep", want: "deep"},
+		{name: "ordinary default name", profile: "default"},
+		{name: "named profile", profile: "deep"},
 		{name: "removed profile uses shared settings", profile: "removed", override: new(" ")},
-		{name: "explicit named override", profile: "deep", override: new(" default "), want: "default"},
+		{name: "explicit named override", profile: "deep", override: new(" default ")},
+		{
+			name:     "extension full mode",
+			profile:  "rush",
+			override: new(""),
+			toolMode: new(llmtypes.ToolModeFull),
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			controller := &fakeRemoteController{manifest: runnerpayload.Manifest{
@@ -362,13 +368,27 @@ func TestRemoteEnvironmentSendsResolvedProfile(t *testing.T) {
 				WithRemoteModelProfile(*test.override)(environment)
 			}
 			spec := RunSpec{
-				ConversationID: "saved", EnvironmentProfile: "review",
-				Config: llmtypes.Config{Profile: test.profile, Provider: "openai", Model: "saved-model"},
+				ConversationID:     "saved",
+				EnvironmentProfile: "review",
+				Config: llmtypes.Config{
+					Profile:           test.profile,
+					Provider:          "openai",
+					Model:             "saved-model",
+					ToolMode:          llmtypes.ToolModeFull,
+					ExtensionToolMode: test.toolMode,
+				},
 			}
 			before := spec.Clone()
 			_, err := environment.Open(t.Context(), spec)
 			require.NoError(t, err)
-			assert.Equal(t, test.want, controller.openParams.Agent.Profile)
+			assert.Equal(t, test.profile, controller.openParams.Agent.Profile)
+			if test.override == nil {
+				assert.Nil(t, controller.openParams.ConfigProfile)
+			} else {
+				assert.Equal(t, new(strings.TrimSpace(*test.override)), controller.openParams.ConfigProfile)
+			}
+			assert.Equal(t, test.toolMode, controller.openParams.ToolMode,
+				"only explicitly declared extension modes override runner defaults")
 			assert.Equal(t, "review", controller.openParams.Agent.EnvironmentProfile)
 			assert.Equal(t, "openai", controller.openParams.Agent.Provider)
 			assert.Equal(t, "saved-model", controller.openParams.Agent.Model)

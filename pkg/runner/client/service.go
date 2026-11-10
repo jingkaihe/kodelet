@@ -1007,13 +1007,20 @@ func (s *Service) reloadRun(ctx context.Context, params protocol.RunReloadParams
 }
 
 func (s *Service) loadRunConfig(workingDirectory string, params protocol.RunOpenParams) (llmtypes.Config, extensions.Config, error) {
-	config, err := s.loadConfig(workingDirectory, params.Agent.Profile, params.Agent.EnvironmentProfile)
+	profile := params.Agent.Profile
+	if params.ConfigProfile != nil {
+		profile = *params.ConfigProfile
+	}
+	config, err := s.loadConfig(workingDirectory, profile, params.Agent.EnvironmentProfile)
 	if err != nil {
 		return config, extensions.Config{}, errors.Wrap(err, "failed to load runner configuration")
 	}
 	config, err = llmtypes.ApplyEnvironmentOptions(config, params.Options)
 	if err != nil {
 		return config, extensions.Config{}, errors.Wrap(err, "invalid runner execution options")
+	}
+	if params.ToolMode != nil {
+		config.ToolMode = *params.ToolMode
 	}
 	config.WorkingDirectory = workingDirectory
 	config.Provider = params.Agent.Provider

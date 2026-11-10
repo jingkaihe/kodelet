@@ -47,6 +47,35 @@ func TestExecutionOptionsChatRequestJSON(t *testing.T) {
 	assert.Equal(t, &llmtypes.ExecutionOptions{}, request.Options)
 }
 
+func TestResolveExtensionProfileToolMode(t *testing.T) {
+	for _, mode := range []string{"omitted", "full", "patch", "invalid"} {
+		t.Run(mode, func(t *testing.T) {
+			profile := extensions.Profile{
+				Name:        "rush",
+				ExtensionID: "rush",
+				Options: llmtypes.ProfileConfig{
+					"provider": "openai",
+					"model":    "custom-model",
+				},
+			}
+			if mode != "omitted" {
+				profile.Options["tool_mode"] = mode
+			}
+			config, err := ResolveExtensionProfile(profile, "")
+			if mode == "invalid" {
+				require.ErrorContains(t, err, "tool_mode must be full or patch")
+				return
+			}
+			require.NoError(t, err)
+			var expected *llmtypes.ToolMode
+			if mode != "omitted" {
+				expected = new(llmtypes.ToolMode(mode))
+			}
+			assert.Equal(t, expected, config.ExtensionToolMode)
+		})
+	}
+}
+
 func TestResolveExtensionProfileCodeMode(t *testing.T) {
 	previous := viper.AllSettings()
 	viper.Reset()

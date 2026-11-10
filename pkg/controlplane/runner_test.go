@@ -2326,7 +2326,12 @@ func TestServerChatRunnerSavedProfileEnvironmentSelection(t *testing.T) {
 			require.NoError(t, err)
 			manifest, err := environment.Open(t.Context(), agentenv.RunSpec{ConversationID: record.ID, Config: config, EnvironmentProfile: "review"})
 			require.NoError(t, err)
-			assert.Equal(t, test.selector, opened.Agent.Profile)
+			assert.Equal(t, test.identity, opened.Agent.Profile)
+			selector := opened.Agent.Profile
+			if opened.ConfigProfile != nil {
+				selector = *opened.ConfigProfile
+			}
+			assert.Equal(t, test.selector, selector)
 			assert.Equal(t, "review", opened.Agent.EnvironmentProfile)
 			assert.Equal(t, config.Provider, opened.Agent.Provider)
 			assert.Equal(t, config.Model, opened.Agent.Model)

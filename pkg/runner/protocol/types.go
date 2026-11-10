@@ -380,8 +380,9 @@ type GoodbyeParams struct {
 
 // AgentDescriptor carries only provider-sensitive identifiers needed by runner resources.
 type AgentDescriptor struct {
-	Provider           string `json:"provider"`
-	Model              string `json:"model"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	// Profile is the active model profile identity exposed to extensions, not a runner configuration selector.
 	Profile            string `json:"profile,omitempty"`
 	EnvironmentProfile string `json:"environmentProfile,omitempty"`
 	RecipeName         string `json:"recipeName,omitempty"`
@@ -404,13 +405,18 @@ type RunOpenParams struct {
 	// CodeExecution advertises support for runner-owned nested tool capabilities.
 	CodeExecution bool `json:"codeExecution,omitempty"`
 	// BrowserEnabled is a server-authorized grant, never a workspace setting.
-	BrowserEnabled     bool                       `json:"browserEnabled,omitempty"`
-	SessionExtensions  *SessionExtensions         `json:"sessionExtensions,omitempty"`
-	RequireCheckpoint  bool                       `json:"requireCheckpoint,omitempty"`
-	RunID              string                     `json:"runId"`
-	ConversationID     string                     `json:"conversationId"`
-	CWD                string                     `json:"cwd,omitempty"`
-	ExpectedCWD        string                     `json:"expectedCwd,omitempty"`
+	BrowserEnabled    bool               `json:"browserEnabled,omitempty"`
+	SessionExtensions *SessionExtensions `json:"sessionExtensions,omitempty"`
+	RequireCheckpoint bool               `json:"requireCheckpoint,omitempty"`
+	RunID             string             `json:"runId"`
+	ConversationID    string             `json:"conversationId"`
+	CWD               string             `json:"cwd,omitempty"`
+	ExpectedCWD       string             `json:"expectedCwd,omitempty"`
+	// ConfigProfile overrides the embedded runner's configured-profile lookup.
+	// Nil selects Agent.Profile; an explicit empty string selects shared settings.
+	ConfigProfile *string `json:"configProfile,omitempty"`
+	// ToolMode selects an explicitly declared extension profile's file tools; permission ceilings still apply.
+	ToolMode           *llmtypes.ToolMode         `json:"toolMode,omitempty"`
 	Agent              AgentDescriptor            `json:"agent"`
 	ClientCapabilities ClientCapabilities         `json:"clientCapabilities"`
 	ReservedToolNames  []string                   `json:"reservedToolNames"`
@@ -428,6 +434,9 @@ func (p RunOpenParams) Validate() error {
 	}
 	if strings.TrimSpace(p.ConversationID) == "" {
 		return errors.New("conversationId is required")
+	}
+	if p.ToolMode != nil && *p.ToolMode != llmtypes.ToolModeFull && *p.ToolMode != llmtypes.ToolModePatch {
+		return errors.New("run.open toolMode must be full or patch")
 	}
 	if p.Options.HasModelOptions() || (p.Options != nil && (p.Options.MaxTurns != nil || p.Options.UseWeakModel != nil)) {
 		return errors.New("run.open options may contain only environment restrictions")

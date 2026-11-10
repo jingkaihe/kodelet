@@ -195,6 +195,8 @@ const searchProfile = ext.registerProfile({
 
 Profiles use ordinary snake_case configuration and built-in defaults, not daemon or parent model settings. Set `code_mode` in a profile to choose code mode for its sessions; otherwise the runner's `code_mode` applies, except that a profile whose `allowed_tools` omits `code_execute` always runs with code mode off. Session options accept the same choice as `codeMode`. Replace older `reasoningEffort` with `reasoning_effort`; session `ExecutionOptions` stays camelCase. For Claude subscriptions, use `provider: "anthropic"` and `anthropic_api_access: "subscription"`. Credentials stay on the daemon; host/runner restrictions still apply.
 
+Set `tool_mode: "full"` or `"patch"` to select the profile's file tools; omit it to inherit the runner's mode. Runner permission restrictions still apply.
+
 ### Background extension work
 
 Acquire a host lifetime lease before starting work that can continue after the current handler returns, and release it only after the worker and its final state or UI updates finish:

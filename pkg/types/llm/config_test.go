@@ -68,6 +68,7 @@ func TestConfigClonePinsMutableSettings(t *testing.T) {
 		SyspromptArgs:           map[string]string{"name": "original"},
 		SystemInformation:       &SystemInformation{Platform: "linux"},
 		ExecutionOptions:        &ExecutionOptions{Model: new("main"), AllowedTools: new([]string{})},
+		ExtensionToolMode:       new(ToolModeFull),
 		Extensions:              new("opaque runtime"),
 		ExtensionSettings: map[string]any{
 			"entries": []any{map[string]any{"args": []string{"original"}}, nil},
@@ -96,7 +97,13 @@ func TestConfigClonePinsMutableSettings(t *testing.T) {
 	}
 	// Include transient settings that Config intentionally excludes from JSON.
 	serialize := func() []byte {
-		data, err := json.Marshal([]any{original, original.ExecutionOptions, original.ExtensionSettings, original.SystemInformation})
+		data, err := json.Marshal([]any{
+			original,
+			original.ExecutionOptions,
+			original.ExtensionSettings,
+			original.SystemInformation,
+			original.ExtensionToolMode,
+		})
 		require.NoError(t, err)
 		return data
 	}
@@ -111,6 +118,7 @@ func TestConfigClonePinsMutableSettings(t *testing.T) {
 	cloned.SyspromptArgs["name"] = "changed"
 	cloned.SystemInformation.Platform = "darwin"
 	*cloned.ExecutionOptions.Model = "other"
+	*cloned.ExtensionToolMode = ToolModePatch
 	*cloned.ExecutionOptions.AllowedTools = append(*cloned.ExecutionOptions.AllowedTools, "bash")
 	cloned.ExtensionSettings["entries"].([]any)[0].(map[string]any)["args"].([]string)[0] = "changed"
 	cloned.ExtensionSettings["typed"].([]map[string][]int)[0]["limits"][0] = 99

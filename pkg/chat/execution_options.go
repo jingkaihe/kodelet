@@ -187,6 +187,12 @@ func ResolveExtensionProfile(profile extensions.Profile, reasoningEffort string)
 	}
 	config.Profile = profile.Name
 	config.ExtensionProfile = true
+	if _, set := profile.Options["tool_mode"]; set {
+		if config.ToolMode != llmtypes.ToolModeFull && config.ToolMode != llmtypes.ToolModePatch {
+			return llmtypes.Config{}, errors.New("extension profile tool_mode must be full or patch")
+		}
+		config.ExtensionToolMode = new(config.ToolMode)
+	}
 	if strings.TrimSpace(reasoningEffort) != "" {
 		config.ReasoningEffort = reasoningEffort
 		if err := llmtypes.NormalizeReasoningConfig(&config); err != nil {

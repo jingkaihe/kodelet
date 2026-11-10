@@ -138,12 +138,8 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 		e.finishOpenFailure()
 		return Manifest{}, errors.Wrap(err, "failed to generate remote run id")
 	}
-	// RunSpec contains an already resolved model configuration. An explicit
-	// empty override requests shared runner settings without a model overlay.
-	profile := strings.TrimSpace(spec.Config.Profile)
-	if e.modelProfile != nil {
-		profile = *e.modelProfile
-	}
+	// Keep model identity separate from the embedded runner's configuration
+	// lookup, which can select shared settings for extension or removed profiles.
 	params := protocol.RunOpenParams{
 		Reload:         spec.Reload,
 		CodeExecution:  true,
@@ -151,10 +147,12 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 		ConversationID: spec.ConversationID,
 		CWD:            strings.TrimSpace(spec.Config.WorkingDirectory),
 		ExpectedCWD:    strings.TrimSpace(spec.ExpectedWorkingDirectory),
+		ConfigProfile:  e.modelProfile,
+		ToolMode:       spec.Config.ExtensionToolMode,
 		Agent: protocol.AgentDescriptor{
 			Provider:           spec.Config.Provider,
 			Model:              spec.Config.Model,
-			Profile:            profile,
+			Profile:            strings.TrimSpace(spec.Config.Profile),
 			EnvironmentProfile: spec.EnvironmentProfile,
 			RecipeName:         spec.Config.RecipeName,
 			InvokedBy:          firstNonEmpty(spec.InvokedBy, "main"),

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -290,6 +291,18 @@ func TestRegistrationAndRunOpenValidationBranches(t *testing.T) {
 	require.ErrorContains(t, (RunOpenParams{}).Validate(), "runId")
 	require.ErrorContains(t, (RunOpenParams{RunID: "run-one"}).Validate(), "conversationId")
 	require.NoError(t, (RunOpenParams{RunID: "run-one", ConversationID: "conversation-one"}).Validate())
+	for _, mode := range []llmtypes.ToolMode{llmtypes.ToolModeFull, llmtypes.ToolModePatch, "", "unknown"} {
+		params := RunOpenParams{
+			RunID:          "run-one",
+			ConversationID: "conversation-one",
+			ToolMode:       &mode,
+		}
+		if mode == llmtypes.ToolModeFull || mode == llmtypes.ToolModePatch {
+			require.NoError(t, params.Validate())
+		} else {
+			require.ErrorContains(t, params.Validate(), "toolMode must be full or patch")
+		}
+	}
 }
 
 func TestHeartbeatParamsValidate(t *testing.T) {
