@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.8.27-beta
+
+Added reasoning-effort changes between conversation turns in the TUI (`Ctrl+Y`), Web UI, and resumed requests, including Web UI voice turns. Model and profile remain locked.
+
+Fixed extension-profile tool-mode selection and active profile identity. Invalid profile settings now disable only the affected profile, with clear diagnostics, without blocking unrelated profiles.
+
 ## 0.8.26-beta
 
 Improved built-in browser compatibility with sites that reject headless Chrome by using a desktop user agent matching the installed browser's major version and platform.
