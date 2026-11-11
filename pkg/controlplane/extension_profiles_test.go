@@ -130,9 +130,9 @@ func TestExtensionProfilesOwnershipDiscoveryAndSnapshots(t *testing.T) {
 	require.ErrorContains(t, server.registerExtensionProfiles(ctx, manifest), "already registered")
 	manifest.Profiles[0].Name = "other"
 	manifest.Profiles[0].Options["max_tokens"] = map[string]any{"invalid": true}
-	require.ErrorContains(t, server.registerExtensionProfiles(ctx, manifest), "invalid extension profile")
+	require.NoError(t, server.registerExtensionProfiles(ctx, manifest))
 	_, err = server.resolveModelProfile(ctx, runner.RunnerID, "other", "")
-	require.ErrorContains(t, err, "not registered")
+	require.ErrorContains(t, err, "max_tokens")
 
 	reconnected := register("one")
 	assert.Greater(t, reconnected.Generation, runner.Generation)
@@ -312,6 +312,10 @@ type profileReloadTestController struct {
 	closedStatus protocol.RunStatus
 }
 
+func (c *profileReloadTestController) OpenRun(context.Context, string, protocol.RunOpenParams) (runnerpayload.Manifest, error) {
+	return c.result.Manifest, c.err
+}
+
 func (c *profileReloadTestController) ReloadRun(context.Context, protocol.RunReloadParams) (runnerpayload.RunReloadResult, error) {
 	return c.result, c.err
 }
@@ -386,6 +390,97 @@ func TestProfileRegisteringControllerReloadRegistersProfilesOrStopsRun(t *testin
 			}
 		})
 	}
+}
+
+func TestExtensionProfilesIsolateInvalidSettings(t *testing.T) {
+	previous := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+		require.NoError(t, viper.MergeConfigMap(previous))
+	})
+	server := newRunnerTestServer(t, "")
+	ctx := contextWithPrincipal(t.Context(), administrativePrincipal("alice"))
+	sink := &recordingChatSink{}
+	broker := newWebUIInputBroker("conversation", sink)
+	t.Cleanup(broker.close)
+	t.Cleanup(broker.setOwner(ctx, "client", sink))
+	ctx = extensions.ContextWithUIInputBroker(ctx, broker)
+	runner, err := server.runnerRegistry.Register(protocol.RegisterParams{
+		ProtocolVersions: []int{protocol.Version},
+		Host:             protocol.Host{InstanceID: "profiles"},
+		Workspace:        protocol.Workspace{Path: "/workspace", Name: "workspace"},
+	}, newRunnerAPITestLink())
+	require.NoError(t, err)
+	profile := extensions.Profile{
+		Name:        "rush",
+		ExtensionID: "profile-tools",
+		Options: llmtypes.ProfileConfig{
+			"provider":  "openai",
+			"model":     "custom-model",
+			"tool_mode": "full",
+		},
+	}
+	other := profile.Clone()
+	other.Name = "other"
+	inner := &profileReloadTestController{
+		result: runnerpayload.RunReloadResult{
+			Manifest: runnerpayload.Manifest{
+				RunnerID:   runner.RunnerID,
+				Generation: runner.Generation,
+				Profiles:   []extensions.Profile{profile, other},
+			},
+		},
+	}
+	controller := profileRegisteringController{
+		RemoteController: inner,
+		server:           server,
+		profile:          "other",
+	}
+	open := protocol.RunOpenParams{RunID: "run"}
+	reload := protocol.RunReloadParams{RunID: "run"}
+	_, err = controller.OpenRun(ctx, runner.RunnerID, open)
+	require.NoError(t, err)
+	require.Empty(t, sink.Events())
+
+	// An invalid replacement removes the old selectable profile, not its sibling.
+	profile.Options["tool_mode"] = "Patch"
+	_, err = controller.ReloadRun(ctx, reload)
+	require.NoError(t, err)
+	assert.Empty(t, inner.closedRunID)
+	options := server.modelProfileOptions(ctx, runner.RunnerID, "rush", true)
+	assert.Equal(t, []ChatProfileOption{{Name: "other", Scope: "extension"}}, options)
+	_, err = server.resolveModelProfile(ctx, runner.RunnerID, "other", "")
+	require.NoError(t, err)
+	_, err = server.resolveChatModelProfile(ctx, chat.ChatRequest{RunnerID: runner.RunnerID}, "rush", "")
+	require.ErrorContains(t, err, "extension profile \"rush\" from \"profile-tools\" is unavailable")
+	require.ErrorContains(t, err, "tool_mode must be full or patch")
+	events := sink.Events()
+	require.Len(t, events, 1)
+	assert.Equal(t, "ui-notification", events[0].Kind)
+	require.NotNil(t, events[0].UINotify)
+	assert.Equal(t, err.Error(), events[0].UINotify.Message)
+
+	// Only a run selecting the invalid profile must stop, on open or reload.
+	controller.profile = "rush"
+	_, err = controller.OpenRun(ctx, runner.RunnerID, open)
+	require.ErrorContains(t, err, "tool_mode must be full or patch")
+	assert.Equal(t, "run", inner.closedRunID)
+	assert.Equal(t, protocol.RunStatusFailed, inner.closedStatus)
+	inner.closedRunID = ""
+	_, err = controller.ReloadRun(ctx, reload)
+	require.ErrorContains(t, err, "tool_mode must be full or patch")
+	assert.Equal(t, "run", inner.closedRunID)
+
+	// A corrected declaration replaces the stored diagnostic and is usable again.
+	profile.Options["tool_mode"] = "patch"
+	_, err = controller.OpenRun(ctx, runner.RunnerID, open)
+	require.NoError(t, err)
+	config, err := server.resolveModelProfile(ctx, runner.RunnerID, "rush", "")
+	require.NoError(t, err)
+	assert.Equal(t, llmtypes.ToolModePatch, config.ToolMode)
+	assert.Contains(t, server.modelProfileOptions(ctx, runner.RunnerID, "", false),
+		ChatProfileOption{Name: "rush", Scope: "extension"})
 }
 
 func TestConversationReasoningEffortOptionsUseCallersExtensionProfile(t *testing.T) {

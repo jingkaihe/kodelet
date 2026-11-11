@@ -48,7 +48,7 @@ func TestExecutionOptionsChatRequestJSON(t *testing.T) {
 }
 
 func TestResolveExtensionProfileToolMode(t *testing.T) {
-	for _, mode := range []string{"omitted", "full", "patch", "invalid"} {
+	for _, mode := range []string{"omitted", "full", "patch", "invalid", "Patch", " patch ", "null"} {
 		t.Run(mode, func(t *testing.T) {
 			profile := extensions.Profile{
 				Name:        "rush",
@@ -61,8 +61,11 @@ func TestResolveExtensionProfileToolMode(t *testing.T) {
 			if mode != "omitted" {
 				profile.Options["tool_mode"] = mode
 			}
+			if mode == "null" {
+				profile.Options["tool_mode"] = nil
+			}
 			config, err := ResolveExtensionProfile(profile, "")
-			if mode == "invalid" {
+			if mode != "omitted" && mode != "full" && mode != "patch" {
 				require.ErrorContains(t, err, "tool_mode must be full or patch")
 				return
 			}
@@ -238,8 +241,9 @@ func TestRemoteExtensionSnapshotUsesMatchingLiveProvider(t *testing.T) {
 			record := &conversationservice.GetConversationResponse{Metadata: metadata}
 			if test.configured {
 				viper.Set("profiles.code-search", map[string]any{
-					"model":  "gpt-4o",
-					"openai": map[string]any{"platform": "codex", "base_url": "https://reused.invalid"},
+					"provider": "openai",
+					"model":    "gpt-4o",
+					"openai":   map[string]any{"platform": "codex", "base_url": "https://reused.invalid"},
 				})
 				t.Cleanup(func() { viper.Set("profiles", nil) })
 			}
@@ -269,6 +273,10 @@ func TestRemoteExtensionSnapshotUsesMatchingLiveProvider(t *testing.T) {
 				})
 			}
 			resumed, err := resolveConfigForExistingConversation(ctx, record)
+			if test.absent {
+				require.ErrorIs(t, err, assert.AnError, "resume must preserve the profile diagnostic")
+				return
+			}
 			if !test.wantLive && !test.ordinary {
 				require.ErrorContains(t, err, "initialize its extension on this runner before resuming")
 				return

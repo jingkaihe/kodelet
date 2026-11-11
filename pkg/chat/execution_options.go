@@ -242,7 +242,10 @@ func extensionSnapshotBase(ctx context.Context, snapshot *llmtypes.ConversationC
 	platform = strings.ToLower(strings.TrimSpace(platform))
 	if resolve, ok := ctx.Value(profileResolverContextKey{}).(func(string, string) (llmtypes.Config, error)); ok {
 		live, err := resolve(snapshot.Profile, "")
-		if err == nil && live.ExtensionProfile && live.Provider == snapshot.Provider && llm.ProviderPlatform(live, snapshot.Provider) == platform {
+		if err != nil {
+			return llmtypes.Config{}, errors.Wrapf(err, "cannot resume extension profile %q", snapshot.Profile)
+		}
+		if live.ExtensionProfile && live.Provider == snapshot.Provider && llm.ProviderPlatform(live, snapshot.Provider) == platform {
 			return live.Clone(), nil
 		}
 	}

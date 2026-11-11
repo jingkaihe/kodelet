@@ -11,6 +11,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -31,11 +32,13 @@ type extensionProfileKey struct {
 type registeredExtensionProfile struct {
 	profile    extensions.Profile
 	generation int64
+	err        error
 }
 
 type profileRegisteringController struct {
 	agentenv.RemoteController
-	server *Server
+	server  *Server
+	profile string
 }
 
 func (c profileRegisteringController) OpenRun(ctx context.Context, runnerID string, params protocol.RunOpenParams) (runnerpayload.Manifest, error) {
@@ -43,7 +46,7 @@ func (c profileRegisteringController) OpenRun(ctx context.Context, runnerID stri
 	if err != nil {
 		return runnerpayload.Manifest{}, err
 	}
-	if err := c.server.registerExtensionProfiles(ctx, manifest); err != nil {
+	if err := c.registerProfiles(ctx, manifest); err != nil {
 		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		_ = c.CloseRun(closeCtx, params.RunID, protocol.RunStatusFailed, err)
@@ -57,13 +60,25 @@ func (c profileRegisteringController) ReloadRun(ctx context.Context, params prot
 	if err != nil || result.Refusal != "" {
 		return result, err
 	}
-	if err := c.server.registerExtensionProfiles(ctx, result.Manifest); err != nil {
+	if err := c.registerProfiles(ctx, result.Manifest); err != nil {
 		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		_ = c.CloseRun(closeCtx, params.RunID, protocol.RunStatusFailed, err)
 		return runnerpayload.RunReloadResult{}, errors.Wrap(err, "failed to register reloaded extension profiles")
 	}
 	return result, nil
+}
+
+func (c profileRegisteringController) registerProfiles(ctx context.Context, manifest runnerpayload.Manifest) error {
+	if err := c.server.registerExtensionProfiles(ctx, manifest); err != nil {
+		return err
+	}
+	// A bad declaration must not stop unrelated runs, but an active profile
+	// cannot silently keep using stale settings after its replacement fails.
+	principal, _ := principalFromContext(ctx)
+	profile, _ := c.server.registeredProfile(
+		extensionProfileKey{principal.ID, manifest.RunnerID, c.profile}, manifest.Generation)
+	return profile.err
 }
 
 func (s *Server) registerExtensionProfiles(ctx context.Context, manifest runnerpayload.Manifest) error {
@@ -83,7 +98,8 @@ func (s *Server) registerExtensionProfiles(ctx context.Context, manifest runnerp
 	}
 	profiles := make(map[extensionProfileKey]registeredExtensionProfile, len(manifest.Profiles))
 	for _, profile := range manifest.Profiles {
-		if _, err := chat.ResolveExtensionProfile(profile, ""); err != nil {
+		// Identity and ownership failures still reject the whole publication.
+		if err := profile.Validate(); err != nil {
 			return errors.Wrapf(err, "invalid extension profile %q", profile.Name)
 		}
 		if llm.HasConfiguredProfile(profile.Name) {
@@ -93,11 +109,34 @@ func (s *Server) registerExtensionProfiles(ctx context.Context, manifest runnerp
 		if _, duplicate := profiles[key]; duplicate {
 			return errors.Errorf("duplicate extension profile %q", profile.Name)
 		}
-		profile.Options = profile.Options.Clone()
-		profiles[key] = registeredExtensionProfile{profile: profile, generation: runner.Generation}
+		_, err := chat.ResolveExtensionProfile(profile, "")
+		profiles[key] = registeredExtensionProfile{
+			profile:    profile.Clone(),
+			generation: runner.Generation,
+			err:        errors.Wrapf(err, "extension profile %q from %q is unavailable", profile.Name, profile.ExtensionID),
+		}
 	}
 
-	return s.publishExtensionProfiles(principal.ID, runner.ID, runner.Generation, profiles)
+	if err := s.publishExtensionProfiles(principal.ID, runner.ID, runner.Generation, profiles); err != nil {
+		return err
+	}
+	for _, profile := range manifest.Profiles {
+		registered := profiles[extensionProfileKey{principal.ID, runner.ID, profile.Name}]
+		if registered.err == nil {
+			continue
+		}
+		logger.G(ctx).WithError(registered.err).Warn("extension profile disabled")
+		if broker, ok := extensions.UINotifyBrokerFromContext(ctx); ok {
+			_, err := broker.Notify(ctx, extensions.UINotifyRequest{
+				Title:   "Extension profile unavailable",
+				Message: registered.err.Error(),
+			})
+			if err != nil {
+				logger.G(ctx).WithError(err).Warn("failed to notify about invalid extension profile")
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Server) publishExtensionProfiles(principalID, runnerID string, generation int64, profiles map[extensionProfileKey]registeredExtensionProfile) error {
@@ -157,7 +196,10 @@ func (s *Server) resolveModelProfile(ctx context.Context, runnerID, name, effort
 	if !exists {
 		return llmtypes.Config{}, errors.Wrapf(errExtensionProfileNotRegistered, "extension profile %q", name)
 	}
-	return chat.ResolveExtensionProfile(profile, effort)
+	if profile.err != nil {
+		return llmtypes.Config{}, profile.err
+	}
+	return chat.ResolveExtensionProfile(profile.profile, effort)
 }
 
 // resolveChatModelProfile bootstraps direct chat requests and registrations lost
@@ -206,14 +248,15 @@ func (s *Server) resolveChatModelProfile(ctx context.Context, req chat.ChatReque
 	return s.resolveModelProfile(ctx, req.RunnerID, name, effort)
 }
 
-func (s *Server) registeredProfile(key extensionProfileKey, generation int64) (extensions.Profile, bool) {
+func (s *Server) registeredProfile(key extensionProfileKey, generation int64) (registeredExtensionProfile, bool) {
 	s.extensionProfilesMu.RLock()
 	defer s.extensionProfilesMu.RUnlock()
 	registered, exists := s.extensionProfiles[key]
 	if !exists || registered.generation != generation {
-		return extensions.Profile{}, false
+		return registeredExtensionProfile{}, false
 	}
-	return registered.profile.Clone(), true
+	registered.profile = registered.profile.Clone()
+	return registered, true
 }
 
 func (s *Server) modelProfileOptions(ctx context.Context, runnerID, selected string, includeHidden bool) []ChatProfileOption {
@@ -223,7 +266,8 @@ func (s *Server) modelProfileOptions(ctx context.Context, runnerID, selected str
 		if runner, ok := s.runnerRegistry.Runner(runnerID); ok && runner.Connected {
 			s.extensionProfilesMu.RLock()
 			for key, registered := range s.extensionProfiles {
-				if key.principalID != principal.ID || key.runnerID != runnerID || registered.generation != runner.Generation {
+				if key.principalID != principal.ID || key.runnerID != runnerID ||
+					registered.generation != runner.Generation || registered.err != nil {
 					continue
 				}
 				options = append(options, ChatProfileOption{Name: key.name, Scope: "extension", Hidden: registered.profile.Hidden})

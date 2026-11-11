@@ -567,6 +567,8 @@ TypeScript `ext.registerProfile(...)` and Python `ext.register_profile(...)` req
 
 Registration accepts ordinary profile JSON with native snake_case keys and built-in defaults, without inheriting model settings or requiring catalog entries. Credentials stay on the daemon; host/runner restrictions still apply. Resuming requires a matching live registration. `hidden: true` hides profiles from pickers without preventing selection. See the [SDK example](../skills/kodelet/references/sdk.md#registered-model-profiles).
 
+Invalid configuration disables only the affected profile, with a diagnostic in server logs and an available UI notification. Selecting or reloading that active profile fails with its diagnostic; unrelated profiles remain usable. Identity and ownership conflicts still reject registration.
+
 ### Live conversation forks
 
 When initialization advertises `capabilities.conversations.fork: true`, an active tool handler may request `kodelet.conversation.fork` with optional params `{ "name": "Delegated task", "asChild": true }`. The request requires the originating `parentId` and returns `{ "conversationId": "..." }`. `asChild` defaults to false and requires `capabilities.conversations.hierarchy: true`.

@@ -126,6 +126,14 @@ func TestEmbeddedProfileExtensionProcess(_ *testing.T) {
 							"model":    "unused",
 						},
 					},
+					{
+						Name: "broken",
+						Options: llmtypes.ProfileConfig{
+							"provider":  "openai",
+							"model":     "unused",
+							"tool_mode": "Patch",
+						},
+					},
 				},
 				Subscriptions: []extensions.Subscription{{Event: extensions.EventAgentInit}},
 			}
