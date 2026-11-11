@@ -1022,7 +1022,7 @@ Kodelet includes a comprehensive profile system that allows you to define and sw
 
 ### Profile Definition
 
-Define model profiles under `profiles` in the daemon's `~/.kodelet/config.yaml` or `KODELET_CONFIG_FILE`, not repository configuration. Named profiles are the only model configuration mechanism. The `profile: <name>` selector is optional, and every profile must explicitly define `provider` and `model`. Nonexistent selected profiles and top-level model settings are configuration errors. Clients and standalone runners do not need model profiles.
+Define model profiles under `profiles` in the daemon's `~/.kodelet/config.yaml` or `KODELET_CONFIG_FILE`, not repository configuration. Named profiles are the only model configuration mechanism. The `profile: <name>` selector is optional, and every profile must explicitly define `provider` and `model`. Top-level model settings are configuration errors. A selected name absent from daemon configuration is checked after workspace extension discovery, not at startup. Clients and standalone runners do not need model profiles.
 
 ```yaml
 # Default selection for new conversations

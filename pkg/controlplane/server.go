@@ -1648,6 +1648,8 @@ func (s *Server) handleGetChatSettings(w http.ResponseWriter, r *http.Request) {
 			message := "failed to resolve chat settings"
 			if errors.Is(err, errNoVisibleModelProfiles) {
 				message = errNoVisibleModelProfiles.Error()
+			} else if errors.Is(err, errModelProfileNotFound) {
+				message = err.Error()
 			}
 			s.writeErrorResponse(w, http.StatusBadRequest, message, err)
 			return

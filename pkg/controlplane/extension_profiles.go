@@ -22,6 +22,8 @@ import (
 
 var errExtensionProfileNotRegistered = errors.New("not registered for this caller and runner; initialize its extension on this runner first")
 
+var errModelProfileNotFound = errors.New("not defined in daemon configuration or provided by this workspace's extensions")
+
 var errNoVisibleModelProfiles = errors.New("no visible model profiles available; configure a profile or enable an extension that provides one")
 
 // Definitions are live runner resources, not mutations to global daemon config.
@@ -286,7 +288,11 @@ func (s *Server) resolveChatModelProfile(ctx context.Context, req chat.ChatReque
 			return llmtypes.Config{}, errNoVisibleModelProfiles
 		}
 	}
-	return s.resolveModelProfile(ctx, req.RunnerID, name, effort)
+	config, err := s.resolveModelProfile(ctx, req.RunnerID, name, effort)
+	if errors.Is(err, errExtensionProfileNotRegistered) {
+		return llmtypes.Config{}, errors.Wrapf(errModelProfileNotFound, "profile %q", name)
+	}
+	return config, err
 }
 
 func (s *Server) registeredProfile(key extensionProfileKey, generation int64) (registeredExtensionProfile, bool) {

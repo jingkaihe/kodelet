@@ -236,7 +236,7 @@ func TestExtensionProfilesBootstrapUnderRequestingCaller(t *testing.T) {
 		RunnerID: runner.RunnerID, Generation: runner.Generation, Profiles: []extensions.Profile{parentProfile, profiles[1]},
 	}))
 	options := &llmtypes.ExecutionOptions{NoSkills: new(true), AllowedTools: &[]string{"grep", "file_read"}}
-	for _, mode := range []string{"discovery", "direct-chat", "resume", "settings"} {
+	for _, mode := range []string{"discovery", "direct-chat", "resume", "settings", "settings missing"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := contextWithPrincipal(t.Context(), administrativePrincipal(t.Name()))
 			_, err := server.resolveModelProfile(ctx, runner.RunnerID, "code-search", "")
@@ -254,7 +254,7 @@ func TestExtensionProfilesBootstrapUnderRequestingCaller(t *testing.T) {
 			request := chat.ChatRequest{
 				ConversationID: "new-child", RunnerID: runner.RunnerID, CWD: "/workspace/selected", EnvironmentProfile: "review", Options: options,
 			}
-			if mode == "discovery" || mode == "settings" {
+			if mode == "discovery" || mode == "settings" || mode == "settings missing" {
 				encoded, err := json.Marshal(options)
 				require.NoError(t, err)
 				query := url.Values{
@@ -262,9 +262,28 @@ func TestExtensionProfilesBootstrapUnderRequestingCaller(t *testing.T) {
 					"profile": {"code-search"}, "options": {string(encoded)},
 				}
 				response := httptest.NewRecorder()
-				if mode == "settings" {
+				if mode == "settings" || mode == "settings missing" {
 					query.Del("profile")
+					if mode == "settings missing" {
+						query.Set("profile", "missing")
+					}
 					server.handleGetChatSettings(response, httptest.NewRequest(http.MethodGet, "/?"+query.Encode(), nil).WithContext(ctx))
+					if mode == "settings missing" {
+						require.Equal(t, http.StatusBadRequest, response.Code)
+						var body map[string]any
+						require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+						assert.Equal(t, `profile "missing": not defined in daemon configuration or provided by this workspace's extensions`, body["error"])
+						assert.Equal(t, 1, calls)
+						link.call = func(context.Context, string, any, any) error {
+							return errors.New("internal discovery error")
+						}
+						response = httptest.NewRecorder()
+						server.handleGetChatSettings(response, httptest.NewRequest(http.MethodGet, "/?"+query.Encode(), nil).WithContext(ctx))
+						require.Equal(t, http.StatusBadRequest, response.Code)
+						require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+						assert.Equal(t, "failed to resolve chat settings", body["error"], "unexpected discovery errors remain private")
+						return
+					}
 					require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 					var settings ChatSettingsResponse
 					require.NoError(t, json.Unmarshal(response.Body.Bytes(), &settings))
@@ -298,7 +317,7 @@ func TestExtensionProfilesBootstrapUnderRequestingCaller(t *testing.T) {
 			return nil
 		}
 		_, err := server.resolveChatModelProfile(ctx, chat.ChatRequest{RunnerID: runner.RunnerID, Options: options}, "code-search", "")
-		require.ErrorIs(t, err, errExtensionProfileNotRegistered, "never fall back to another model")
+		require.ErrorIs(t, err, errModelProfileNotFound, "never fall back to another model")
 	})
 }
 
@@ -316,8 +335,8 @@ func TestAutomaticModelProfileSelection(t *testing.T) {
 		{name: "explicit overrides default", selected: "missing", requested: "zulu", want: "zulu", wantDiscovery: true},
 		{name: "hidden explicit", requested: "aaa-internal", want: "aaa-internal", wantDiscovery: true},
 		{name: "hidden default", selected: "aaa-internal", want: "aaa-internal", wantDiscovery: true},
-		{name: "missing explicit", requested: "missing", wantError: "not registered", wantDiscovery: true},
-		{name: "missing default", selected: "missing", wantError: "not registered", wantDiscovery: true},
+		{name: "missing explicit", requested: "missing", wantError: "not defined in daemon configuration or provided by this workspace's extensions", wantDiscovery: true},
+		{name: "missing default", selected: "missing", wantError: "not defined in daemon configuration or provided by this workspace's extensions", wantDiscovery: true},
 		{name: "invalid default", selected: "aaa-invalid", wantError: "max_tokens", wantDiscovery: true},
 		{name: "hidden only", hiddenOnly: true, wantError: "no visible model profiles", wantDiscovery: true},
 		{name: "none available", noProfiles: true, wantError: "no visible model profiles", wantDiscovery: true},
