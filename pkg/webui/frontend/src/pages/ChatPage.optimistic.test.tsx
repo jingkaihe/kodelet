@@ -70,6 +70,7 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     });
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    await flushAsyncUpdates();
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
     fireEvent.click(screen.getByRole('button', { name: `Show ${view}` }));
     const draftPanel = await screen.findByTestId(`${view}-panel`);
@@ -172,6 +173,7 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
+    await flushAsyncUpdates();
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'retry' },
     });
@@ -415,6 +417,7 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
+    await flushAsyncUpdates();
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'hello' },
     });

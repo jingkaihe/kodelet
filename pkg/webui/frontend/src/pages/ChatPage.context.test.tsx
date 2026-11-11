@@ -47,11 +47,15 @@ describe('ChatPage working directories and runner selection', () => {
 
       fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
       selectWorkspaceRunner();
+      await flushAsyncUpdates();
+      const settingsRequests = mockGetChatSettings.mock.calls.length;
       const cwdInput = screen.getByLabelText('Working directory');
       fireEvent.focus(cwdInput);
       expect(screen.queryByTestId('cwd-suggestions')).not.toBeInTheDocument();
       fireEvent.change(cwdInput, { target: { value: '/workspace/ko' } });
       await runCwdSuggestionDebounce();
+      expect(mockGetChatSettings).toHaveBeenCalledTimes(settingsRequests);
+      expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
 
       expect(mockGetCWDHints).toHaveBeenLastCalledWith('/workspace/ko', {
         runnerId: 'runner-1',
@@ -65,8 +69,8 @@ describe('ChatPage working directories and runner selection', () => {
       expect(screen.getByTestId('new-chat-dialog')).toBeInTheDocument();
       expect(screen.queryByTestId('cwd-suggestions')).not.toBeInTheDocument();
       expect(mockGetCWDHints).not.toHaveBeenLastCalledWith('/workspace/kodelet', expect.anything());
-      await flushAsyncUpdates();
       fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+      await flushAsyncUpdates();
       expect(screen.queryByTestId('new-chat-dialog')).not.toBeInTheDocument();
       expect(getActiveTab()).toHaveAttribute('title', 'New chat\n/workspace/kodelet');
       await flushCwdBlurTimer();
@@ -232,6 +236,39 @@ describe('ChatPage working directories and runner selection', () => {
     }
   });
 
+  it.each([false, true])('waits for committed directory discovery (cancel: %s)', async (cancel) => {
+    const defaults = await mockGetChatSettings();
+    let resolveSettings!: (settings: ChatSettings) => void;
+    const pendingSettings = new Promise<ChatSettings>((resolve) => {
+      resolveSettings = resolve;
+    });
+    mockGetChatSettings.mockImplementation(
+      (_profile?: string, _runnerId?: string, workspace?: { cwd?: string }) =>
+        workspace?.cwd === '/workspace/next' ? pendingSettings : Promise.resolve(defaults)
+    );
+    render(<ChatPage />);
+    await flushAsyncUpdates();
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    selectWorkspaceRunner();
+    await flushAsyncUpdates();
+    const before = mockGetChatSettings.mock.calls.length;
+    const directory = screen.getByLabelText('Working directory');
+    fireEvent.change(directory, { target: { value: '/workspace/next' } });
+    expect(mockGetChatSettings).toHaveBeenCalledTimes(before);
+    fireEvent.blur(directory);
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    expect(mockGetChatSettings).toHaveBeenCalledTimes(before + 1);
+    expect(screen.getByTestId('new-chat-dialog')).toBeInTheDocument();
+    if (cancel) fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await act(async () => resolveSettings(defaults));
+    expect(screen.queryByTestId('new-chat-dialog')).not.toBeInTheDocument();
+    if (cancel) {
+      expect(getActiveTab().getAttribute('title')).not.toContain('/workspace/next');
+    } else {
+      expect(getActiveTab()).toHaveAttribute('title', 'New chat\n/workspace/next');
+    }
+  });
+
   it('submits a relative directory typed naturally', async () => {
     mockStreamChat.mockResolvedValue(undefined);
 
@@ -246,6 +283,7 @@ describe('ChatPage working directories and runner selection', () => {
     });
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    await flushAsyncUpdates();
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'hello' },
     });
@@ -277,6 +315,7 @@ describe('ChatPage working directories and runner selection', () => {
     fireEvent.change(cwdInput, { target: { value: '/runner/other-project' } });
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    await flushAsyncUpdates();
     expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {

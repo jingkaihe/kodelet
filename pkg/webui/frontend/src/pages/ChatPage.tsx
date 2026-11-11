@@ -1750,34 +1750,34 @@ const ChatPage: React.FC = () => {
   }, []);
 
   const handleCommitNewChatContext = (voice?: string) => {
-    const context = contextSettings.commitDialog();
-    if (!context) return;
-    if (voice !== undefined) realtime.setVoice(voice);
-    const optimisticConversation = optimisticRemoteConversationRef.current;
-    if (
-      conversationId &&
-      optimisticConversation?.conversationId === conversationId &&
-      !optimisticConversation.confirmed
-    ) {
-      const nextRunner = runners.find((runner) => runner.id === context.runnerId);
-      const effectiveCWD = context.cwd || nextRunner?.workspace.path || '';
-      const contextUpdate = {
-        profile: context.profile,
-        model: context.model || undefined,
-        reasoningEffort: context.reasoningEffort || undefined,
-        cwd: effectiveCWD,
-        runnerId: context.runnerId || undefined,
-        environmentProfile: context.environmentProfile || undefined,
-        runner: nextRunner,
-      };
-      optimisticRemoteConversationRef.current = {
-        ...optimisticConversation,
-        runnerId: context.runnerId,
-        environmentProfile: context.environmentProfile || undefined,
-        cwd: context.cwd || undefined,
-      };
-      patchOptimisticConversationContext(contextUpdate);
-    }
+    contextSettings.commitDialog((context) => {
+      if (voice !== undefined) realtime.setVoice(voice);
+      const optimisticConversation = optimisticRemoteConversationRef.current;
+      if (
+        conversationId &&
+        optimisticConversation?.conversationId === conversationId &&
+        !optimisticConversation.confirmed
+      ) {
+        const nextRunner = runners.find((runner) => runner.id === context.runnerId);
+        const effectiveCWD = context.cwd || nextRunner?.workspace.path || '';
+        const contextUpdate = {
+          profile: context.profile,
+          model: context.model || undefined,
+          reasoningEffort: context.reasoningEffort || undefined,
+          cwd: effectiveCWD,
+          runnerId: context.runnerId || undefined,
+          environmentProfile: context.environmentProfile || undefined,
+          runner: nextRunner,
+        };
+        optimisticRemoteConversationRef.current = {
+          ...optimisticConversation,
+          runnerId: context.runnerId,
+          environmentProfile: context.environmentProfile || undefined,
+          cwd: context.cwd || undefined,
+        };
+        patchOptimisticConversationContext(contextUpdate);
+      }
+    });
   };
 
   const conversationSearchReturnFocusSelector = mobileLayout

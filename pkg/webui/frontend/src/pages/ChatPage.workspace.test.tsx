@@ -406,6 +406,7 @@ describe('ChatPage workspace tools and browsers', () => {
     });
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    await flushAsyncUpdates();
     expect(mockStreamChat).not.toHaveBeenCalled();
     expect(mockGetConversation).not.toHaveBeenCalled();
     if (!workspaceCwd) {

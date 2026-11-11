@@ -129,6 +129,7 @@ describe('ChatPage model and reasoning settings', () => {
     fireEvent.change(screen.getByLabelText('Working directory'), {
       target: { value: '/workspace/selected' },
     });
+    fireEvent.blur(screen.getByLabelText('Working directory'));
     await flushAsyncUpdates();
     expect(mockGetChatSettings).toHaveBeenLastCalledWith(undefined, 'runner-1', {
       cwd: '/workspace/selected',
@@ -146,6 +147,7 @@ describe('ChatPage model and reasoning settings', () => {
     fireEvent.change(screen.getByLabelText('Working directory'), {
       target: { value: '/workspace/other' },
     });
+    fireEvent.keyDown(screen.getByLabelText('Working directory'), { key: 'Enter' });
     await flushAsyncUpdates();
     expect(mockGetChatSettings).toHaveBeenLastCalledWith('zzz-runner', 'runner-1', {
       cwd: '/workspace/other',
@@ -173,6 +175,11 @@ describe('ChatPage model and reasoning settings', () => {
     });
     expect(screen.getByTestId('composer-textarea')).toBeEnabled();
     expect(screen.queryByTestId('new-chat-dialog')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    await flushAsyncUpdates();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await flushAsyncUpdates();
+    expect(screen.getByTestId('composer-textarea')).toBeEnabled();
   });
 
   it.each([
@@ -253,6 +260,7 @@ describe('ChatPage model and reasoning settings', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
+    await flushAsyncUpdates();
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'hello' },
     });

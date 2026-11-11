@@ -12,6 +12,7 @@ interface CWDSuggestionsOptions {
   environmentProfile: string;
   profile: string;
   runners: Runner[];
+  onCommit: (path: string) => void;
 }
 
 // Own the query, keyboard selection, and request lifetime together: a change of
@@ -24,6 +25,7 @@ export const useCWDSuggestions = ({
   environmentProfile,
   profile,
   runners,
+  onCommit,
 }: CWDSuggestionsOptions) => {
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState<CWDHint[]>([]);
@@ -108,7 +110,10 @@ export const useCWDSuggestions = ({
     setQuery(value);
   };
 
-  const selectSuggestion = (path: string) => reset(path, path);
+  const selectSuggestion = (path: string) => {
+    reset(path, path);
+    onCommit(path.trim());
+  };
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (suggestionsOpen && suggestions.length > 0) {
@@ -171,6 +176,7 @@ export const useCWDSuggestions = ({
       },
       onCwdInputBlur: () => {
         focusedRef.current = false;
+        onCommit(query.trim());
         window.setTimeout(() => {
           setSuggestionsOpen(false);
           setIndex(-1);

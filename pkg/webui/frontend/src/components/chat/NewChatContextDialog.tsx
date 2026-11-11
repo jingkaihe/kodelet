@@ -72,6 +72,7 @@ interface NewChatContextDialogProps {
   modelOptions: string[];
   reasoningEffortDraft: string;
   reasoningEffortLoading: boolean;
+  canCommitPendingSettings?: boolean;
   reasoningEffortOptions: string[];
   settingsError?: string;
   runners: Runner[];
@@ -106,6 +107,7 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
       modelOptions,
       reasoningEffortDraft,
       reasoningEffortLoading,
+      canCommitPendingSettings,
       reasoningEffortOptions,
       settingsError,
       runners,
@@ -480,10 +482,9 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
               <button
                 className="new-chat-primary-button"
                 disabled={
-                  reasoningEffortLoading ||
-                  Boolean(settingsError) ||
                   !selectedRunnerAvailable ||
-                  !profileDraft.trim()
+                  (!canCommitPendingSettings &&
+                    (reasoningEffortLoading || Boolean(settingsError) || !profileDraft.trim()))
                 }
                 onClick={() => onCommit(voice ? (voiceDraft ?? voice.value) : undefined)}
                 type="button"

@@ -118,8 +118,18 @@ export const useChatSettings = ({
   const [draft, setDraft] = useState(() => defaultContext({}));
   const [dialogOpen, setDialogOpen] = useState(false);
   const [discovering, setDiscovering] = useState(false);
+  const [directoryDiscovery, setDirectoryDiscovery] = useState(false);
   const [settingsError, setSettingsError] = useState('');
   const discoveryRequestRef = useRef(0);
+  const discoveryRef = useRef<{
+    key: string;
+    runnerId: string;
+    environmentProfile: string;
+    cwd: string;
+    promise: Promise<ModelSettings | null> | null;
+  } | null>(null);
+  const resolvedDiscoveryKeyRef = useRef('');
+  const commitRequestRef = useRef(0);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const cwd = useCWDSuggestions({
     conversationId,
@@ -129,6 +139,10 @@ export const useChatSettings = ({
     environmentProfile: draft.environmentProfile,
     profile: draft.profile,
     runners,
+    onCommit: (path) => {
+      if (path !== draft.cwd) commitRequestRef.current += 1;
+      setDraft((current) => ({ ...current, cwd: path }));
+    },
   });
   const [catalog, setCatalog] = useState<{
     runnerId: string;
@@ -188,10 +202,23 @@ export const useChatSettings = ({
     profileName: string,
     runnerId = draft.runnerId,
     discoverProfiles = false,
-    workspace = { cwd: cwd.query.trim(), environmentProfile: draft.environmentProfile.trim() },
+    workspace = { cwd: draft.cwd, environmentProfile: draft.environmentProfile.trim() },
     selectInitialProfile = false
   ) => {
     const previous = draft;
+    const profile = discoverProfiles && !previous.profileExplicit ? undefined : profileName;
+    const key = JSON.stringify([runnerId, workspace.cwd, workspace.environmentProfile, profile]);
+    // Reopening the dialog or committing the same target must not reload extensions.
+    if (resolvedDiscoveryKeyRef.current === key && previous.profile)
+      return Promise.resolve(previous);
+    if (discoveryRef.current?.key === key && discoveryRef.current.promise)
+      return discoveryRef.current.promise;
+    resolvedDiscoveryKeyRef.current = '';
+    setDirectoryDiscovery(
+      discoveryRef.current?.runnerId === runnerId &&
+        discoveryRef.current.environmentProfile === workspace.environmentProfile &&
+        discoveryRef.current.cwd !== workspace.cwd
+    );
     const requestId = ++discoveryRequestRef.current;
     setDraft((current) => ({
       ...current,
@@ -202,14 +229,10 @@ export const useChatSettings = ({
     }));
     setDiscovering(true);
     setSettingsError('');
-    void apiService
-      .getChatSettings(
-        discoverProfiles && !previous.profileExplicit ? undefined : profileName,
-        runnerId || undefined,
-        workspace
-      )
+    const promise = apiService
+      .getChatSettings(profile, runnerId || undefined, workspace)
       .then((nextSettings) => {
-        if (!nextSettings || discoveryRequestRef.current !== requestId) return;
+        if (!nextSettings || discoveryRequestRef.current !== requestId) return null;
         const next = modelSettingsFromChatSettings(nextSettings);
         if (!next.profile) throw new Error('Chat settings did not return a model profile');
         const preserveModel =
@@ -217,18 +240,24 @@ export const useChatSettings = ({
           runnerId === selected.runnerId &&
           next.modelOptions.includes(previous.model);
         setSettings((current) => ({ ...current, profiles: nextSettings.profiles }));
-        setDraft((current) => ({
-          ...current,
+        const resolved = {
           ...next,
           profileExplicit: !discoverProfiles || previous.profileExplicit,
           model: preserveModel ? previous.model : next.model,
           ...preserveReasoningEffort(previous, next),
-        }));
+        };
+        resolvedDiscoveryKeyRef.current = key;
+        if (discoveryRef.current) discoveryRef.current.promise = null;
+        setDraft((current) => ({ ...current, ...resolved }));
         if (selectInitialProfile) setSelected((current) => ({ ...current, ...next }));
         setDiscovering(false);
+        setDirectoryDiscovery(false);
+        return resolved;
       })
       .catch((error) => {
-        if (discoveryRequestRef.current !== requestId) return;
+        if (discoveryRequestRef.current !== requestId) return null;
+        if (discoveryRef.current) discoveryRef.current.promise = null;
+        resolvedDiscoveryKeyRef.current = '';
         console.error('Failed to load profile reasoning settings', error);
         setSettingsError(
           error instanceof Error ? error.message : 'Failed to load model profile settings'
@@ -239,7 +268,11 @@ export const useChatSettings = ({
           modelOptions: [],
         }));
         setDiscovering(false);
+        setDirectoryDiscovery(false);
+        return null;
       });
+    discoveryRef.current = { key, runnerId, ...workspace, promise };
+    return promise;
   };
 
   const onDiscoverRunnerProfile = useEffectEvent(
@@ -257,7 +290,7 @@ export const useChatSettings = ({
   const discoveryEnvironmentProfile = dialogOpen
     ? draft.environmentProfile
     : selected.environmentProfile;
-  const discoveryCWD = dialogOpen ? cwd.query : selected.cwd;
+  const discoveryCWD = dialogOpen ? draft.cwd : selected.cwd;
   useEffect(() => {
     if (!discoveryRunnerId || !loaded || (!dialogOpen && (conversationId || selected.profile)))
       return;
@@ -267,9 +300,6 @@ export const useChatSettings = ({
       discoveryCWD,
       !dialogOpen
     );
-    return () => {
-      discoveryRequestRef.current += 1;
-    };
   }, [
     dialogOpen,
     discoveryRunnerId,
@@ -282,7 +312,10 @@ export const useChatSettings = ({
 
   const invalidateDiscovery = () => {
     discoveryRequestRef.current += 1;
+    commitRequestRef.current += 1;
+    if (discoveryRef.current) discoveryRef.current.promise = null;
     setDiscovering(false);
+    setDirectoryDiscovery(false);
     setSettingsError('');
   };
   const rememberFocus = () => {
@@ -295,6 +328,8 @@ export const useChatSettings = ({
     setSelected(context);
     setDraft(context);
     invalidateDiscovery();
+    resolvedDiscoveryKeyRef.current = '';
+    discoveryRef.current = null;
     cwd.reset('', '');
     setDialogOpen(true);
   };
@@ -320,20 +355,37 @@ export const useChatSettings = ({
     cwd.cancel();
     setDialogOpen(false);
   };
-  const commitDialog = (): ChatContextSettings | null => {
-    if (discovering || settingsError || !loaded || !draft.runnerId || !draft.profile.trim())
-      return null;
-    const context = {
-      ...draft,
-      profile: draft.profile.trim(),
-      profileExplicit: true,
-      environmentProfile: draft.environmentProfile.trim(),
-      cwd: cwd.query.trim(),
+  const commitDialog = (onCommit: (context: ChatContextSettings) => void): void => {
+    if (!loaded || !draft.runnerId) return;
+    const directory = cwd.query.trim();
+    const requestId = ++commitRequestRef.current;
+    const finish = (model: ModelSettings | null) => {
+      if (!model?.profile.trim() || requestId !== commitRequestRef.current) return;
+      const context = {
+        ...draft,
+        ...model,
+        profile: model.profile.trim(),
+        profileExplicit: true,
+        environmentProfile: draft.environmentProfile.trim(),
+        cwd: directory,
+      };
+      setSelected(context);
+      cwd.reset(directory);
+      setDialogOpen(false);
+      onCommit(context);
     };
-    setSelected(context);
-    cwd.reset(cwd.query);
-    setDialogOpen(false);
-    return context;
+    if (directory !== draft.cwd) {
+      // Start also commits typed paths and continues after their settings resolve.
+      setDraft((current) => ({ ...current, cwd: directory }));
+      void discoverProfile(draft.profile, draft.runnerId, true, {
+        cwd: directory,
+        environmentProfile: draft.environmentProfile.trim(),
+      }).then(finish);
+    } else if (discovering && discoveryRef.current?.promise) {
+      void discoveryRef.current.promise.then(finish);
+    } else if (!settingsError) {
+      finish(draft);
+    }
   };
 
   // Like the TUI's /model picker: discover every visible profile's models.
@@ -468,6 +520,10 @@ export const useChatSettings = ({
         : undefined,
     dialogProps: {
       ...cwd.props,
+      onCwdInputChange: (value: string) => {
+        commitRequestRef.current += 1;
+        cwd.props.onCwdInputChange(value);
+      },
       availableProfiles,
       profileDraft: draft.profile,
       modelDraft: draft.model,
@@ -475,26 +531,34 @@ export const useChatSettings = ({
       reasoningEffortDraft: draft.reasoningEffort,
       reasoningEffortOptions: draft.reasoningEffortOptions,
       reasoningEffortLoading: discovering || !loaded,
+      canCommitPendingSettings: loaded && (directoryDiscovery || cwd.query.trim() !== draft.cwd),
       settingsError,
       runners,
       runnerIdDraft: draft.runnerId,
       environmentProfileDraft: draft.environmentProfile,
       returnFocusRef,
       onCancel: closeDialog,
-      onProfileDraftChange: discoverProfile,
+      onProfileDraftChange: (profile: string) => {
+        commitRequestRef.current += 1;
+        void discoverProfile(profile);
+      },
       onModelDraftChange: (model: string) => setDraft((current) => ({ ...current, model })),
       onReasoningEffortDraftChange: (reasoningEffort: string) =>
         setDraft((current) => ({ ...current, reasoningEffort, reasoningEffortExplicit: true })),
       onRunnerDraftChange: (runnerId: string) => {
+        commitRequestRef.current += 1;
         setDraft((current) => ({
           ...current,
           runnerId,
+          cwd: '',
           ...(runnerId !== current.runnerId ? { model: '', modelOptions: [] } : {}),
         }));
         cwd.reset('', '');
       },
-      onEnvironmentProfileDraftChange: (environmentProfile: string) =>
-        setDraft((current) => ({ ...current, environmentProfile })),
+      onEnvironmentProfileDraftChange: (environmentProfile: string) => {
+        commitRequestRef.current += 1;
+        setDraft((current) => ({ ...current, environmentProfile }));
+      },
     },
   };
 };
