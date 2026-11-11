@@ -1608,21 +1608,52 @@ func getCurrentWebUIProfile() string {
 // handleGetChatSettings handles GET /api/chat/settings.
 func (s *Server) handleGetChatSettings(w http.ResponseWriter, r *http.Request) {
 	profile := strings.TrimSpace(r.URL.Query().Get("profile"))
-	if profile == "" {
-		profile = getCurrentWebUIProfile()
-	}
-
 	runnerID := strings.TrimSpace(r.URL.Query().Get("runnerId"))
+	status := s.EmbeddedRunnerStatus()
 	if runnerID == "" {
-		runnerID = s.EmbeddedRunnerStatus().RunnerID
+		runnerID = status.RunnerID
 	}
-	config, err := s.resolveModelProfile(r.Context(), runnerID, profile, "")
-	if err != nil {
-		s.writeErrorResponse(w, http.StatusBadRequest, "failed to resolve chat settings", err)
-		return
+	var config llmtypes.Config
+	var err error
+	// Clients need runner metadata before they can select a workspace and
+	// discover its profiles. Bootstrapping must not require a model.
+	if r.URL.Query().Get("bootstrap") != "true" {
+		if runnerID != "" {
+			request := chat.ChatRequest{
+				RunnerID:           runnerID,
+				CWD:                r.URL.Query().Get("cwd"),
+				EnvironmentProfile: r.URL.Query().Get("environmentProfile"),
+				ConversationID:     r.URL.Query().Get("conversationId"),
+			}
+			if values, present := r.URL.Query()["options"]; present {
+				if len(values) != 1 || len(values[0]) > 16*1024 {
+					s.writeErrorResponse(w, http.StatusBadRequest, "settings options must be one JSON object of at most 16 KiB", nil)
+					return
+				}
+				request.Options = &llmtypes.ExecutionOptions{}
+				if err := json.Unmarshal([]byte(values[0]), request.Options); err != nil {
+					s.writeErrorResponse(w, http.StatusBadRequest, "invalid settings options", err)
+					return
+				}
+				if err := (protocol.WorkspaceDiscoverParams{Options: request.Options}).Validate(); err != nil {
+					s.writeErrorResponse(w, http.StatusBadRequest, "invalid settings options", err)
+					return
+				}
+			}
+			config, err = s.resolveChatModelProfile(r.Context(), request, profile, "")
+		} else if profile != "" || llm.HasConfiguredProfile(getCurrentWebUIProfile()) {
+			config, err = s.resolveModelProfile(r.Context(), runnerID, profile, "")
+		}
+		if err != nil {
+			message := "failed to resolve chat settings"
+			if errors.Is(err, errNoVisibleModelProfiles) {
+				message = errNoVisibleModelProfiles.Error()
+			}
+			s.writeErrorResponse(w, http.StatusBadRequest, message, err)
+			return
+		}
 	}
 
-	status := s.EmbeddedRunnerStatus()
 	defaultCWD, hostID := "", ""
 	if status.Ready && s.runnerRegistry != nil {
 		if runner, found := s.runnerRegistry.Runner(status.RunnerID); found && runner.Connected {

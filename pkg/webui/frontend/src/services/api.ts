@@ -323,7 +323,11 @@ class ApiService {
     return this.request('/api/transcription', { method: 'POST', body, signal });
   }
 
-  async getChatSettings(profile?: string, runnerId?: string): Promise<ChatSettings> {
+  async getChatSettings(
+    profile?: string,
+    runnerId?: string,
+    workspace?: { cwd?: string; environmentProfile?: string; bootstrap?: boolean }
+  ): Promise<ChatSettings> {
     const params = new URLSearchParams();
     if (profile) {
       params.append('profile', profile);
@@ -331,6 +335,10 @@ class ApiService {
     if (runnerId) {
       params.append('runnerId', runnerId);
     }
+    if (workspace?.cwd) params.append('cwd', workspace.cwd);
+    if (workspace?.environmentProfile)
+      params.append('environmentProfile', workspace.environmentProfile);
+    if (workspace?.bootstrap) params.append('bootstrap', 'true');
     const suffix = params.toString();
     return this.request<ChatSettings>(`/api/chat/settings${suffix ? `?${suffix}` : ''}`);
   }

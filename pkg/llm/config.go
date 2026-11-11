@@ -94,10 +94,11 @@ var modelSettingKeys = []string{
 	"anthropic.adaptive_thinking",
 }
 
-// ValidateModelProfiles validates daemon model configuration at startup. Clients,
-// runners and saved-conversation shared loaders must not call this: they do not
-// need a default model profile. Removed top-level file and environment settings
-// are rejected; explicit model flags remain per-request overrides.
+// ValidateModelProfiles validates daemon model definitions at startup without
+// requiring profiles or resolving the default, which may be extension-defined.
+// Clients, runners and saved-conversation shared loaders must not call this.
+// Removed top-level file and environment settings are rejected; explicit model
+// flags remain per-request overrides.
 func ValidateModelProfiles() error {
 	for _, key := range modelSettingKeys {
 		if viper.InConfig(key) {
@@ -108,10 +109,12 @@ func ValidateModelProfiles() error {
 			return errors.Errorf("model environment setting %s is not supported; configure %s in profiles.<name> instead", envKey, key)
 		}
 	}
-	if _, err := GetConfigFromViper(); err != nil {
-		return err
+	rawProfiles := viper.Get("profiles")
+	profiles, ok := settingValueMap(rawProfiles)
+	if rawProfiles != nil && !ok {
+		return errors.New("profiles must be a mapping")
 	}
-	for _, name := range slices.Sorted(maps.Keys(viper.GetStringMap("profiles"))) {
+	for _, name := range slices.Sorted(maps.Keys(profiles)) {
 		if strings.TrimSpace(name) == "" {
 			return errors.New("model profile names must not be empty")
 		}

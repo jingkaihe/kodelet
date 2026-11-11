@@ -218,7 +218,7 @@ func prepareOneShotRunner(ctx context.Context, cmd *cobra.Command, server, token
 			cwd = defaultCWD
 		}
 		if strings.TrimSpace(selector) == "" {
-			settings, err := runner.ChatSettings(ctx, request.Profile)
+			settings, err := runner.ChatSettingsBootstrap(ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -259,7 +259,7 @@ func prepareOneShotRunner(ctx context.Context, cmd *cobra.Command, server, token
 		request.RunnerID = history.RunnerID
 	} else {
 		if strings.TrimSpace(selector) == "" {
-			settings, err := runner.ChatSettings(ctx, request.Profile)
+			settings, err := runner.ChatSettingsBootstrap(ctx)
 			if err != nil {
 				return nil, err
 			}

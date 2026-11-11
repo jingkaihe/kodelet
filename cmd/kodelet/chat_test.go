@@ -311,7 +311,7 @@ func TestPrepareRemoteChatSettingsUsesControlPlaneProfiles(t *testing.T) {
 	runner, err := chatpkg.NewClient(server.URL, "", "runner-1")
 	require.NoError(t, err)
 
-	profile, options, settings, defaultCWD, err := prepareRemoteChatSettings(t.Context(), runner, "work")
+	profile, options, settings, defaultCWD, err := prepareRemoteChatSettings(t.Context(), runner, chatpkg.WorkspaceTarget{Profile: "work"})
 	require.NoError(t, err)
 	assert.Equal(t, "work", profile)
 	assert.Equal(t, []string{"default", "work"}, options)
@@ -336,7 +336,7 @@ func TestPrepareRemoteChatSettingsRequiresResolvedProfile(t *testing.T) {
 	runner, err := chatpkg.NewClient(server.URL, "", "runner-1")
 	require.NoError(t, err)
 
-	profile, options, settings, _, err := prepareRemoteChatSettings(t.Context(), runner, "")
+	profile, options, settings, _, err := prepareRemoteChatSettings(t.Context(), runner, chatpkg.WorkspaceTarget{})
 	require.ErrorContains(t, err, "did not return a model profile")
 	assert.Empty(t, profile)
 	assert.Empty(t, options)
@@ -608,6 +608,72 @@ func TestPrepareDaemonChatUsesRunnerDirectoriesAndTypedRestrictions(t *testing.T
 	assert.EqualValues(t, 1, discoveries.Load())
 	_, ok := config.Runner.(chatpkg.ConversationStreamer)
 	assert.True(t, ok, "wrapper promotes shared stream and UI transport methods")
+}
+
+func TestPrepareDaemonChatResolvesExtensionProfilesInSelectedWorkspace(t *testing.T) {
+	for _, explicitRunner := range []bool{false, true} {
+		name, runnerID := "default runner", "default-runner"
+		if explicitRunner {
+			name, runnerID = "explicit runner", "selected-runner"
+		}
+		t.Run(name, func(t *testing.T) {
+			var bootstrapCalls, profileCalls int
+			daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				query := r.URL.Query()
+				switch r.URL.Path {
+				case "/api/runners":
+					require.NoError(t, json.NewEncoder(w).Encode(runnerListAPIResponse{
+						Runners: []runnerregistry.Runner{{ID: runnerID, Connected: true, Status: runnerregistry.RunnerStatusIdle}},
+					}))
+				case "/api/chat/settings":
+					if query.Get("bootstrap") == "true" {
+						bootstrapCalls++
+						require.NoError(t, json.NewEncoder(w).Encode(chatpkg.ControlPlaneChatSettings{
+							DefaultRunnerID: "default-runner", DefaultRunnerReady: true,
+						}))
+						return
+					}
+					profileCalls++
+					assert.Equal(t, runnerID, query.Get("runnerId"))
+					assert.Equal(t, "~/selected", query.Get("cwd"))
+					assert.Equal(t, "review", query.Get("environmentProfile"))
+					assert.JSONEq(t, `{"noSkills":true}`, query.Get("options"))
+					profile := query.Get("profile")
+					if profile == "" {
+						profile = "alpha"
+					}
+					require.NoError(t, json.NewEncoder(w).Encode(chatpkg.ControlPlaneChatSettings{
+						CurrentProfile: profile, Model: profile + "-model",
+						Profiles: []chatpkg.ControlPlaneProfileOption{{Name: "alpha", Scope: "extension"}, {Name: "zeta", Scope: "extension"}},
+					}))
+				case "/api/chat/cwd-suggestions":
+					assert.Equal(t, runnerID, query.Get("runnerId"))
+					assert.Equal(t, "alpha", query.Get("profile"))
+					require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceCWDHintsResult{BaseDir: "/runner/selected"}))
+				default:
+					t.Errorf("unexpected endpoint: %s", r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(daemon.Close)
+			args := []string{"--server=" + daemon.URL, "--cwd=~/selected", "--runner-profile=review", "--no-skills"}
+			if explicitRunner {
+				args = append(args, "--runner="+runnerID)
+			}
+			config, err := prepareDaemonChat(t.Context(), daemonChatCommandForTest(t, args...))
+			require.NoError(t, err)
+			assert.Equal(t, "alpha", config.Profile)
+			assert.Equal(t, "alpha-model", config.Model)
+			assert.Equal(t, []string{"alpha", "zeta"}, config.ProfileOptions)
+			assert.Equal(t, "/runner/selected", config.CWD)
+			assert.Equal(t, 2, profileCalls)
+			if explicitRunner {
+				assert.Zero(t, bootstrapCalls, "an explicit runner never needs the default runner")
+			} else {
+				assert.Equal(t, 1, bootstrapCalls)
+			}
+		})
+	}
 }
 
 func TestPrepareDaemonChatResumeDoesNotRequireCurrentDefaultRunner(t *testing.T) {

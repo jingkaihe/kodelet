@@ -9,6 +9,7 @@ const DEFAULT_REASONING_EFFORT = 'medium';
 
 interface ModelSettings {
   profile: string;
+  profileExplicit: boolean;
   model: string;
   modelOptions: string[];
   reasoningEffort: string;
@@ -40,6 +41,7 @@ const modelSettingsFromChatSettings = (settings: Partial<ChatSettings>): ModelSe
   }
   return {
     profile: settings.currentProfile?.trim() || '',
+    profileExplicit: false,
     model,
     modelOptions: Array.from(
       new Set(
@@ -116,6 +118,7 @@ export const useChatSettings = ({
   const [draft, setDraft] = useState(() => defaultContext({}));
   const [dialogOpen, setDialogOpen] = useState(false);
   const [discovering, setDiscovering] = useState(false);
+  const [settingsError, setSettingsError] = useState('');
   const discoveryRequestRef = useRef(0);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const cwd = useCWDSuggestions({
@@ -135,12 +138,11 @@ export const useChatSettings = ({
   const catalogRequestRef = useRef(0);
 
   useEffect(() => {
-    // Bootstrap once; runner-specific settings are discovered in the dialog.
+    // Bootstrap once; resolve models only after selecting a runner workspace.
     void apiService
-      .getChatSettings()
+      .getChatSettings(undefined, undefined, { bootstrap: true })
       .then((nextSettings) => {
         const context = defaultContext(nextSettings);
-        if (!context.profile) throw new Error('Chat settings did not return a model profile');
         setSettings(nextSettings);
         setLoaded(true);
         // Preserve any runner choice made while bootstrap settings were loading.
@@ -185,32 +187,27 @@ export const useChatSettings = ({
   const discoverProfile = (
     profileName: string,
     runnerId = draft.runnerId,
-    discoverProfiles = false
+    discoverProfiles = false,
+    workspace = { cwd: cwd.query.trim(), environmentProfile: draft.environmentProfile.trim() },
+    selectInitialProfile = false
   ) => {
     const previous = draft;
     const requestId = ++discoveryRequestRef.current;
     setDraft((current) => ({
       ...current,
-      ...(!discoverProfiles ? { profile: profileName } : {}),
+      ...(!discoverProfiles ? { profile: profileName, profileExplicit: true } : {}),
       ...(profileName !== previous.profile || runnerId !== selected.runnerId
         ? { model: '', modelOptions: [] }
         : {}),
     }));
     setDiscovering(true);
+    setSettingsError('');
     void apiService
-      .getChatSettings(discoverProfiles ? undefined : profileName, runnerId || undefined)
-      .then((nextSettings) => {
-        if (discoveryRequestRef.current !== requestId) return;
-        // A previously selected profile need not exist on the new runner.
-        if (
-          discoverProfiles &&
-          profileName !== nextSettings.currentProfile &&
-          nextSettings.profiles.some((profile) => profile.name === profileName)
-        ) {
-          return apiService.getChatSettings(profileName, runnerId || undefined);
-        }
-        return nextSettings;
-      })
+      .getChatSettings(
+        discoverProfiles && !previous.profileExplicit ? undefined : profileName,
+        runnerId || undefined,
+        workspace
+      )
       .then((nextSettings) => {
         if (!nextSettings || discoveryRequestRef.current !== requestId) return;
         const next = modelSettingsFromChatSettings(nextSettings);
@@ -223,42 +220,70 @@ export const useChatSettings = ({
         setDraft((current) => ({
           ...current,
           ...next,
+          profileExplicit: !discoverProfiles || previous.profileExplicit,
           model: preserveModel ? previous.model : next.model,
           ...preserveReasoningEffort(previous, next),
         }));
+        if (selectInitialProfile) setSelected((current) => ({ ...current, ...next }));
         setDiscovering(false);
       })
       .catch((error) => {
         if (discoveryRequestRef.current !== requestId) return;
         console.error('Failed to load profile reasoning settings', error);
+        setSettingsError(
+          error instanceof Error ? error.message : 'Failed to load model profile settings'
+        );
         setDraft((current) => ({
           ...current,
-          profile: previous.profile,
-          model: discoverProfiles ? selected.model : previous.model,
-          modelOptions: discoverProfiles ? selected.modelOptions : previous.modelOptions,
-          reasoningEffort: previous.reasoningEffort,
-          reasoningEffortOptions: previous.reasoningEffortOptions,
-          reasoningEffortExplicit: previous.reasoningEffortExplicit,
-          ...(discoverProfiles ? { runnerId: selected.runnerId } : {}),
+          model: '',
+          modelOptions: [],
         }));
         setDiscovering(false);
       });
   };
 
-  const onDiscoverRunnerProfile = useEffectEvent((runnerId: string) => {
-    discoverProfile(draft.profile, runnerId, true);
-  });
+  const onDiscoverRunnerProfile = useEffectEvent(
+    (runnerId: string, environmentProfile: string, workingDirectory: string, initial: boolean) => {
+      discoverProfile(
+        draft.profile,
+        runnerId,
+        true,
+        { cwd: workingDirectory.trim(), environmentProfile: environmentProfile.trim() },
+        initial
+      );
+    }
+  );
+  const discoveryRunnerId = dialogOpen ? draft.runnerId : selected.runnerId;
+  const discoveryEnvironmentProfile = dialogOpen
+    ? draft.environmentProfile
+    : selected.environmentProfile;
+  const discoveryCWD = dialogOpen ? cwd.query : selected.cwd;
   useEffect(() => {
-    if (!dialogOpen || !draft.runnerId || !loaded) return;
-    onDiscoverRunnerProfile(draft.runnerId);
+    if (!discoveryRunnerId || !loaded || (!dialogOpen && (conversationId || selected.profile)))
+      return;
+    onDiscoverRunnerProfile(
+      discoveryRunnerId,
+      discoveryEnvironmentProfile,
+      discoveryCWD,
+      !dialogOpen
+    );
     return () => {
       discoveryRequestRef.current += 1;
     };
-  }, [dialogOpen, draft.runnerId, loaded]);
+  }, [
+    dialogOpen,
+    discoveryRunnerId,
+    discoveryEnvironmentProfile,
+    discoveryCWD,
+    selected.profile,
+    conversationId,
+    loaded,
+  ]);
 
   const invalidateDiscovery = () => {
     discoveryRequestRef.current += 1;
     setDiscovering(false);
+    setSettingsError('');
   };
   const rememberFocus = () => {
     returnFocusRef.current =
@@ -275,7 +300,11 @@ export const useChatSettings = ({
   };
   const openDialog = (profile = selected.profile) => {
     rememberFocus();
-    setDraft({ ...selected, profile });
+    setDraft({
+      ...selected,
+      profile,
+      profileExplicit: selected.profileExplicit || profile !== selected.profile,
+    });
     invalidateDiscovery();
     cwd.setQuery(selected.runnerId ? selected.cwd : '');
     setDialogOpen(true);
@@ -292,10 +321,12 @@ export const useChatSettings = ({
     setDialogOpen(false);
   };
   const commitDialog = (): ChatContextSettings | null => {
-    if (discovering || !loaded || !draft.runnerId || !draft.profile.trim()) return null;
+    if (discovering || settingsError || !loaded || !draft.runnerId || !draft.profile.trim())
+      return null;
     const context = {
       ...draft,
       profile: draft.profile.trim(),
+      profileExplicit: true,
       environmentProfile: draft.environmentProfile.trim(),
       cwd: cwd.query.trim(),
     };
@@ -318,7 +349,12 @@ export const useChatSettings = ({
       profileNames.push(selected.profile);
     setCatalogLoading(true);
     void Promise.all(
-      profileNames.map((name) => apiService.getChatSettings(name, runnerId || undefined))
+      profileNames.map((name) =>
+        apiService.getChatSettings(name, runnerId || undefined, {
+          cwd: selected.cwd,
+          environmentProfile: selected.environmentProfile,
+        })
+      )
     )
       .then((settingsList) => {
         if (catalogRequestRef.current !== requestId) return;
@@ -369,7 +405,7 @@ export const useChatSettings = ({
     );
     if (!option) return null;
     const update: Partial<Conversation> = { model: option.model };
-    const next: ChatContextSettings = { ...selected, model: option.model };
+    const next: ChatContextSettings = { ...selected, model: option.model, profileExplicit: true };
     if (option.profile !== selected.profile) {
       next.profile = option.profile;
       setDraft((current) => ({ ...current, profile: option.profile }));
@@ -439,6 +475,7 @@ export const useChatSettings = ({
       reasoningEffortDraft: draft.reasoningEffort,
       reasoningEffortOptions: draft.reasoningEffortOptions,
       reasoningEffortLoading: discovering || !loaded,
+      settingsError,
       runners,
       runnerIdDraft: draft.runnerId,
       environmentProfileDraft: draft.environmentProfile,

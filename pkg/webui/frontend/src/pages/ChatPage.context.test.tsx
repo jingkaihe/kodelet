@@ -65,6 +65,7 @@ describe('ChatPage working directories and runner selection', () => {
       expect(screen.getByTestId('new-chat-dialog')).toBeInTheDocument();
       expect(screen.queryByTestId('cwd-suggestions')).not.toBeInTheDocument();
       expect(mockGetCWDHints).not.toHaveBeenLastCalledWith('/workspace/kodelet', expect.anything());
+      await flushAsyncUpdates();
       fireEvent.click(screen.getByRole('button', { name: 'Start' }));
       expect(screen.queryByTestId('new-chat-dialog')).not.toBeInTheDocument();
       expect(getActiveTab()).toHaveAttribute('title', 'New chat\n/workspace/kodelet');
@@ -106,6 +107,7 @@ describe('ChatPage working directories and runner selection', () => {
 
       fireEvent.keyDown(cwdInput, { key: 'ArrowDown' });
       fireEvent.keyDown(cwdInput, { key: 'Enter' });
+      await flushAsyncUpdates();
       fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
       expect(getActiveTab()).toHaveAttribute('title', 'New chat\n/workspace/kodelet');
@@ -147,6 +149,7 @@ describe('ChatPage working directories and runner selection', () => {
       fireEvent.keyDown(cwdInput, { key: 'Tab' });
       expect(screen.queryByTestId('cwd-suggestions')).not.toBeInTheDocument();
       expect(cwdInput).toHaveValue('/workspace/kodelet');
+      await flushAsyncUpdates();
       fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
       expect(getActiveTab()).toHaveAttribute('title', 'New chat\n/workspace/kodelet');
@@ -367,6 +370,7 @@ describe('ChatPage working directories and runner selection', () => {
       });
       expect(screen.getByTestId('cwd-suggestions')).toHaveTextContent('/runner/selected-project');
       fireEvent.click(screen.getByText('/runner/selected-project'));
+      await flushAsyncUpdates();
       fireEvent.click(screen.getByRole('button', { name: 'Start' }));
       await flushAsyncUpdates();
       expect(mockGetSlashCommands).toHaveBeenLastCalledWith('/runner/selected-project', {

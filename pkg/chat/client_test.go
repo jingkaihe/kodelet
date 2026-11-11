@@ -846,6 +846,58 @@ func TestClientChatSettingsRunnerSelection(t *testing.T) {
 	}
 }
 
+func TestClientChatSettingsForWorkspace(t *testing.T) {
+	for _, runnerID := range []string{"", "target-runner"} {
+		t.Run("runner="+runnerID, func(t *testing.T) {
+			target := WorkspaceTarget{
+				RunnerID: runnerID, Profile: " extension-profile ", CWD: "~/workspace with spaces",
+				EnvironmentProfile: "review", Options: &llmtypes.ExecutionOptions{NoSkills: new(true)},
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				assert.Equal(t, "/base/api/chat/settings", request.URL.Path)
+				assert.Equal(t, "Bearer secret", request.Header.Get("Authorization"))
+				query := request.URL.Query()
+				wantRunner := runnerID
+				if wantRunner == "" {
+					wantRunner = "client-runner"
+				}
+				assert.Equal(t, wantRunner, query.Get("runnerId"))
+				assert.Equal(t, "extension-profile", query.Get("profile"))
+				assert.Equal(t, target.CWD, query.Get("cwd"))
+				assert.Equal(t, target.EnvironmentProfile, query.Get("environmentProfile"))
+				assert.JSONEq(t, `{"noSkills":true}`, query.Get("options"))
+				require.NoError(t, json.NewEncoder(w).Encode(ControlPlaneChatSettings{CurrentProfile: "extension-profile"}))
+			}))
+			t.Cleanup(server.Close)
+			client, err := NewClient(server.URL+"/base", "secret", "client-runner")
+			require.NoError(t, err)
+			settings, err := client.ChatSettingsForWorkspace(t.Context(), target)
+			require.NoError(t, err)
+			assert.Equal(t, "extension-profile", settings.CurrentProfile)
+			target.Options.Model = new("not-a-restriction")
+			_, err = client.ChatSettingsForWorkspace(t.Context(), target)
+			require.Error(t, err, "model options must not be sent to workspace discovery")
+		})
+	}
+}
+
+func TestClientChatSettingsBootstrapWithoutProfile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		assert.Equal(t, "bootstrap=true", request.URL.RawQuery)
+		require.NoError(t, json.NewEncoder(w).Encode(ControlPlaneChatSettings{
+			ConversationHierarchyVersion: 1, DefaultRunnerID: "runner", DefaultRunnerReady: true,
+		}))
+	}))
+	t.Cleanup(server.Close)
+	client, err := NewClient(server.URL, "", "other-runner")
+	require.NoError(t, err)
+	settings, err := client.ChatSettingsBootstrap(t.Context())
+	require.NoError(t, err)
+	assert.Empty(t, settings.CurrentProfile)
+	assert.Equal(t, "runner", settings.DefaultRunnerID)
+	assert.Equal(t, 1, settings.ConversationHierarchyVersion)
+}
+
 func TestClientTreatsStaleScopedStopAsSuccess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		turnID := request.URL.Query().Get("turnId")

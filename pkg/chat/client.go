@@ -847,6 +847,30 @@ func controlPlaneMessageText(content json.RawMessage) (string, error) {
 
 // ChatSettings fetches control-plane model profiles and reasoning policy.
 func (r *Client) ChatSettings(ctx context.Context, profile string) (ControlPlaneChatSettings, error) {
+	return r.ChatSettingsForWorkspace(ctx, WorkspaceTarget{Profile: profile})
+}
+
+// ChatSettingsForWorkspace resolves profiles after discovery in the intended
+// runner workspace, including its environment profile and request restrictions.
+func (r *Client) ChatSettingsForWorkspace(ctx context.Context, target WorkspaceTarget) (ControlPlaneChatSettings, error) {
+	target.Profile = strings.TrimSpace(target.Profile)
+	if target.RunnerID == "" && r != nil {
+		target.RunnerID = r.runnerID
+	}
+	query, err := target.discoveryQueryValues()
+	if err != nil {
+		return ControlPlaneChatSettings{}, err
+	}
+	return r.chatSettings(ctx, query)
+}
+
+// ChatSettingsBootstrap fetches daemon capabilities and the default runner
+// without requiring a model profile or discovering the wrong workspace.
+func (r *Client) ChatSettingsBootstrap(ctx context.Context) (ControlPlaneChatSettings, error) {
+	return r.chatSettings(ctx, url.Values{"bootstrap": {"true"}})
+}
+
+func (r *Client) chatSettings(ctx context.Context, query url.Values) (ControlPlaneChatSettings, error) {
 	if r == nil || r.client == nil {
 		return ControlPlaneChatSettings{}, errors.New("the chat connection is not initialized")
 	}
@@ -857,13 +881,6 @@ func (r *Client) ChatSettings(ctx context.Context, profile string) (ControlPlane
 	parsed, err := url.Parse(settingsURL)
 	if err != nil {
 		return ControlPlaneChatSettings{}, errors.Wrap(err, "failed to parse chat settings URL")
-	}
-	query := parsed.Query()
-	if profile = strings.TrimSpace(profile); profile != "" {
-		query.Set("profile", profile)
-	}
-	if r.runnerID != "" {
-		query.Set("runnerId", r.runnerID)
 	}
 	parsed.RawQuery = query.Encode()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
@@ -889,7 +906,7 @@ func (r *Client) ChatSettings(ctx context.Context, profile string) (ControlPlane
 
 // WorkspaceTarget selects runner-owned discovery without interpreting paths on
 // the client. Profile selects the daemon model profile independently of the
-// runner's EnvironmentProfile; blank inherits the daemon's configured profile.
+// runner's EnvironmentProfile; blank lets the daemon select a default profile.
 // ConversationID pins discovery to persisted
 // runner/CWD affinity and the stored model profile; clients should omit Profile
 // when discovering a saved conversation.
@@ -911,6 +928,24 @@ func (t WorkspaceTarget) queryValues() url.Values {
 		}
 	}
 	return values
+}
+
+func (t WorkspaceTarget) discoveryQueryValues() (url.Values, error) {
+	if err := (protocol.WorkspaceDiscoverParams{Options: t.Options}).Validate(); err != nil {
+		return nil, err
+	}
+	values := t.queryValues()
+	if t.Options != nil {
+		data, err := json.Marshal(t.Options)
+		if err != nil {
+			return nil, err
+		}
+		if len(data) > 16*1024 {
+			return nil, errors.New("discovery options exceed 16 KiB")
+		}
+		values.Set("options", string(data))
+	}
+	return values, nil
 }
 
 // DiscoverWorkspace validates the target and discovers its slash commands on
@@ -943,19 +978,9 @@ func (r *Client) workspaceDiscovery(ctx context.Context, endpoint string, target
 	if target.RunnerID == "" && target.ConversationID == "" {
 		return errors.New("runnerId or conversationId is required for runner workspace discovery")
 	}
-	if err := (protocol.WorkspaceDiscoverParams{Options: target.Options}).Validate(); err != nil {
+	values, err := target.discoveryQueryValues()
+	if err != nil {
 		return err
-	}
-	values := target.queryValues()
-	if target.Options != nil {
-		data, err := json.Marshal(target.Options)
-		if err != nil {
-			return err
-		}
-		if len(data) > 16*1024 {
-			return errors.New("discovery options exceed 16 KiB")
-		}
-		values.Set("options", string(data))
 	}
 	if query != "" {
 		values.Set("q", query)

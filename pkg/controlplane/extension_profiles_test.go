@@ -236,7 +236,7 @@ func TestExtensionProfilesBootstrapUnderRequestingCaller(t *testing.T) {
 		RunnerID: runner.RunnerID, Generation: runner.Generation, Profiles: []extensions.Profile{parentProfile, profiles[1]},
 	}))
 	options := &llmtypes.ExecutionOptions{NoSkills: new(true), AllowedTools: &[]string{"grep", "file_read"}}
-	for _, mode := range []string{"discovery", "direct-chat", "resume"} {
+	for _, mode := range []string{"discovery", "direct-chat", "resume", "settings"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := contextWithPrincipal(t.Context(), administrativePrincipal(t.Name()))
 			_, err := server.resolveModelProfile(ctx, runner.RunnerID, "code-search", "")
@@ -254,7 +254,7 @@ func TestExtensionProfilesBootstrapUnderRequestingCaller(t *testing.T) {
 			request := chat.ChatRequest{
 				ConversationID: "new-child", RunnerID: runner.RunnerID, CWD: "/workspace/selected", EnvironmentProfile: "review", Options: options,
 			}
-			if mode == "discovery" {
+			if mode == "discovery" || mode == "settings" {
 				encoded, err := json.Marshal(options)
 				require.NoError(t, err)
 				query := url.Values{
@@ -262,9 +262,18 @@ func TestExtensionProfilesBootstrapUnderRequestingCaller(t *testing.T) {
 					"profile": {"code-search"}, "options": {string(encoded)},
 				}
 				response := httptest.NewRecorder()
-				server.handleGetSlashCommands(response, httptest.NewRequest(http.MethodGet, "/?"+query.Encode(), nil).WithContext(ctx))
-				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-				assert.NotContains(t, response.Body.String(), "profiles", "definitions remain on the daemon")
+				if mode == "settings" {
+					query.Del("profile")
+					server.handleGetChatSettings(response, httptest.NewRequest(http.MethodGet, "/?"+query.Encode(), nil).WithContext(ctx))
+					require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+					var settings ChatSettingsResponse
+					require.NoError(t, json.Unmarshal(response.Body.Bytes(), &settings))
+					assert.Equal(t, "code-search", settings.CurrentProfile)
+				} else {
+					server.handleGetSlashCommands(response, httptest.NewRequest(http.MethodGet, "/?"+query.Encode(), nil).WithContext(ctx))
+					require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+					assert.NotContains(t, response.Body.String(), "profiles", "definitions remain on the daemon")
+				}
 			} else {
 				if mode == "resume" {
 					request.ConversationID, request.CWD, request.EnvironmentProfile = "saved", "", ""
@@ -291,6 +300,134 @@ func TestExtensionProfilesBootstrapUnderRequestingCaller(t *testing.T) {
 		_, err := server.resolveChatModelProfile(ctx, chat.ChatRequest{RunnerID: runner.RunnerID, Options: options}, "code-search", "")
 		require.ErrorIs(t, err, errExtensionProfileNotRegistered, "never fall back to another model")
 	})
+}
+
+func TestAutomaticModelProfileSelection(t *testing.T) {
+	for _, test := range []struct {
+		name, selected, requested, configured, want, wantError string
+		hiddenOnly, noExtensions, noProfiles                   bool
+		wantDiscovery                                          bool
+	}{
+		{name: "extension only", want: "alpha", wantDiscovery: true},
+		{name: "extension before configured", configured: "zulu", want: "alpha", wantDiscovery: true},
+		{name: "configured before extension", configured: "aardvark", want: "aardvark", wantDiscovery: true},
+		{name: "configured default", selected: "zulu", configured: "zulu", want: "zulu"},
+		{name: "extension default", selected: "zulu", want: "zulu", wantDiscovery: true},
+		{name: "explicit overrides default", selected: "missing", requested: "zulu", want: "zulu", wantDiscovery: true},
+		{name: "hidden explicit", requested: "aaa-internal", want: "aaa-internal", wantDiscovery: true},
+		{name: "hidden default", selected: "aaa-internal", want: "aaa-internal", wantDiscovery: true},
+		{name: "missing explicit", requested: "missing", wantError: "not registered", wantDiscovery: true},
+		{name: "missing default", selected: "missing", wantError: "not registered", wantDiscovery: true},
+		{name: "invalid default", selected: "aaa-invalid", wantError: "max_tokens", wantDiscovery: true},
+		{name: "hidden only", hiddenOnly: true, wantError: "no visible model profiles", wantDiscovery: true},
+		{name: "none available", noProfiles: true, wantError: "no visible model profiles", wantDiscovery: true},
+		{name: "extensions disabled", noExtensions: true, wantError: "no visible model profiles", wantDiscovery: true},
+		{name: "configured with extensions disabled", noExtensions: true, configured: "configured", want: "configured", wantDiscovery: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			previous := viper.AllSettings()
+			viper.Reset()
+			t.Cleanup(func() { viper.Reset(); require.NoError(t, viper.MergeConfigMap(previous)) })
+			viper.Set("profile", test.selected)
+			if test.configured != "" {
+				viper.Set("profiles", map[string]any{
+					test.configured: map[string]any{"provider": "openai", "model": "gpt-4o"},
+					"aaa-hidden":    map[string]any{"provider": "openai", "model": "gpt-4o", "hidden": true},
+				})
+			}
+			server := newRunnerTestServer(t, "")
+			ctx := contextWithPrincipal(t.Context(), administrativePrincipal("alice"))
+			link := newRunnerAPITestLink()
+			runner, err := server.runnerRegistry.Register(protocol.RegisterParams{
+				ProtocolVersions: []int{protocol.Version},
+				Capabilities:     protocol.RunnerCapabilities{WorkspaceDiscovery: true},
+				Host:             protocol.Host{InstanceID: "profiles", Hostname: "worker", OS: "linux", Arch: "amd64"},
+				Workspace:        protocol.Workspace{Path: "/workspace", Name: "workspace"},
+			}, link)
+			require.NoError(t, err)
+			require.NoError(t, server.runnerRegistry.Heartbeat(runner.RunnerID, runner.ConnectionID, runner.Generation, protocol.HeartbeatParams{
+				RunnerID: runner.RunnerID, Generation: runner.Generation, State: protocol.RunnerStateIdle,
+			}))
+			// A prior workspace's earlier-sorting registration must not win.
+			require.NoError(t, server.registerExtensionProfiles(ctx, runnerpayload.Manifest{
+				RunnerID: runner.RunnerID, Generation: runner.Generation,
+				Profiles: []extensions.Profile{{
+					Name: "aaa-stale", ExtensionID: "other-workspace",
+					Options: llmtypes.ProfileConfig{"provider": "openai", "model": "gpt-4o"},
+				}},
+			}))
+			calls := 0
+			link.call = func(_ context.Context, method string, params, result any) error {
+				calls++
+				assert.Equal(t, protocol.MethodWorkspaceDiscover, method)
+				discovery := params.(protocol.WorkspaceDiscoverParams)
+				assert.Equal(t, "/workspace/selected", discovery.CWD)
+				assert.Equal(t, "review", discovery.EnvironmentProfile)
+				var profiles []extensions.Profile
+				if !test.noExtensions && !test.noProfiles {
+					for _, name := range []string{"zulu", "aaa-internal", "alpha", "aaa-invalid"} {
+						if name == test.configured {
+							continue
+						}
+						profile := extensions.Profile{
+							Name: name, ExtensionID: "profiles", Hidden: test.hiddenOnly || name == "aaa-internal",
+							Options: llmtypes.ProfileConfig{"provider": "openai", "model": "gpt-4o"},
+						}
+						if name == "aaa-invalid" {
+							profile.Options["max_tokens"] = map[string]any{"invalid": true}
+						}
+						profiles = append(profiles, profile)
+					}
+				} else if test.noExtensions {
+					require.NotNil(t, discovery.Options)
+					assert.Equal(t, new(true), discovery.Options.NoExtensions)
+				}
+				*result.(*runnerpayload.WorkspaceDiscoverResult) = runnerpayload.WorkspaceDiscoverResult{Profiles: profiles}
+				return nil
+			}
+			request := chat.ChatRequest{RunnerID: runner.RunnerID, CWD: "/workspace/selected", EnvironmentProfile: "review"}
+			if test.noExtensions {
+				request.Options = &llmtypes.ExecutionOptions{NoExtensions: new(true)}
+			}
+			config, err := server.resolveChatModelProfile(ctx, request, test.requested, "high")
+			assert.Equal(t, test.wantDiscovery, calls == 1)
+			if test.wantError != "" {
+				require.ErrorContains(t, err, test.wantError)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, test.want, config.Profile)
+			assert.Equal(t, test.want != test.configured, config.ExtensionProfile)
+			assert.Equal(t, "high", config.ReasoningEffort)
+		})
+	}
+}
+
+func TestChatSettingsBootstrapWithoutModel(t *testing.T) {
+	previous := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() { viper.Reset(); require.NoError(t, viper.MergeConfigMap(previous)) })
+	server := newRunnerTestServer(t, "")
+	for _, selected := range []string{"", "extension-default"} {
+		viper.Set("profile", selected)
+		for _, query := range []string{"", "?bootstrap=true&runnerId=not-connected"} {
+			response := httptest.NewRecorder()
+			server.handleGetChatSettings(response, httptest.NewRequest(http.MethodGet, "/api/chat/settings"+query, nil))
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			var settings ChatSettingsResponse
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &settings))
+			assert.Equal(t, 1, settings.ConversationHierarchyVersion)
+			assert.Empty(t, settings.CurrentProfile)
+			assert.Empty(t, settings.Model)
+		}
+	}
+	for _, options := range []string{`{`, `{"noExtensions":"wrong"}`, `{"model":"not-a-restriction"}`} {
+		response := httptest.NewRecorder()
+		query := url.Values{"runnerId": {"runner"}, "options": {options}}
+		server.handleGetChatSettings(response, httptest.NewRequest(http.MethodGet, "/api/chat/settings?"+query.Encode(), nil))
+		assert.Equal(t, http.StatusBadRequest, response.Code)
+		assert.Contains(t, response.Body.String(), "invalid settings options")
+	}
 }
 
 func TestChatExecutionContextKeepsProfileOwner(t *testing.T) {

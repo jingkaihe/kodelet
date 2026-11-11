@@ -82,17 +82,21 @@ type fakeRemoteChatClient struct {
 	targets  []chat.WorkspaceTarget
 	settings chat.ControlPlaneChatSettings
 
-	settingsProfiles []string
+	bootstrapCalls int
 
 	steerStarted   chan struct{}
 	steerRelease   chan struct{}
 	steerCancelled bool
 }
 
-func (c *fakeRemoteChatClient) ChatSettings(_ context.Context, profile string) (chat.ControlPlaneChatSettings, error) {
+func (c *fakeRemoteChatClient) ChatSettingsBootstrap(_ context.Context) (chat.ControlPlaneChatSettings, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.settingsProfiles = append(c.settingsProfiles, profile)
+	c.bootstrapCalls++
+	return c.settings, nil
+}
+
+func (c *fakeRemoteChatClient) ChatSettings(_ context.Context, _ string) (chat.ControlPlaneChatSettings, error) {
 	return c.settings, nil
 }
 
@@ -341,7 +345,7 @@ func TestRemoteACPDiscoversProfileAfterCapabilityChecks(t *testing.T) {
 		ConversationHierarchyVersion: 1, DefaultRunnerID: "runner-1", DefaultRunnerReady: true,
 	}}
 	client.discover = func(target chat.WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error) {
-		assert.Equal(t, []string{"", ""}, client.settingsProfiles, "hierarchy and default-runner checks must precede profile discovery")
+		assert.Equal(t, 2, client.bootstrapCalls, "model-independent hierarchy and default-runner checks must precede profile discovery")
 		assert.Equal(t, chat.WorkspaceTarget{RunnerID: "runner-1", CWD: "/workspace", Profile: "code-search"}, target)
 		return protocol.WorkspaceDiscoverResult{CWD: target.CWD}, nil
 	}

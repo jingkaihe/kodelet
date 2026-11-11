@@ -626,6 +626,7 @@ func TestGetServeConfigFromFlags_UsesConfiguredCompactRatio(t *testing.T) {
 	viper.Reset()
 	setServeModelProfileForTest(t)
 	viper.Set("compact_ratio", 0.65)
+	viper.Set("profiles.work.compact_ratio", 0.9)
 
 	cmd := newServeCommandForTest()
 
@@ -637,7 +638,7 @@ func TestGetServeConfigFromFlags_UsesConfiguredCompactRatio(t *testing.T) {
 	assert.Equal(t, 14*24*time.Hour, config.OIDC.CLISessionDuration)
 }
 
-func TestGetServeConfigFromFlagsRequiresNamedModelProfiles(t *testing.T) {
+func TestGetServeConfigFromFlagsValidatesOptionalModelProfiles(t *testing.T) {
 	const validProfiles = `
 profiles:
   flair:
@@ -647,7 +648,9 @@ profiles:
 	for _, test := range []struct {
 		name, config, wantError string
 	}{
-		{"missing selector", validProfiles, "no model profile selected"},
+		{"no model configuration", "", ""},
+		{"missing selector", validProfiles, ""},
+		{"extension-only selector", "profile: extension-model", ""},
 		{"top-level model", "profile: flair\nmodel: removed-base-model\n" + validProfiles, "top-level model setting"},
 		{"invalid unselected profile", "profile: flair\n" + validProfiles + "  invalid:\n    provider: openai\n", "model is required"},
 	} {
@@ -660,8 +663,14 @@ profiles:
 			})
 			viper.SetConfigType("yaml")
 			require.NoError(t, viper.ReadConfig(bytes.NewBufferString(test.config)))
+			viper.Set("compact_ratio", 0.65)
 			config := getServeConfigFromFlags(newServeCommandForTest())
-			require.ErrorContains(t, config.ConfigError, test.wantError)
+			if test.wantError != "" {
+				require.ErrorContains(t, config.ConfigError, test.wantError)
+			} else {
+				require.NoError(t, config.ConfigError)
+				assert.Equal(t, 0.65, config.CompactRatio)
+			}
 		})
 	}
 }

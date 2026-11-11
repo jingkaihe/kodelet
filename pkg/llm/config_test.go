@@ -306,19 +306,41 @@ func TestCodeModeConfiguration(t *testing.T) {
 }
 
 func TestValidateModelProfiles(t *testing.T) {
+	const validProfiles = `
+profiles:
+  test:
+    provider: openai
+    model: test-model
+`
 	for _, test := range []struct {
-		name, key, wantErr string
-		value              any
+		name, config, wantErr string
 	}{
-		{name: "missing selector", key: "profile", value: "", wantErr: "no model profile selected"},
-		{name: "unknown selector", key: "profile", value: "missing", wantErr: "profile 'missing' not found"},
-		{name: "malformed profile", key: "profiles.test", value: "not-a-map", wantErr: "must be a mapping"},
-		{name: "unselected profile", key: "profiles.hidden", value: map[string]any{"hidden": true, "provider": "openai"}, wantErr: `invalid model profile "hidden"`},
+		{name: "no model configuration"},
+		{name: "empty profiles", config: "profiles: {}"},
+		{name: "missing selector", config: validProfiles},
+		{name: "configured selector", config: "profile: test\n" + validProfiles},
+		{name: "extension-only selector", config: "profile: extension-model"},
+		{name: "extension selector with configured profiles", config: "profile: extension-model\n" + validProfiles},
+		{name: "malformed profiles", config: "profiles: not-a-map", wantErr: "profiles must be a mapping"},
+		{name: "profile list", config: "profiles: [test]", wantErr: "profiles must be a mapping"},
+		{name: "malformed profile", config: "profiles: {test: not-a-map}", wantErr: "must be a mapping"},
+		{name: "empty name", config: `profiles: {"": {provider: openai, model: test-model}}`, wantErr: "model profile names must not be empty"},
+		{name: "unselected profile", config: validProfiles + `
+  hidden:
+    hidden: true
+    provider: openai
+`, wantErr: `invalid model profile "hidden"`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			configureTestProfile(t, "openai", "test-model")
-			viper.Set(test.key, test.value)
-			require.ErrorContains(t, ValidateModelProfiles(), test.wantErr)
+			viper.Reset()
+			t.Cleanup(viper.Reset)
+			viper.SetConfigType("yaml")
+			require.NoError(t, viper.ReadConfig(strings.NewReader(test.config)))
+			if test.wantErr != "" {
+				require.ErrorContains(t, ValidateModelProfiles(), test.wantErr)
+			} else {
+				require.NoError(t, ValidateModelProfiles())
+			}
 			_, err := GetConfigFromViperWithoutProfile()
 			require.NoError(t, err, "clients and runners do not require model configuration")
 		})
@@ -326,7 +348,8 @@ func TestValidateModelProfiles(t *testing.T) {
 	for _, key := range modelSettingKeys {
 		for _, source := range []string{"file", "environment"} {
 			t.Run(key+"/"+source, func(t *testing.T) {
-				configureTestProfile(t, "openai", "test-model")
+				viper.Reset()
+				t.Cleanup(viper.Reset)
 				if source == "file" {
 					settings := map[string]any{}
 					setSetting(settings, key, "removed-value")

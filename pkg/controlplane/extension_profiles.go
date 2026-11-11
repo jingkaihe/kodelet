@@ -17,9 +17,12 @@ import (
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
 )
 
 var errExtensionProfileNotRegistered = errors.New("not registered for this caller and runner; initialize its extension on this runner first")
+
+var errNoVisibleModelProfiles = errors.New("no visible model profiles available; configure a profile or enable an extension that provides one")
 
 // Definitions are live runner resources, not mutations to global daemon config.
 // A new runner generation must register again; conversations keep their snapshots.
@@ -178,7 +181,17 @@ func (s *Server) publishExtensionProfiles(principalID, runnerID string, generati
 
 func (s *Server) resolveModelProfile(ctx context.Context, runnerID, name, effort string) (llmtypes.Config, error) {
 	name = strings.TrimSpace(name)
-	if chat.NormalizeRequestedProfile(name) == "" || llm.HasConfiguredProfile(name) {
+	if name == "" {
+		name = strings.TrimSpace(viper.GetString("profile"))
+	}
+	if name == "" {
+		profiles := s.modelProfileOptions(ctx, runnerID, "", false)
+		if len(profiles) == 0 {
+			return llmtypes.Config{}, errNoVisibleModelProfiles
+		}
+		name = profiles[0].Name
+	}
+	if llm.HasConfiguredProfile(name) {
 		return chat.ResolveConfigForNewConversation(name, effort)
 	}
 	principal, ok := principalFromContext(ctx)
@@ -205,9 +218,17 @@ func (s *Server) resolveModelProfile(ctx context.Context, runnerID, name, effort
 // resolveChatModelProfile bootstraps direct chat requests and registrations lost
 // to a runner reconnect, using the same discovery path as ACP session setup.
 func (s *Server) resolveChatModelProfile(ctx context.Context, req chat.ChatRequest, name, effort string) (llmtypes.Config, error) {
-	config, err := s.resolveModelProfile(ctx, req.RunnerID, name, effort)
-	if !errors.Is(err, errExtensionProfileNotRegistered) {
-		return config, err
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = strings.TrimSpace(viper.GetString("profile"))
+	}
+	// An automatic choice must include this workspace's extension profiles,
+	// even when configured or previously registered profiles already exist.
+	if name != "" {
+		config, err := s.resolveModelProfile(ctx, req.RunnerID, name, effort)
+		if !errors.Is(err, errExtensionProfileNotRegistered) {
+			return config, err
+		}
 	}
 	if err := req.Options.Validate(); err != nil {
 		return llmtypes.Config{}, err
@@ -238,12 +259,32 @@ func (s *Server) resolveChatModelProfile(ctx context.Context, req chat.ChatReque
 			params.EnvironmentProfile = stored
 		}
 	}
+	if s.runnerRegistry == nil {
+		return llmtypes.Config{}, errors.New("runner registry is unavailable")
+	}
 	runner, ok := s.runnerRegistry.Runner(req.RunnerID)
 	if !ok || !runner.Connected {
 		return llmtypes.Config{}, errors.New("the selected runner is unavailable")
 	}
-	if _, err := s.discoverWorkspace(ctx, runner, params); err != nil {
+	discovered, err := s.discoverWorkspace(ctx, runner, params)
+	if err != nil {
 		return llmtypes.Config{}, errors.Wrap(err, "failed to discover extension profiles")
+	}
+	if name == "" {
+		for _, option := range s.modelProfileOptions(ctx, req.RunnerID, "", false) {
+			// Registrations from other workspaces on this runner must not
+			// become automatic choices in the current workspace.
+			if option.Scope == "extension" && !slices.ContainsFunc(discovered.Profiles, func(profile extensions.Profile) bool {
+				return profile.Name == option.Name
+			}) {
+				continue
+			}
+			name = option.Name
+			break
+		}
+		if name == "" {
+			return llmtypes.Config{}, errNoVisibleModelProfiles
+		}
 	}
 	return s.resolveModelProfile(ctx, req.RunnerID, name, effort)
 }

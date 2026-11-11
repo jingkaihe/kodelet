@@ -52,23 +52,9 @@ describe('ChatPage model and reasoning settings', () => {
     expect(mockGetSlashCommands).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { name: 'request failure', error: 'settings unavailable' },
-    { name: 'missing profile', profile: undefined },
-    { name: 'empty profile', profile: '' },
-    { name: 'blank profile', profile: '  ' },
-  ])('prevents starting a chat with invalid initial settings: $name', async (test) => {
+  it('prevents starting a chat when bootstrap settings fail', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    if (test.error) {
-      mockGetChatSettings.mockRejectedValue(new Error(test.error));
-    } else {
-      mockGetChatSettings.mockResolvedValue({
-        currentProfile: test.profile,
-        profiles: [{ name: 'flair', scope: 'global', active: true }],
-        reasoningEffort: 'medium',
-        reasoningEffortOptions: ['medium'],
-      });
-    }
+    mockGetChatSettings.mockRejectedValue(new Error('settings unavailable'));
     mockStreamChat.mockResolvedValue(undefined);
 
     try {
@@ -78,7 +64,7 @@ describe('ChatPage model and reasoning settings', () => {
         expect(consoleError).toHaveBeenCalledWith(
           'Failed to load chat settings',
           expect.objectContaining({
-            message: test.error || 'Chat settings did not return a model profile',
+            message: 'settings unavailable',
           })
         )
       );
@@ -95,6 +81,98 @@ describe('ChatPage model and reasoning settings', () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+
+  it('discovers extension-only profiles after empty bootstrap', async () => {
+    mockGetChatSettings.mockImplementation(async (_profile?: string, runnerId?: string) => ({
+      currentProfile: runnerId ? 'extension-profile' : undefined,
+      profiles: runnerId ? [{ name: 'extension-profile', scope: 'extension' }] : [],
+      reasoningEffort: 'medium',
+      reasoningEffortOptions: ['medium'],
+    }));
+
+    render(<ChatPage />);
+    await flushAsyncUpdates();
+    expect(mockGetChatSettings).toHaveBeenCalledWith(undefined, undefined, { bootstrap: true });
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
+    selectWorkspaceRunner();
+    await flushAsyncUpdates();
+    expect(screen.getByLabelText('Profile')).toHaveTextContent('extension-profile');
+    expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
+  });
+
+  it('reselects an automatic profile for the chosen workspace and runner profile', async () => {
+    mockGetChatSettings.mockImplementation(
+      async (
+        profile?: string,
+        runnerId?: string,
+        workspace?: { cwd?: string; environmentProfile?: string }
+      ) => ({
+        currentProfile:
+          profile || (workspace?.cwd ? 'aaa-workspace' : runnerId ? 'zzz-runner' : 'zzz-bootstrap'),
+        profiles: [
+          { name: 'aaa-workspace', scope: 'extension' },
+          { name: 'zzz-runner', scope: 'extension' },
+        ],
+        reasoningEffort: 'medium',
+        reasoningEffortOptions: ['medium'],
+      })
+    );
+
+    render(<ChatPage />);
+    await flushAsyncUpdates();
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    selectWorkspaceRunner();
+    await flushAsyncUpdates();
+    expect(screen.getByLabelText('Profile')).toHaveTextContent('zzz-runner');
+    fireEvent.change(screen.getByLabelText('Working directory'), {
+      target: { value: '/workspace/selected' },
+    });
+    await flushAsyncUpdates();
+    expect(mockGetChatSettings).toHaveBeenLastCalledWith(undefined, 'runner-1', {
+      cwd: '/workspace/selected',
+      environmentProfile: '',
+    });
+    expect(screen.getByLabelText('Profile')).toHaveTextContent('aaa-workspace');
+    fireEvent.change(screen.getByLabelText('Runner profile'), { target: { value: 'review' } });
+    await flushAsyncUpdates();
+    expect(mockGetChatSettings).toHaveBeenLastCalledWith(undefined, 'runner-1', {
+      cwd: '/workspace/selected',
+      environmentProfile: 'review',
+    });
+    selectNewChatOption('Profile', 'zzz-runner');
+    await flushAsyncUpdates();
+    fireEvent.change(screen.getByLabelText('Working directory'), {
+      target: { value: '/workspace/other' },
+    });
+    await flushAsyncUpdates();
+    expect(mockGetChatSettings).toHaveBeenLastCalledWith('zzz-runner', 'runner-1', {
+      cwd: '/workspace/other',
+      environmentProfile: 'review',
+    });
+    expect(screen.getByLabelText('Profile')).toHaveTextContent('zzz-runner');
+  });
+
+  it('resolves the ready embedded runner after metadata-only bootstrap', async () => {
+    mockGetRunners.mockResolvedValue({ runners: [makeRunner()] });
+    mockGetChatSettings.mockImplementation(async (_profile?: string, runnerId?: string) => ({
+      currentProfile: runnerId ? 'extension-profile' : '',
+      profiles: runnerId ? [{ name: 'extension-profile', scope: 'extension' }] : [],
+      defaultRunnerId: 'runner-1',
+      defaultRunnerReady: true,
+      reasoningEffort: 'medium',
+      reasoningEffortOptions: ['medium'],
+    }));
+
+    render(<ChatPage />);
+    await flushAsyncUpdates();
+    expect(mockGetChatSettings).toHaveBeenLastCalledWith(undefined, 'runner-1', {
+      cwd: '',
+      environmentProfile: '',
+    });
+    expect(screen.getByTestId('composer-textarea')).toBeEnabled();
+    expect(screen.queryByTestId('new-chat-dialog')).not.toBeInTheDocument();
   });
 
   it.each([
@@ -154,7 +232,10 @@ describe('ChatPage model and reasoning settings', () => {
 
     selectNewChatOption('Profile', 'anthropic');
     await waitFor(() =>
-      expect(mockGetChatSettings).toHaveBeenLastCalledWith('anthropic', 'runner-1')
+      expect(mockGetChatSettings).toHaveBeenLastCalledWith('anthropic', 'runner-1', {
+        cwd: '',
+        environmentProfile: '',
+      })
     );
     await waitFor(() =>
       expect(screen.getByLabelText('Reasoning effort')).toHaveTextContent('high')
@@ -298,8 +379,8 @@ describe('ChatPage model and reasoning settings', () => {
     fireEvent.click(screen.getByRole('combobox', { name: 'Model quick pick' }));
     await flushAsyncUpdates();
     expect(mockGetChatSettings.mock.calls).toEqual([
-      ['work', 'runner-1'],
-      ['anthropic', 'runner-1'],
+      ['work', 'runner-1', { cwd: '', environmentProfile: '' }],
+      ['anthropic', 'runner-1', { cwd: '', environmentProfile: '' }],
     ]);
     const modelList = screen.getByRole('listbox', { name: 'Model quick pick' });
     expect(
@@ -445,7 +526,10 @@ describe('ChatPage model and reasoning settings', () => {
       expect(profileSelect).toHaveFocus();
       expect(profileSelect).toHaveTextContent('anthropic');
       expect(mockGetChatSettings).toHaveBeenCalledTimes(settingsRequests + 1);
-      expect(mockGetChatSettings).toHaveBeenLastCalledWith('anthropic', 'runner-1');
+      expect(mockGetChatSettings).toHaveBeenLastCalledWith('anthropic', 'runner-1', {
+        cwd: '',
+        environmentProfile: '',
+      });
 
       fireEvent.change(screen.getByLabelText('Working directory'), {
         target: { value: '/workspace/cancelled' },
@@ -493,12 +577,18 @@ describe('ChatPage model and reasoning settings', () => {
     await flushAsyncUpdates();
     fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
     selectWorkspaceRunner();
-    expect(mockGetChatSettings).toHaveBeenLastCalledWith(undefined, 'runner-1');
+    expect(mockGetChatSettings).toHaveBeenLastCalledWith(undefined, 'runner-1', {
+      cwd: '',
+      environmentProfile: '',
+    });
     expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
     expect(screen.getByLabelText('Model')).toBeDisabled();
     selectNewChatOption('Environment', 'runner-2');
     await flushAsyncUpdates();
-    expect(mockGetChatSettings).toHaveBeenLastCalledWith(undefined, 'runner-2');
+    expect(mockGetChatSettings).toHaveBeenLastCalledWith(undefined, 'runner-2', {
+      cwd: '',
+      environmentProfile: '',
+    });
     fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
     expect(
       within(screen.getByRole('listbox', { name: 'Profile' })).getByRole('option', {
@@ -545,12 +635,13 @@ describe('ChatPage model and reasoning settings', () => {
       resolveOld = resolve;
     });
     mockGetChatSettings.mockImplementation((profile?: string, runnerId?: string) => {
-      if (profile === 'code-search') return oldRequest;
+      if (profile === 'code-search' && runnerId === 'runner-1') return oldRequest;
       return Promise.resolve({
         ...defaults,
+        currentProfile: profile || defaults.currentProfile,
         profiles: [
           ...defaults.profiles,
-          ...(runnerId === 'runner-1' ? [{ name: 'code-search', scope: 'extension' }] : []),
+          ...(runnerId ? [{ name: 'code-search', scope: 'extension' }] : []),
         ],
       });
     });
@@ -561,17 +652,20 @@ describe('ChatPage model and reasoning settings', () => {
     selectWorkspaceRunner();
     await flushAsyncUpdates();
     selectNewChatOption('Profile', 'code-search');
-    expect(mockGetChatSettings).toHaveBeenLastCalledWith('code-search', 'runner-1');
+    expect(mockGetChatSettings).toHaveBeenLastCalledWith('code-search', 'runner-1', {
+      cwd: '',
+      environmentProfile: '',
+    });
     selectNewChatOption('Environment', 'runner-2');
     await flushAsyncUpdates();
 
-    expect(screen.getByLabelText('Profile')).toHaveTextContent('work');
+    expect(screen.getByLabelText('Profile')).toHaveTextContent('code-search');
     fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
     expect(
       within(screen.getByRole('listbox', { name: 'Profile' })).queryByRole('option', {
         name: 'code-search',
       })
-    ).not.toBeInTheDocument();
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
     await act(async () => {
       resolveOld({
@@ -582,21 +676,21 @@ describe('ChatPage model and reasoning settings', () => {
         reasoningEffortOptions: ['none'],
       });
     });
-    expect(screen.getByLabelText('Profile')).toHaveTextContent('work');
+    expect(screen.getByLabelText('Profile')).toHaveTextContent('code-search');
     expect(screen.getByLabelText('Reasoning effort')).toHaveTextContent('medium');
     fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
     expect(
       within(screen.getByRole('listbox', { name: 'Profile' })).queryByRole('option', {
         name: 'code-search',
       })
-    ).not.toBeInTheDocument();
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
     expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
   });
 
   it.each([
     { profile: 'anthropic', expectedProfile: 'anthropic' },
-    { profile: 'code-search', expectedProfile: 'work' },
+    { profile: 'code-search', expectedProfile: 'code-search' },
   ])('revalidates the selected $profile on another runner', async ({
     profile,
     expectedProfile,
@@ -628,23 +722,25 @@ describe('ChatPage model and reasoning settings', () => {
     selectNewChatOption('Environment', 'runner-2');
     await flushAsyncUpdates();
 
-    expect(mockGetChatSettings).toHaveBeenLastCalledWith(
-      expectedProfile === 'work' ? undefined : expectedProfile,
-      'runner-2'
-    );
+    expect(mockGetChatSettings).toHaveBeenLastCalledWith(expectedProfile, 'runner-2', {
+      cwd: '',
+      environmentProfile: '',
+    });
     expect(screen.getByLabelText('Profile')).toHaveTextContent(expectedProfile);
     fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
-    expect(
-      within(screen.getByRole('listbox', { name: 'Profile' })).queryByRole('option', {
-        name: 'code-search',
-      })
-    ).not.toBeInTheDocument();
+    if (profile === 'code-search') {
+      expect(
+        within(screen.getByRole('listbox', { name: 'Profile' })).getByRole('option', {
+          name: 'code-search',
+        })
+      ).toBeInTheDocument();
+    }
     fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
     expect(screen.getByLabelText('Reasoning effort')).toHaveTextContent('high');
     expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
   });
 
-  it('reverts the profile when its reasoning settings fail to load', async () => {
+  it('blocks starting with a failed explicit profile until a valid profile is selected', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     mockStreamChat.mockResolvedValue(undefined);
 
@@ -661,8 +757,12 @@ describe('ChatPage model and reasoning settings', () => {
       selectNewChatOption('Profile', 'restricted');
 
       await waitFor(() =>
-        expect(screen.getByTestId('new-chat-profile-select')).toHaveTextContent('work')
+        expect(screen.getByRole('alert')).toHaveTextContent('profile settings unavailable')
       );
+      expect(screen.getByTestId('new-chat-profile-select')).toHaveTextContent('restricted');
+      expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
+      selectNewChatOption('Profile', 'work');
+      await flushAsyncUpdates();
       expect(screen.getByLabelText('Reasoning effort')).toHaveTextContent('medium');
       expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
       fireEvent.click(screen.getByRole('button', { name: 'Start' }));

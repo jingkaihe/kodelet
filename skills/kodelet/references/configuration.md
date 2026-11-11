@@ -139,7 +139,7 @@ profiles:
 
 ```
 
-Named profiles are the only model configuration mechanism. The daemon requires `profile: <name>` to select its default and an explicit `provider` and `model` in every profile. Omitting `--profile` selects that configured name; an explicit name selects that profile. Missing selectors and unknown names are errors. There is no unnamed model fallback or reserved `default` model profile; `default` works only if a profile with that name is defined.
+Named profiles are the only model configuration mechanism. The daemon accepts an optional `profile: <name>` to select its default and requires an explicit `provider` and `model` in every profile. Omitting `--profile` selects that configured name; an explicit name selects that profile. With neither, Kodelet selects the first visible, valid profile alphabetically after workspace discovery. Invalid selections fail without fallback; no available profile is a request error, not a startup error. There is no unnamed model fallback or reserved `default` model profile; `default` works only if a profile with that name is defined.
 
 Model-valued environment variables such as `KODELET_MODEL`, `KODELET_PROVIDER`, `KODELET_WEAK_MODEL`, `KODELET_MAX_TOKENS`, `KODELET_REASONING_EFFORT`, and `KODELET_OPENAI_API_MODE` are removed and rejected at daemon startup. Define their values inside profiles. `KODELET_PROFILE` remains supported, along with provider credential variables and supported explicit CLI model overrides.
 
@@ -149,7 +149,9 @@ Pickers display plain profile names and indicate the current selection without a
 
 `allowed_reasoning_efforts` defines the ordered reasoning-effort choices available in the TUI and Web UI, both for new conversations and when switching effort between turns of an existing one. When omitted or empty, all efforts supported by the configured provider are available. An existing conversation can always keep its current effort, even if the list no longer includes it.
 
-Profile definitions support `hidden: true` to omit them from normal pickers without preventing explicit selection. Extensions can [register self-contained profiles](sdk.md#registered-model-profiles) using ordinary configuration keys and built-in defaults, without editing daemon configuration.
+Profile definitions support `hidden: true` to omit them from normal pickers and automatic selection without preventing explicit selection or use as the configured default.
+
+**Extension-based profiles:** Extensions can [register self-contained profiles](sdk.md#registered-model-profiles) using ordinary configuration keys and built-in defaults, without editing daemon configuration. These follow the same selection rules and can be named by `profile:` without a matching YAML definition. Extension-only setups can omit both `profile:` and `profiles:` and use the automatic selection from the selected runner/workspace. Credentials remain on the daemon.
 
 ## Skills config
 

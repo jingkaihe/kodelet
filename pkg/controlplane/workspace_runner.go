@@ -365,9 +365,11 @@ func (s *Server) handleRunnerDiscovery(w http.ResponseWriter, r *http.Request, m
 	var err error
 	switch method {
 	case protocol.MethodWorkspaceDiscover:
-		result, err = s.discoverWorkspace(ctx, target.Runner, protocol.WorkspaceDiscoverParams{
+		var discovered runnerpayload.WorkspaceDiscoverResult
+		discovered, err = s.discoverWorkspace(ctx, target.Runner, protocol.WorkspaceDiscoverParams{
 			CWD: target.CWD, Profile: target.Profile, EnvironmentProfile: target.EnvironmentProfile, Options: options,
 		})
+		result = discovered.WorkspaceDiscoverResult
 		if err == nil && target.ExtensionProfile != "" {
 			if _, err := s.resolveModelProfile(ctx, target.Runner.ID, target.ExtensionProfile, ""); err != nil {
 				s.writeErrorResponse(w, http.StatusBadRequest, "could not resolve model profile", err)
@@ -399,25 +401,25 @@ func (s *Server) handleRunnerDiscovery(w http.ResponseWriter, r *http.Request, m
 	s.writeJSONResponse(w, result)
 }
 
-func (s *Server) discoverWorkspace(ctx context.Context, runner runnerregistry.Runner, params protocol.WorkspaceDiscoverParams) (protocol.WorkspaceDiscoverResult, error) {
+func (s *Server) discoverWorkspace(ctx context.Context, runner runnerregistry.Runner, params protocol.WorkspaceDiscoverParams) (runnerpayload.WorkspaceDiscoverResult, error) {
 	if err := params.Validate(); err != nil {
-		return protocol.WorkspaceDiscoverResult{}, err
+		return runnerpayload.WorkspaceDiscoverResult{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	var result runnerpayload.WorkspaceDiscoverResult
 	if err := s.runnerRegistry.CallRunner(ctx, runner.ID, runner.Generation, protocol.MethodWorkspaceDiscover, params, &result); err != nil {
-		return protocol.WorkspaceDiscoverResult{}, err
+		return runnerpayload.WorkspaceDiscoverResult{}, err
 	}
 	// The authenticated runner supplies definitions; the requesting caller owns
 	// the registration. Never borrow another caller's cached profiles.
 	if err := s.registerExtensionProfiles(ctx, runnerpayload.Manifest{
 		RunnerID: runner.ID, Generation: runner.Generation, Profiles: result.Profiles,
 	}); err != nil {
-		return protocol.WorkspaceDiscoverResult{}, err
+		return runnerpayload.WorkspaceDiscoverResult{}, err
 	}
 	result.Commands = withBuiltInSlashCommands(result.Commands)
-	return result.WorkspaceDiscoverResult, nil
+	return result, nil
 }
 
 // Host commands are not part of the runner manifest or its discovery digest.

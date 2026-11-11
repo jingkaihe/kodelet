@@ -190,6 +190,16 @@ KODELET_EMBEDDED_PROFILE_EXTENSION=1 exec %q -test.run '^TestEmbeddedProfileExte
 	}, 5*time.Second, 10*time.Millisecond)
 	runnerID := server.EmbeddedRunnerStatus().RunnerID
 	ctx := contextWithPrincipal(t.Context(), administrativePrincipal("alice"))
+	// With no daemon profiles, discover the actual extension process before
+	// selecting the first valid visible profile ("broken" is unavailable).
+	selected, err := server.resolveChatModelProfile(ctx, chat.ChatRequest{RunnerID: runnerID, CWD: workspace}, "", "")
+	require.NoError(t, err)
+	assert.Equal(t, "other", selected.Profile)
+	assert.True(t, selected.ExtensionProfile)
+	viper.Set("profile", "rush")
+	selected, err = server.resolveChatModelProfile(ctx, chat.ChatRequest{RunnerID: runnerID, CWD: workspace}, "", "")
+	require.NoError(t, err)
+	assert.Equal(t, "rush", selected.Profile, "a default can name an extension-only profile")
 	ctx = chat.ContextWithProfileResolver(ctx, func(name, effort string) (llmtypes.Config, error) {
 		return server.resolveModelProfile(ctx, runnerID, name, effort)
 	})
@@ -254,6 +264,7 @@ KODELET_EMBEDDED_PROFILE_EXTENSION=1 exec %q -test.run '^TestEmbeddedProfileExte
 							ctx, store, conversationID, "", "", "")
 						request.ConversationID = conversationID
 						require.NoError(t, err)
+						assert.Equal(t, test.profile, modelConfig.Profile, "resume retains the saved selection, not the daemon default")
 					}
 					modelConfig, err = chat.ResolveExecutionOptions(ctx, store, request, modelConfig)
 					require.NoError(t, err)

@@ -20,6 +20,7 @@ type RemoteChatClient interface {
 	chat.ChatRunner
 	chat.ConversationSource
 	ChatSettings(context.Context, string) (chat.ControlPlaneChatSettings, error)
+	ChatSettingsBootstrap(context.Context) (chat.ControlPlaneChatSettings, error)
 	DiscoverWorkspace(context.Context, chat.WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error)
 	SteerConversation(ctx context.Context, conversationID, message string, images []string) (bool, error)
 	StopConversation(ctx context.Context, conversationID string) error
@@ -108,7 +109,7 @@ func (m *remoteSessionManager) newSession(ctx context.Context, request acptypes.
 	if parentID != "" {
 		// Capabilities must not depend on a profile that workspace discovery
 		// has not registered for this caller yet.
-		settings, err := client.ChatSettings(ctx, "")
+		settings, err := client.ChatSettingsBootstrap(ctx)
 		if err != nil {
 			return "", errors.Wrap(err, "failed to check daemon conversation hierarchy support")
 		}
@@ -117,7 +118,7 @@ func (m *remoteSessionManager) newSession(ctx context.Context, request acptypes.
 		}
 	}
 	if runnerID == "" {
-		settings, err := client.ChatSettings(ctx, "")
+		settings, err := client.ChatSettingsBootstrap(ctx)
 		if err != nil {
 			return "", errors.Wrap(err, "could not connect to the server; start 'kodelet serve' or check --server and your authentication settings")
 		}

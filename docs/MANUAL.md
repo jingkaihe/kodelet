@@ -98,7 +98,7 @@ Before upgrading, stop older Kodelet processes and back up `~/.kodelet`. Use mat
 
 ### Local background server
 
-On a fresh daemon host, run `kodelet setup` first and configure the selected profile's credentials. Setup writes named profiles and the required `profile: openai` selection; there is no built-in unnamed model configuration.
+On a fresh daemon host, run `kodelet setup` first and configure the selected profile's credentials. Setup writes named profiles and the `profile: openai` selection; there is no built-in unnamed model configuration.
 
 ```bash
 kodelet chat                    # start or reuse the local server, then open chat
@@ -1022,7 +1022,7 @@ Kodelet includes a comprehensive profile system that allows you to define and sw
 
 ### Profile Definition
 
-Define model profiles under `profiles` in the daemon's `~/.kodelet/config.yaml` or `KODELET_CONFIG_FILE`, not repository configuration. Named profiles are the only model configuration mechanism. The daemon requires a `profile: <name>` selector, and every profile must explicitly define `provider` and `model`. Missing selectors, nonexistent selected profiles, and top-level model settings are configuration errors. Clients and standalone runners do not need model profiles.
+Define model profiles under `profiles` in the daemon's `~/.kodelet/config.yaml` or `KODELET_CONFIG_FILE`, not repository configuration. Named profiles are the only model configuration mechanism. The `profile: <name>` selector is optional, and every profile must explicitly define `provider` and `model`. Nonexistent selected profiles and top-level model settings are configuration errors. Clients and standalone runners do not need model profiles.
 
 ```yaml
 # Default selection for new conversations
@@ -1077,7 +1077,7 @@ aliases:
 
 `allowed_reasoning_efforts` defines the ordered reasoning-effort choices available in the TUI and Web UI, both for new conversations and when switching effort between turns of an existing one. When omitted or empty, all efforts supported by the configured provider are available. An existing conversation can always keep its current effort, even if the list no longer includes it.
 
-Set `hidden: true` to omit a profile from pickers without preventing explicit selection. Extensions can also [register model profiles](extension-design.md#registered-model-profiles) without editing configuration.
+Set `hidden: true` to omit a profile from pickers and automatic selection without preventing explicit selection or use as the configured default.
 
 Define workspace presets under `environment_profiles` in the daemon configuration for its built-in runner, or in a standalone runner's configuration. They select tools and resources independently of model profiles and cannot relax daemon restrictions:
 
@@ -1132,6 +1132,8 @@ kodelet serve
 
 - `--profile NAME` selects a model profile available on the daemon; unknown names fail for new conversations.
 - Omitting `--profile` uses the daemon's configured `profile:` selection, including a daemon-host `KODELET_PROFILE` or `serve --profile` override.
+- With neither, select the first visible, valid profile alphabetically after workspace discovery.
+- Invalid selections fail without fallback. No available profile is a request error, not a startup error.
 - Provider/model, weak-model settings, token limits, reasoning settings, and model-specific provider options belong only inside profiles. Optional model fields use built-in field defaults, not top-level settings or another profile.
 - Shared top-level settings, including extensions, skills, tracing, tools, aliases, and connection/authentication settings, remain available. Supported profile overrides deep-merge nested maps; scalar and list values replace inherited values. Omitted shared fields are retained.
 - Existing daemon/runner ownership and process-startup behavior remain unchanged. Selecting a profile does not dynamically reconfigure tracing or other process-level services.
@@ -1143,7 +1145,9 @@ Existing conversations keep their saved model configuration, even when the confi
 
 “Default” describes which named profile is selected implicitly; it is not a separate model configuration. Pickers display plain profile names and indicate the current selection without a default label. Choosing another profile for one conversation does not change the daemon's default.
 
-`kodelet setup` writes named `openai` and `anthropic` profiles using full model IDs without aliases and sets `profile: openai`. The default selector is required even with a single configured profile; Kodelet never chooses a profile based on its name or order.
+`kodelet setup` writes named `openai` and `anthropic` profiles using full model IDs without aliases and sets `profile: openai`. The default selector is optional; set it to keep the choice stable when profiles are added or renamed.
+
+**Extension-based profiles:** Extensions can [register model profiles](extension-design.md#registered-model-profiles) on the selected runner without editing daemon configuration. They follow the same selection rules and can be named by `profile:` without a matching YAML definition. To use only extension-provided profiles, omit both `profile:` and `profiles:`; Kodelet discovers the workspace's profiles and selects the first visible, valid one alphabetically. Provider credentials remain on the daemon.
 
 ## Observability
 

@@ -124,7 +124,7 @@ func (r *configuredChatRunner) discoveryTarget(ctx context.Context, target chatp
 		if target.RunnerID == "" {
 			target.RunnerID = r.runnerID
 			if target.RunnerID == "" {
-				settings, err := r.ChatSettings(ctx, "")
+				settings, err := r.ChatSettingsBootstrap(ctx)
 				if err != nil {
 					return target, err
 				}
@@ -432,7 +432,13 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 		}
 		target.ConversationID = history.ID
 	} else {
-		result.Profile, result.ProfileOptions, result.ProfileSettings, _, err = prepareRemoteChatSettings(ctx, client, result.Profile)
+		target, err = runner.discoveryTarget(ctx, chatpkg.WorkspaceTarget{
+			CWD: config.CWD, Profile: result.Profile, EnvironmentProfile: config.RunnerProfile,
+		})
+		if err != nil {
+			return result, err
+		}
+		result.Profile, result.ProfileOptions, result.ProfileSettings, _, err = prepareRemoteChatSettings(ctx, client, target)
 		if err != nil {
 			return result, err
 		}
@@ -442,7 +448,7 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 		if config.Options != nil && config.Options.Model != nil {
 			result.Model = strings.TrimSpace(*config.Options.Model)
 		}
-		target = chatpkg.WorkspaceTarget{CWD: config.CWD, Profile: result.Profile, EnvironmentProfile: config.RunnerProfile}
+		target.Profile = result.Profile
 	}
 	if result.ReasoningEffortExplicit {
 		result.ReasoningEffort, _ = cmd.Flags().GetString("reasoning-effort")
@@ -477,7 +483,10 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 		// saved settings or requiring its profile to still exist in daemon config.
 		settingsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		_, options, settings, _, settingsErr := prepareRemoteChatSettings(settingsCtx, client, "")
+		_, options, settings, _, settingsErr := prepareRemoteChatSettings(settingsCtx, client, chatpkg.WorkspaceTarget{
+			RunnerID: runner.runnerID, CWD: result.CWD, EnvironmentProfile: result.EnvironmentProfile,
+			Options: runner.options.Restrictions(),
+		})
 		if settingsErr != nil {
 			logger.G(ctx).WithError(settingsErr).Warn("could not load model choices for new conversations; keeping saved settings")
 		} else {
@@ -595,11 +604,11 @@ func prepareServerChatRunner(config *ChatConfig) (*chatpkg.Client, error) {
 	return chatpkg.NewClient(config.Server, config.AuthToken, "", chatpkg.WithHTTPClient(config.HTTPClient))
 }
 
-func prepareRemoteChatSettings(ctx context.Context, runner *chatpkg.Client, requestedProfile string) (string, []string, map[string]tui.ProfileSettings, string, error) {
+func prepareRemoteChatSettings(ctx context.Context, runner *chatpkg.Client, target chatpkg.WorkspaceTarget) (string, []string, map[string]tui.ProfileSettings, string, error) {
 	if runner == nil {
 		return "", nil, nil, "", errors.New("chat runner is required")
 	}
-	selected, err := runner.ChatSettings(ctx, requestedProfile)
+	selected, err := runner.ChatSettingsForWorkspace(ctx, target)
 	if err != nil {
 		return "", nil, nil, "", err
 	}
@@ -617,7 +626,8 @@ func prepareRemoteChatSettings(ctx context.Context, runner *chatpkg.Client, requ
 		options = append(options, name)
 		profileSettings := selected
 		if !strings.EqualFold(name, profile) {
-			profileSettings, err = runner.ChatSettings(ctx, name)
+			target.Profile = name
+			profileSettings, err = runner.ChatSettingsForWorkspace(ctx, target)
 			if err != nil {
 				return "", nil, nil, "", errors.Wrapf(err, "failed to load profile %s", name)
 			}

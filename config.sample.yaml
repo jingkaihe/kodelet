@@ -136,11 +136,20 @@ aliases:
   opus-5: "claude-opus-5"
   opus-55: "claude-opus-5-5"
 
-# Required default model profile for new conversations on the daemon.
-# --profile selects another named profile for one conversation.
+# Optional default model profile for new conversations on the daemon.
+# May name an extension-only profile without a matching entry under profiles.
+# Explicit request selections (--profile, SDK, UI) override this default.
+# Without either selection, discover target runner/workspace extensions first,
+# then choose the first visible, valid configured or registered profile by name
+# in alphabetical order. Hidden profiles require explicit/default selection.
+# Unknown/invalid selections fail without fallback; no eligible profiles is a
+# request error, not a startup error. Snapshots retain existing selections;
+# adding/renaming profiles can change the automatic choice for new conversations.
 profile: "anthropic"
 
-# Model profiles belong in daemon configuration; select one with --profile.
+# Optional model profiles belong in daemon configuration; select with --profile.
+# Omit both profile and profiles for an extension-only setup; enable installed
+# profile-providing extensions on the target runner. Credentials stay on the daemon.
 # Each profile requires provider and model. Model settings are not allowed at
 # the top level; optional model fields use built-in defaults, not another profile.
 # Shared top-level settings (extensions, tracing, tools, aliases, etc.) remain
@@ -501,7 +510,7 @@ tracing:
 # Environment variables can also be used to configure Kodelet:
 # - KODELET_LOG_LEVEL: Overrides the log_level setting
 # - KODELET_LOG_FORMAT: Overrides the log_format setting
-# - KODELET_PROFILE: Selects a configured named model profile on the daemon
+# - KODELET_PROFILE: Optional daemon default profile name, including extension-only names
 # Model-valued environment variables (KODELET_MODEL, KODELET_PROVIDER,
 # KODELET_WEAK_MODEL, KODELET_MAX_TOKENS, KODELET_REASONING_EFFORT,
 # KODELET_OPENAI_API_MODE, etc.) are removed and rejected at daemon startup.

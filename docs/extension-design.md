@@ -569,6 +569,8 @@ Registration accepts ordinary profile JSON with native snake_case keys and built
 
 Invalid configuration disables only the affected profile, with a diagnostic in server logs and an available UI notification. Selecting or reloading that active profile fails with its diagnostic; unrelated profiles remain usable. Identity and ownership conflicts still reject registration.
 
+Daemon `profile:` and `profiles:` are optional, and the configured default may name an extension-only profile. New conversations prefer an explicit request selection, then the configured default, then the first visible, valid configured or registered profile alphabetically after target workspace extension discovery. Hidden profiles require explicit/default selection; an invalid selected/default name fails without fallback. No eligible profiles is a request error, not a startup requirement. Saved snapshots retain the resolved selection; adding or renaming profiles affects only automatic selection for new conversations.
+
 ### Live conversation forks
 
 When initialization advertises `capabilities.conversations.fork: true`, an active tool handler may request `kodelet.conversation.fork` with optional params `{ "name": "Delegated task", "asChild": true }`. The request requires the originating `parentId` and returns `{ "conversationId": "..." }`. `asChild` defaults to false and requires `capabilities.conversations.hierarchy: true`.

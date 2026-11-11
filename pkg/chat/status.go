@@ -91,7 +91,7 @@ func (r *Client) RunnerStatus(ctx context.Context, target WorkspaceTarget) (Runn
 			runnerID = r.runnerID
 		}
 		if runnerID == "" {
-			settings, err := r.ChatSettings(ctx, target.Profile)
+			settings, err := r.ChatSettingsBootstrap(ctx)
 			if err != nil {
 				return result, errors.Wrap(err, "could not determine the default runner")
 			}

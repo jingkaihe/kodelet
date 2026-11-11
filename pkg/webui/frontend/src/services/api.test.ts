@@ -879,6 +879,30 @@ describe('ApiService', () => {
   });
 
   describe('getChatSettings', () => {
+    it('fetches bootstrap metadata without resolving a profile', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ currentProfile: '', profiles: [] }),
+      });
+      await apiService.getChatSettings(undefined, undefined, { bootstrap: true });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/chat/settings?bootstrap=true',
+        expect.any(Object)
+      );
+    });
+
+    it('uses the selected runner workspace and environment profile', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ profiles: [] }) });
+      await apiService.getChatSettings(undefined, 'runner/one', {
+        cwd: '/workspace/project',
+        environmentProfile: 'review',
+      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/chat/settings?runnerId=runner%2Fone&cwd=%2Fworkspace%2Fproject&environmentProfile=review',
+        expect.any(Object)
+      );
+    });
+
     it('fetches chat settings', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,

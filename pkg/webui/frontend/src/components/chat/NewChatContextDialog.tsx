@@ -73,6 +73,7 @@ interface NewChatContextDialogProps {
   reasoningEffortDraft: string;
   reasoningEffortLoading: boolean;
   reasoningEffortOptions: string[];
+  settingsError?: string;
   runners: Runner[];
   runnerIdDraft: string;
   environmentProfileDraft: string;
@@ -106,6 +107,7 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
       reasoningEffortDraft,
       reasoningEffortLoading,
       reasoningEffortOptions,
+      settingsError,
       runners,
       runnerIdDraft,
       environmentProfileDraft,
@@ -314,6 +316,7 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
           </header>
 
           <div className="new-chat-context-panel" data-testid="new-chat-context-panel">
+            {settingsError ? <p role="alert">{settingsError}</p> : null}
             <div className="new-chat-dialog-grid">
               <NewChatSelect
                 label="Profile"
@@ -477,7 +480,10 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
               <button
                 className="new-chat-primary-button"
                 disabled={
-                  reasoningEffortLoading || !selectedRunnerAvailable || !profileDraft.trim()
+                  reasoningEffortLoading ||
+                  Boolean(settingsError) ||
+                  !selectedRunnerAvailable ||
+                  !profileDraft.trim()
                 }
                 onClick={() => onCommit(voice ? (voiceDraft ?? voice.value) : undefined)}
                 type="button"

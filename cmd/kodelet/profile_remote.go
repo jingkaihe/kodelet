@@ -111,7 +111,7 @@ func runRemoteProfileCommand(cmd *cobra.Command, args []string) error {
 	}
 	current := settings.CurrentProfile
 	if current == "" {
-		return errors.New("the server returned no model profile; configure profile: <name> on the daemon host and restart 'kodelet serve'")
+		return errors.New("the server returned no model profile; select a runner/workspace when starting a conversation, or configure a daemon default with profile: <name>")
 	}
 	switch cmd.Name() {
 	case "current":

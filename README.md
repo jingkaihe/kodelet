@@ -43,7 +43,7 @@ kodelet setup
 export OPENAI_API_KEY="your-api-key"
 ```
 
-Setup creates `openai` and `anthropic` profiles and selects `profile: openai`. Model settings live inside `profiles`; the top-level `profile` selects the default for new conversations. Choose another configured profile with `kodelet chat --profile anthropic`. Shared extension, tracing, and workspace settings remain top-level.
+Setup creates `openai` and `anthropic` profiles and selects `openai`. Choose another with `kodelet chat --profile anthropic`. See [profile selection](docs/MANUAL.md#default-profile-selection) for automatic defaults and extension-only setups.
 
 See the [provider guide](docs/MANUAL.md#llm-providers) and [sample configuration](config.sample.yaml) for other providers, authentication options, and model profiles. Model configuration and provider credentials belong to the daemon; if it is already running, finish active work and run `kodelet server restart` from the shell with the updated environment.
 
