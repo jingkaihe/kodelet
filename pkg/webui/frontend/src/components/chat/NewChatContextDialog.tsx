@@ -318,7 +318,11 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
           </header>
 
           <div className="new-chat-context-panel" data-testid="new-chat-context-panel">
-            {settingsError ? <p role="alert">{settingsError}</p> : null}
+            {settingsError ? (
+              <p className="composer-error" role="alert">
+                {settingsError}
+              </p>
+            ) : null}
             <div className="new-chat-dialog-grid">
               <NewChatSelect
                 label="Profile"
