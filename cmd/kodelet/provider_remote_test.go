@@ -42,6 +42,7 @@ func TestRemoteProviderAndProfileProcessesNeverUseClientState(t *testing.T) {
 		{"profile-current", []string{"profile", "current"}, "", "central", false, 1},
 		{"profile-unset", []string{"profile", "current"}, "", "server returned no model profile", true, 1},
 		{"profile-list", []string{"profile", "list"}, "", "central", false, 1},
+		{"profile-list-unset", []string{"profile", "list"}, "", "central", false, 1},
 		{"profile-show", []string{"profile", "show", "central"}, "", `"profile": "central"`, false, 1},
 		{"profile-named-default", []string{"profile", "show", "default"}, "", `"profile": "default"`, false, 1},
 		{"profile-missing", []string{"profile", "show", "local-only"}, "", "could not load model profiles", true, 1},
@@ -94,19 +95,22 @@ func TestRemoteProviderAndProfileProcessesNeverUseClientState(t *testing.T) {
 					assert.Equal(t, http.MethodDelete, r.Method)
 					w.WriteHeader(http.StatusNoContent)
 				case "/api/chat/settings":
+					if strings.HasPrefix(test.name, "profile-list") {
+						assert.Equal(t, "true", r.URL.Query().Get("bootstrap"), "listing must not resolve a model or start runner extensions")
+					}
 					if r.URL.Query().Get("profile") == "local-only" {
 						http.Error(w, "profile not advertised", http.StatusBadRequest)
 						return
 					}
 					profile := "central"
 					switch test.name {
-					case "profile-unset":
+					case "profile-unset", "profile-list-unset":
 						profile = ""
 					case "profile-named-default":
 						assert.Equal(t, "default", r.URL.Query().Get("profile"))
 						profile = "default"
 					}
-					require.NoError(t, json.NewEncoder(w).Encode(chat.ControlPlaneChatSettings{CurrentProfile: profile, Profiles: []chat.ControlPlaneProfileOption{{Name: profile, Scope: "global", Active: true}}, ReasoningEffort: "high"}))
+					require.NoError(t, json.NewEncoder(w).Encode(chat.ControlPlaneChatSettings{CurrentProfile: profile, Profiles: []chat.ControlPlaneProfileOption{{Name: "central", Scope: "global", Active: profile == "central"}}, ReasoningEffort: "high"}))
 				case "/api/providers/codex/status":
 					require.NoError(t, json.NewEncoder(w).Encode(chat.CodexStatus{Connected: true, AccountID: "server-account"}))
 				case "/api/providers/codex/device-login", "/api/providers/copilot/device-login":
@@ -146,6 +150,10 @@ func TestRemoteProviderAndProfileProcessesNeverUseClientState(t *testing.T) {
 				assert.Regexp(t, `central\s+global\s+Selected`, string(output))
 				assert.NotContains(t, string(output), "DEFAULT")
 				assert.NotRegexp(t, `(?m)^default\s`, string(output))
+			}
+			if test.name == "profile-list-unset" {
+				assert.Regexp(t, `central\s+global`, string(output))
+				assert.NotContains(t, string(output), "Selected")
 			}
 			assert.NotContains(t, string(output), "client-credential-marker")
 			assert.EqualValues(t, test.calls, calls.Load())

@@ -105,12 +105,17 @@ func runRemoteProfileCommand(cmd *cobra.Command, args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 	defer cancel()
-	settings, err := client.ChatSettings(ctx, profile)
+	var settings chat.ControlPlaneChatSettings
+	if cmd.Name() == "list" {
+		settings, err = client.ChatSettingsBootstrap(ctx)
+	} else {
+		settings, err = client.ChatSettings(ctx, profile)
+	}
 	if err != nil {
 		return errors.Wrap(err, "could not load model profiles")
 	}
 	current := settings.CurrentProfile
-	if current == "" {
+	if current == "" && cmd.Name() != "list" {
 		return errors.New("the server returned no model profile; select a runner/workspace when starting a conversation, or configure a daemon default with profile: <name>")
 	}
 	switch cmd.Name() {
