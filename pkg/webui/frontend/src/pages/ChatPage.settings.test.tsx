@@ -14,6 +14,7 @@ import {
   mockGetSlashCommands,
   mockStreamChat,
   openActiveTabMenu,
+  openNewChatSettings,
   renderChatWithRunner,
   runCwdSuggestionDebounce,
   selectNewChatOption,
@@ -126,6 +127,11 @@ describe('ChatPage model and reasoning settings', () => {
     selectWorkspaceRunner();
     await flushAsyncUpdates();
     expect(screen.getByLabelText('Profile')).toHaveTextContent('zzz-runner');
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    const requestsBeforeReopen = mockGetChatSettings.mock.calls.length;
+    openNewChatSettings();
+    await flushAsyncUpdates();
+    expect(mockGetChatSettings).toHaveBeenCalledTimes(requestsBeforeReopen);
     fireEvent.change(screen.getByLabelText('Working directory'), {
       target: { value: '/workspace/selected' },
     });
@@ -704,7 +710,11 @@ describe('ChatPage model and reasoning settings', () => {
     expectedProfile,
   }) => {
     const defaultSettings = mockGetChatSettings.getMockImplementation();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     mockGetChatSettings.mockImplementation(async (profile?: string, runnerId?: string) => {
+      if (profile === 'code-search' && runnerId === 'runner-2') {
+        throw new Error('Profile "code-search" is not available in this workspace');
+      }
       const settings = await defaultSettings?.(profile);
       return {
         ...settings,
@@ -729,6 +739,7 @@ describe('ChatPage model and reasoning settings', () => {
     await flushAsyncUpdates();
     selectNewChatOption('Environment', 'runner-2');
     await flushAsyncUpdates();
+    consoleError.mockRestore();
 
     expect(mockGetChatSettings).toHaveBeenLastCalledWith(expectedProfile, 'runner-2', {
       cwd: '',
@@ -745,6 +756,15 @@ describe('ChatPage model and reasoning settings', () => {
     }
     fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
     expect(screen.getByLabelText('Reasoning effort')).toHaveTextContent('high');
+    if (profile === 'code-search') {
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Profile "code-search" is not available in this workspace'
+      );
+      expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
+      selectNewChatOption('Profile', 'work');
+      await flushAsyncUpdates();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    }
     expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
   });
 

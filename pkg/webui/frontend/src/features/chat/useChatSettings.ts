@@ -365,7 +365,6 @@ export const useChatSettings = ({
         ...draft,
         ...model,
         profile: model.profile.trim(),
-        profileExplicit: true,
         environmentProfile: draft.environmentProfile.trim(),
         cwd: directory,
       };
