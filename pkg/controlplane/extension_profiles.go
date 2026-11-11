@@ -17,7 +17,6 @@ import (
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
-	"github.com/spf13/viper"
 )
 
 var errExtensionProfileNotRegistered = errors.New("not registered for this caller and runner; initialize its extension on this runner first")
@@ -184,14 +183,7 @@ func (s *Server) publishExtensionProfiles(principalID, runnerID string, generati
 func (s *Server) resolveModelProfile(ctx context.Context, runnerID, name, effort string) (llmtypes.Config, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		name = strings.TrimSpace(viper.GetString("profile"))
-	}
-	if name == "" {
-		profiles := s.modelProfileOptions(ctx, runnerID, "", false)
-		if len(profiles) == 0 {
-			return llmtypes.Config{}, errNoVisibleModelProfiles
-		}
-		name = profiles[0].Name
+		return llmtypes.Config{}, errors.New("model profile name is required")
 	}
 	if llm.HasConfiguredProfile(name) {
 		return chat.ResolveConfigForNewConversation(name, effort)
@@ -222,7 +214,7 @@ func (s *Server) resolveModelProfile(ctx context.Context, runnerID, name, effort
 func (s *Server) resolveChatModelProfile(ctx context.Context, req chat.ChatRequest, name, effort string) (llmtypes.Config, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		name = strings.TrimSpace(viper.GetString("profile"))
+		name = getCurrentWebUIProfile()
 	}
 	// An automatic choice must include this workspace's extension profiles,
 	// even when configured or previously registered profiles already exist.

@@ -1566,7 +1566,7 @@ func resolveConversationReasoningEffort(response *conversations.GetConversationR
 
 func getWebUIProfileOptions() []ChatProfileOption {
 	profileSources := llm.ProfileSources()
-	activeProfile := strings.TrimSpace(viper.GetString("profile"))
+	activeProfile := getCurrentWebUIProfile()
 	configured := viper.GetStringMap("profiles")
 	profiles := make([]ChatProfileOption, 0, len(configured))
 
@@ -1642,6 +1642,9 @@ func (s *Server) handleGetChatSettings(w http.ResponseWriter, r *http.Request) {
 			}
 			config, err = s.resolveChatModelProfile(r.Context(), request, profile, "")
 		} else if profile != "" || llm.HasConfiguredProfile(getCurrentWebUIProfile()) {
+			if profile == "" {
+				profile = getCurrentWebUIProfile()
+			}
 			config, err = s.resolveModelProfile(r.Context(), runnerID, profile, "")
 		}
 		if err != nil {

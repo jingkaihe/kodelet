@@ -58,6 +58,8 @@ func TestExtensionProfilesOwnershipDiscoveryAndSnapshots(t *testing.T) {
 		},
 	}
 	manifest := runnerpayload.Manifest{RunnerID: runner.RunnerID, Generation: runner.Generation, Profiles: []extensions.Profile{profile}}
+	_, err := server.resolveModelProfile(ctx, runner.RunnerID, " ", "")
+	require.ErrorContains(t, err, "model profile name is required", "named lookup must not choose a configured default or an alphabetical fallback")
 	require.NoError(t, server.registerExtensionProfiles(ctx, manifest))
 	config, err := server.resolveModelProfile(ctx, runner.RunnerID, profile.Name, "")
 	require.NoError(t, err)
@@ -109,7 +111,7 @@ func TestExtensionProfilesOwnershipDiscoveryAndSnapshots(t *testing.T) {
 	require.ErrorContains(t, server.registerExtensionProfiles(ctx, runnerpayload.Manifest{
 		RunnerID: runner.RunnerID, Generation: runner.Generation, Profiles: []extensions.Profile{visible},
 	}), "daemon-configured profile")
-	for _, name := range []string{"", "deep", "internal"} {
+	for _, name := range []string{"deep", "internal"} {
 		configured, err := server.resolveModelProfile(ctx, runner.RunnerID, name, "")
 		require.NoError(t, err)
 		assert.False(t, configured.ExtensionProfile)
