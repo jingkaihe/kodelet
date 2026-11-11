@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.8.28-beta
+
+Made daemon `profile:` and `profiles:` optional. Without a selection, new conversations use the first visible profile alphabetically, including extension-registered ones, so extension-only setups need no model configuration. See [profile selection](docs/MANUAL.md#default-profile-selection).
+
 ## 0.8.27-beta
 
 Added reasoning-effort changes between conversation turns in the TUI (`Ctrl+Y`), Web UI, and resumed requests, including Web UI voice turns. Model and profile remain locked.
