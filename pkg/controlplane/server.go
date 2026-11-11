@@ -1606,6 +1606,8 @@ func getCurrentWebUIProfile() string {
 }
 
 // handleGetChatSettings handles GET /api/chat/settings.
+// Bootstrap requests return metadata only; other requests may start workspace
+// extensions to discover and resolve model profiles.
 func (s *Server) handleGetChatSettings(w http.ResponseWriter, r *http.Request) {
 	profile := strings.TrimSpace(r.URL.Query().Get("profile"))
 	runnerID := strings.TrimSpace(r.URL.Query().Get("runnerId"))
