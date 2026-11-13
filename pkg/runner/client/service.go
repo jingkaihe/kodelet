@@ -118,6 +118,7 @@ type Service struct {
 	browserManager        *browser.Manager
 	browserRelays         map[*webBrowserRelay]struct{}
 	terminalManagers      map[workspaceTerminalScope]*workspaceTerminalManager
+	terminalSessionLimit  int
 	cleanupTimeout        time.Duration
 	snapshotWaitTimeout   time.Duration
 	peer                  Peer
@@ -250,6 +251,7 @@ func NewService(parent context.Context, workspace string, options ServiceOptions
 	service.browserManager = browser.NewManager(service.ctx, options.Browser)
 	service.browserRelays = make(map[*webBrowserRelay]struct{})
 	service.terminalManagers = make(map[workspaceTerminalScope]*workspaceTerminalManager)
+	service.terminalSessionLimit = workspaceTerminalSessionLimit
 	service.workspaceSessionLeases = make(map[string]time.Time)
 	service.workspaceSessionsStop = make(chan struct{})
 	service.workspaceSessionsDone = make(chan struct{})

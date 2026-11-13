@@ -21,7 +21,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Runner cleanup waits for shells and browsers to stop; it is usually sub-second.
 const workspaceSessionsDiscardTimeout = time.Minute
 
 type workspaceRunnerTarget struct {
@@ -96,8 +95,7 @@ func (s *Server) handleDiscardDraftWorkspace(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// conversationWorkspaceRunner returns the runner holding a saved conversation's
-// terminals and browsers. Resolve it before deletion removes the affinity.
+// Call before deletion, which removes the conversation's runner affinity.
 func (s *Server) conversationWorkspaceRunner(ctx context.Context, conversationID string) string {
 	if s.runnerRegistry == nil {
 		return ""
@@ -113,9 +111,7 @@ func (s *Server) conversationWorkspaceRunner(ctx context.Context, conversationID
 	return affinity.RunnerID
 }
 
-// discardDeletedConversationWorkspace stops the terminals and browsers a deleted
-// conversation left on its runner. Deletion has already committed, so failures
-// are logged; sessions on an unreachable runner last until it stops.
+// Best-effort: the conversation is already deleted, so failures are only logged.
 func (s *Server) discardDeletedConversationWorkspace(ctx context.Context, runnerID, conversationID string) {
 	if s.runnerRegistry == nil || runnerID == "" {
 		return
