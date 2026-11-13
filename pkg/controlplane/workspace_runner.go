@@ -11,6 +11,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
@@ -19,6 +20,9 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
+
+// Runner cleanup waits for shells and browsers to stop; it is usually sub-second.
+const workspaceSessionsDiscardTimeout = time.Minute
 
 type workspaceRunnerTarget struct {
 	Runner             runnerregistry.Runner
@@ -81,21 +85,68 @@ func (s *Server) handleDiscardDraftWorkspace(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	// Once accepted, navigating away must not interrupt subprocess cleanup.
-	ctx, cancel := context.WithTimeout(s.chatExecutionContext(r.Context()), time.Minute)
+	ctx, cancel := context.WithTimeout(s.chatExecutionContext(r.Context()), workspaceSessionsDiscardTimeout)
 	defer cancel()
 	if err := s.runnerRegistry.CallRunner(ctx, runnerID, runner.Generation, protocol.MethodWorkspaceSessionsDiscard,
 		protocol.WorkspaceSessionsDiscardParams{ConversationID: conversationID}, nil); err != nil {
 		s.writeErrorResponse(w, http.StatusBadGateway, "could not clean up draft workspace sessions", err)
 		return
 	}
+	s.removeConversationBrowserHandles(runnerID, runner.Generation, conversationID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// conversationWorkspaceRunner returns the runner holding a saved conversation's
+// terminals and browsers. Resolve it before deletion removes the affinity.
+func (s *Server) conversationWorkspaceRunner(ctx context.Context, conversationID string) string {
+	if s.runnerRegistry == nil {
+		return ""
+	}
+	affinity, found, err := s.runnerRegistry.ResolveConversationAffinity(ctx, conversationID)
+	if err != nil {
+		logger.G(ctx).WithError(err).WithField("conversation_id", conversationID).Warn("failed to resolve runner for workspace cleanup")
+		return ""
+	}
+	if !found {
+		return ""
+	}
+	return affinity.RunnerID
+}
+
+// discardDeletedConversationWorkspace stops the terminals and browsers a deleted
+// conversation left on its runner. Deletion has already committed, so failures
+// are logged; sessions on an unreachable runner last until it stops.
+func (s *Server) discardDeletedConversationWorkspace(ctx context.Context, runnerID, conversationID string) {
+	if s.runnerRegistry == nil || runnerID == "" {
+		return
+	}
+	log := logger.G(ctx).WithField("conversation_id", conversationID).WithField("runner_id", runnerID)
+	runner, found := s.runnerRegistry.Runner(runnerID)
+	if !found {
+		return
+	}
+	if err := s.runnerRegistry.ValidateRunnerCall(runnerID, runner.Generation, protocol.MethodWorkspaceSessionsDiscard); err != nil {
+		log.WithError(err).Debug("skipped workspace cleanup for deleted conversation")
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, workspaceSessionsDiscardTimeout)
+	defer cancel()
+	if err := s.runnerRegistry.CallRunner(ctx, runnerID, runner.Generation, protocol.MethodWorkspaceSessionsDiscard,
+		protocol.WorkspaceSessionsDiscardParams{ConversationID: conversationID}, nil); err != nil {
+		log.WithError(err).Warn("failed to stop deleted conversation's workspace sessions")
+		return
+	}
+	s.removeConversationBrowserHandles(runnerID, runner.Generation, conversationID)
+}
+
+func (s *Server) removeConversationBrowserHandles(runnerID string, generation int64, conversationID string) {
 	s.browserMu.Lock()
+	defer s.browserMu.Unlock()
 	for _, handle := range s.browserHandles {
-		if handle.runnerID == runnerID && handle.generation == runner.Generation && handle.conversationID == conversationID {
+		if handle.runnerID == runnerID && handle.generation == generation && handle.conversationID == conversationID {
 			s.removeBrowserHandleLocked(handle)
 		}
 	}
-	s.browserMu.Unlock()
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // Heartbeats only renew an existing draft lease. The runner owns expiry and

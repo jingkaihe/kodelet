@@ -196,7 +196,7 @@ func TestWorkspaceDraftLeaseExpiryAndOwnerHeartbeat(t *testing.T) {
 	require.NoError(t, service.reapWorkspaceSessions(time.Now().Add(6*time.Minute)))
 	entries := decodeStructuredRunnerLogs(t, logOutput)
 	require.Len(t, entries, 1, "heartbeats stay silent; cleanup logs once")
-	assert.Equal(t, "draft workspace session cleanup", entries[0]["message"])
+	assert.Equal(t, "workspace session cleanup", entries[0]["message"])
 	assert.Equal(t, "draft", entries[0]["conversation_id"])
 	assert.Equal(t, "expired", entries[0]["reason"])
 	assert.Equal(t, "info", entries[0]["logLevel"])

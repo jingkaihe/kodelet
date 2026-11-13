@@ -1200,6 +1200,65 @@ func TestDiscardDraftWorkspaceStopsOnlyUnsubmittedDrafts(t *testing.T) {
 	assert.Empty(t, s.deletingConversations, "cleanup releases the admission guard")
 }
 
+func TestDeleteConversationStopsRunnerWorkspaceSessions(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		bound     bool
+		runnerErr error
+		calls     int
+		discarded bool
+	}{
+		{name: "bound", bound: true, calls: 1, discarded: true},
+		{name: "runner failure", bound: true, runnerErr: errors.New("runner unavailable"), calls: 1},
+		{name: "unbound", calls: 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s, registration, link := newBrowserAPITestServer(t)
+			deleted := openBrowserTestHandle(t, s, registration, "alice", "deleted")
+			other := openBrowserTestHandle(t, s, registration, "alice", "other")
+			if test.bound {
+				require.NoError(t, s.runnerRegistry.BindConversation(t.Context(), "deleted", registration.RunnerID))
+			}
+			conversationDeleted := false
+			s.conversationService = &mockConversationService{deleteFunc: func(_ context.Context, id string) error {
+				assert.Equal(t, "deleted", id)
+				conversationDeleted = true
+				return nil
+			}}
+			requestCtx, cancelRequest := context.WithCancel(t.Context())
+			defer cancelRequest()
+			calls := 0
+			link.call = func(ctx context.Context, method string, params, _ any) error {
+				calls++
+				assert.Equal(t, protocol.MethodWorkspaceSessionsDiscard, method)
+				assert.Equal(t, protocol.WorkspaceSessionsDiscardParams{ConversationID: "deleted"}, params)
+				assert.True(t, conversationDeleted, "sessions are discarded only after deletion commits")
+				cancelRequest()
+				assert.NoError(t, ctx.Err(), "accepted cleanup outlives its HTTP observer")
+				return test.runnerErr
+			}
+
+			r := httptest.NewRequest(http.MethodDelete, "/api/conversations/deleted", nil).WithContext(requestCtx)
+			r = mux.SetURLVars(r, map[string]string{"id": "deleted"})
+			w := httptest.NewRecorder()
+			s.handleDeleteConversation(w, r)
+
+			assert.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+			assert.True(t, conversationDeleted)
+			assert.Equal(t, test.calls, calls)
+			s.browserMu.Lock()
+			defer s.browserMu.Unlock()
+			if test.discarded {
+				assert.NotContains(t, s.browserHandles, deleted.ID)
+			} else {
+				assert.Contains(t, s.browserHandles, deleted.ID)
+			}
+			assert.Contains(t, s.browserHandles, other.ID)
+			assert.Empty(t, s.deletingConversations, "cleanup releases the deletion guard")
+		})
+	}
+}
+
 func TestDraftWorkspaceHeartbeatRoutesRenewalAndExpiry(t *testing.T) {
 	s, registration, link := newBrowserAPITestServer(t)
 	link.call = func(_ context.Context, method string, params, _ any) error {

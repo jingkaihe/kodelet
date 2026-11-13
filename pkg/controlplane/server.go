@@ -2565,6 +2565,7 @@ func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request
 	}
 	defer s.releaseConversationDeletion(id)
 	s.closeRealtimeConversation(id)
+	workspaceRunnerID := s.conversationWorkspaceRunner(ctx, id)
 
 	// Delete conversation
 	err := s.conversationService.DeleteConversation(ctx, id)
@@ -2575,6 +2576,9 @@ func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request
 	if s.runnerRegistry != nil {
 		s.runnerRegistry.ForgetConversation(id)
 	}
+	// Its terminals would otherwise hold runner session slots with no tab left
+	// to close them. Leaving the page must not interrupt process cleanup.
+	s.discardDeletedConversationWorkspace(s.chatExecutionContext(ctx), workspaceRunnerID, id)
 	if closer, ok := s.chatRunner.(interface{ CloseConversation(string) error }); ok {
 		if err := closer.CloseConversation(id); err != nil {
 			logger.G(ctx).WithError(err).WithField("conversation_id", id).Warn("failed to close cached conversation thread")

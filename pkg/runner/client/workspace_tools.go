@@ -38,7 +38,7 @@ const (
 	workspaceTerminalCleanupPollWait   = 20 * time.Millisecond
 	workspaceTerminalProcessKillWait   = 2 * time.Second
 	workspaceTerminalShutdownWait      = 4 * time.Second
-	workspaceTerminalSessionLimit      = 8
+	workspaceTerminalSessionLimit      = 32
 	workspaceDiscardedSessionLimit     = 1024
 	workspaceDraftLeaseTimeout         = 5 * time.Minute
 	workspaceSessionSweepInterval      = 30 * time.Second
@@ -842,7 +842,7 @@ func (s *Service) openWorkspaceTerminal(ctx context.Context, params protocol.Wor
 		}
 		if len(s.terminalManagers) >= workspaceTerminalSessionLimit {
 			s.mu.Unlock()
-			return protocol.WorkspaceTerminalOpenResult{}, errors.New("runner terminal session limit reached (8); exit an existing terminal to release its slot")
+			return protocol.WorkspaceTerminalOpenResult{}, errors.Errorf("runner terminal session limit reached (%d); exit an existing terminal to release its slot", workspaceTerminalSessionLimit)
 		}
 		manager = newWorkspaceTerminalManager(s.ctx, cwd)
 		s.terminalManagers[scope] = manager
@@ -1191,9 +1191,9 @@ func (s *Service) discardWorkspaceSessionsLocked(conversationID string, expiredB
 		s.mu.Lock()
 		delete(s.workspaceSessionLeases, conversationID)
 		s.mu.Unlock()
-		log.Info("draft workspace session cleanup")
+		log.Info("workspace session cleanup")
 	} else {
-		log.WithField("outcome", "failure").WithError(err).Warn("draft workspace session cleanup")
+		log.WithField("outcome", "failure").WithError(err).Warn("workspace session cleanup")
 	}
 	return err
 }

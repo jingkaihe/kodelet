@@ -144,8 +144,8 @@ func TestTerminalOpenFailureSignalsExplicitRetry(t *testing.T) {
 	}{
 		{
 			name: "capacity",
-			err:  &protocol.RPCError{Code: protocol.ErrorCodeInternal, Message: "runner terminal session limit reached (8); exit an existing terminal to release its slot"},
-			info: "runner terminal session limit reached (8); exit an existing terminal to release its slot",
+			err:  &protocol.RPCError{Code: protocol.ErrorCodeInternal, Message: "runner terminal session limit reached (32); exit an existing terminal to release its slot"},
+			info: "runner terminal session limit reached (32); exit an existing terminal to release its slot",
 			code: websocket.CloseTryAgainLater,
 		},
 		{
