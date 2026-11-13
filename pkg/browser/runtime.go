@@ -24,8 +24,10 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
+// DefaultMaxSessions applies when Config.MaxSessions is unset.
+const DefaultMaxSessions = 32
+
 const (
-	maxSessions         = 4
 	maxConnectionLeases = 64
 	defaultIdleTimeout  = 15 * time.Minute
 	startupTimeout      = 20 * time.Second
@@ -49,6 +51,8 @@ type Config struct {
 	DevToolsDir string
 	// IdleTimeout applies only to sessions without attachments. Nonpositive values use fifteen minutes.
 	IdleTimeout time.Duration
+	// MaxSessions bounds concurrent conversation sessions. Nonpositive values use the default.
+	MaxSessions int
 }
 
 // Scope isolates a conversation's browser in one canonical working directory.
@@ -80,7 +84,7 @@ type AssetChunk struct {
 	EOF         bool   `json:"eof"`
 }
 
-// Manager owns at most four conversation sessions, independently of individual agent runs.
+// Manager owns at most Config.MaxSessions conversation sessions, independently of individual agent runs.
 // Call Close at runner shutdown. Connections must be released even if their socket has already closed.
 type Manager struct {
 	ctx       context.Context
@@ -133,6 +137,9 @@ func NewManager(ctx context.Context, config Config) *Manager {
 	config.DevToolsDir = strings.TrimSpace(config.DevToolsDir)
 	if config.IdleTimeout <= 0 {
 		config.IdleTimeout = defaultIdleTimeout
+	}
+	if config.MaxSessions <= 0 {
+		config.MaxSessions = DefaultMaxSessions
 	}
 	m := &Manager{
 		ctx:           ctx,
@@ -188,9 +195,9 @@ func (m *Manager) Open(ctx context.Context, scope Scope) (Info, error) {
 		}
 		created := s == nil
 		if created {
-			if len(m.sessions) >= maxSessions {
+			if len(m.sessions) >= m.config.MaxSessions {
 				m.mu.Unlock()
-				return Info{}, errors.New("browser session limit reached (four conversation sessions); stop an unused session")
+				return Info{}, errors.Errorf("browser session limit reached (%d conversation sessions); stop an unused session", m.config.MaxSessions)
 			}
 			sessionCtx, sessionCancel := context.WithCancel(m.ctx)
 			s = &session{

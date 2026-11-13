@@ -285,8 +285,15 @@ func TestOpenReusesCanonicalConversationAndRequestLifetime(t *testing.T) {
 	require.NoError(t, m.Close())
 }
 
+func TestManagerDefaultsMaxSessions(t *testing.T) {
+	m := NewManager(t.Context(), Config{})
+	t.Cleanup(func() { require.NoError(t, m.Close()) })
+	assert.Equal(t, DefaultMaxSessions, m.config.MaxSessions)
+}
+
 func TestConcurrentOpenAndSessionLimit(t *testing.T) {
 	config, _ := fakeBrowserConfig(t)
+	config.MaxSessions = 4
 	m := testManager(t, config)
 	scope := Scope{ConversationID: "conversation", CWD: t.TempDir()}
 	type result struct {
@@ -307,7 +314,7 @@ func TestConcurrentOpenAndSessionLimit(t *testing.T) {
 		require.NoError(t, got.err)
 		assert.Equal(t, first.info, got.info)
 	}
-	for i := range maxSessions - 1 {
+	for i := range config.MaxSessions - 1 {
 		_, err := m.Open(t.Context(), Scope{ConversationID: fmt.Sprintf("other-%d", i), CWD: scope.CWD})
 		require.NoError(t, err)
 	}

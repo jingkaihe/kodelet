@@ -118,9 +118,8 @@ func TestWorkspaceGitDiffUsesRequestedDirectory(t *testing.T) {
 func TestWorkspaceTerminalsAreScopedByConversationAndCanonicalDirectory(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	startup, selected := t.TempDir(), t.TempDir()
-	service, err := NewService(t.Context(), startup, ServiceOptions{})
+	service, err := NewService(t.Context(), startup, ServiceOptions{TerminalMaxSessions: 4})
 	require.NoError(t, err)
-	service.terminalSessionLimit = 4
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 	first := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{ConversationID: "conversation"})
 	second := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{
@@ -186,7 +185,7 @@ func TestWorkspaceTerminalsAreScopedByConversationAndCanonicalDirectory(t *testi
 	}
 	retained := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{ConversationID: "other"})
 	assert.Equal(t, other.SessionID, retained.SessionID)
-	for i := range service.terminalSessionLimit - 1 {
+	for i := range service.terminalMaxSessions - 1 {
 		callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{ConversationID: "new-" + strconv.Itoa(i)})
 	}
 	require.NoError(t, service.Close())
@@ -195,18 +194,24 @@ func TestWorkspaceTerminalsAreScopedByConversationAndCanonicalDirectory(t *testi
 	assert.Contains(t, rpcErr.Message, "closed")
 }
 
-func TestWorkspaceTerminalsRespectLimitAndReclaimExitedOrClosedSessions(t *testing.T) {
-	t.Setenv("SHELL", "/bin/sh")
+func TestServiceDefaultsTerminalMaxSessions(t *testing.T) {
 	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{})
 	require.NoError(t, err)
-	service.terminalSessionLimit = 4
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	assert.Equal(t, DefaultTerminalMaxSessions, service.terminalMaxSessions)
+}
+
+func TestWorkspaceTerminalsRespectLimitAndReclaimExitedOrClosedSessions(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{TerminalMaxSessions: 4})
+	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 	first := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{ConversationID: "first"})
 	manager, err := service.terminalManagerForSession(first.SessionID)
 	require.NoError(t, err)
 	session, err := manager.session(first.SessionID)
 	require.NoError(t, err)
-	for i := range service.terminalSessionLimit - 1 {
+	for i := range service.terminalMaxSessions - 1 {
 		callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{
 			ConversationID: "conversation", TerminalID: strconv.Itoa(i),
 		})
@@ -221,17 +226,17 @@ func TestWorkspaceTerminalsRespectLimitAndReclaimExitedOrClosedSessions(t *testi
 	next := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, nextScope)
 	assert.NotEqual(t, first.SessionID, next.SessionID)
 	assert.True(t, workspaceTerminalDone(manager.closedCh), "reclaim also releases the manager's context watcher")
-	assert.Len(t, service.terminalManagers, service.terminalSessionLimit)
+	assert.Len(t, service.terminalManagers, service.terminalMaxSessions)
 
 	// Reuse the full runner to check explicit close also frees a tab's slot.
 	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalClose, protocol.WorkspaceTerminalCloseParams{
 		ConversationID: "conversation", TerminalID: "0",
 	})
-	assert.Len(t, service.terminalManagers, service.terminalSessionLimit-1)
+	assert.Len(t, service.terminalManagers, service.terminalMaxSessions-1)
 	callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{
 		ConversationID: "conversation", TerminalID: "after-close",
 	})
-	assert.Len(t, service.terminalManagers, service.terminalSessionLimit)
+	assert.Len(t, service.terminalManagers, service.terminalMaxSessions)
 }
 
 func TestWorkspaceTerminalTabsPersistAndCloseIndependently(t *testing.T) {
@@ -402,9 +407,8 @@ func TestWorkspaceTerminalTabsValidateIDsBeforeCreatingResources(t *testing.T) {
 func TestWorkspaceTerminalTabCloseRetainsFailedCleanupSlot(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	workspace := t.TempDir()
-	service, err := NewService(t.Context(), workspace, ServiceOptions{})
+	service, err := NewService(t.Context(), workspace, ServiceOptions{TerminalMaxSessions: 4})
 	require.NoError(t, err)
-	service.terminalSessionLimit = 4
 	cleanupErr := errors.New("cleanup failed")
 	t.Cleanup(func() { require.ErrorIs(t, service.Close(), cleanupErr) })
 	manager := newWorkspaceTerminalManager(t.Context(), workspace)
@@ -419,7 +423,7 @@ func TestWorkspaceTerminalTabCloseRetainsFailedCleanupSlot(t *testing.T) {
 		}), cleanupErr)
 		assert.Same(t, manager, service.terminalManagers[scope])
 	}
-	for i := range service.terminalSessionLimit - 1 {
+	for i := range service.terminalMaxSessions - 1 {
 		callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{
 			ConversationID: "conversation", TerminalID: strconv.Itoa(i),
 		})

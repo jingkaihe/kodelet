@@ -30,7 +30,12 @@ log_format: "json"
 # browser:
 #   executable: "/opt/chrome/chrome" # Installed Chrome/Chromium; empty disables.
 #   idle_timeout: "15m" # Must be positive.
+#   max_sessions: 32 # Concurrent conversation browsers per runner (YAML only).
 #   devtools_dir: "" # Optional compiled frontend containing inspector.html.
+
+# Terminal settings for `serve` and `runner start` (trusted config only).
+# terminal:
+#   max_sessions: 256 # Retained Web UI terminals per runner.
 
 # `kodelet serve` settings may be stored under `serve` in ~/.kodelet/config.yaml
 # or a file explicitly selected with KODELET_CONFIG_FILE. Repository-level

@@ -103,6 +103,8 @@ func TestRunnerBrowserConfigPrecedence(t *testing.T) {
 		{name: "wrong YAML type", yaml: "browser:\n  executable: 123\n", wantErr: "trusted browser configuration"},
 		{name: "invalid environment duration", environment: map[string]string{"IDLE_TIMEOUT": "nope"}, wantErr: "positive duration"},
 		{name: "zero flag duration", flags: []string{"--browser-idle-timeout=0"}, wantErr: "positive duration"},
+		{name: "max sessions from YAML", yaml: "browser:\n  max_sessions: 8\n", want: browser.Config{MaxSessions: 8}},
+		{name: "zero YAML max sessions", yaml: "browser:\n  max_sessions: 0\n", wantErr: "positive integer"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			require.NoError(t, viper.ReadConfig(strings.NewReader(test.yaml)))
@@ -129,6 +131,39 @@ func TestRunnerBrowserConfigPrecedence(t *testing.T) {
 		for _, flag := range []string{"browser-executable", "browser-devtools-dir", "browser-idle-timeout"} {
 			assert.NotNil(t, cmd.Flags().Lookup(flag), "%s registers %s", cmd.CommandPath(), flag)
 		}
+	}
+}
+
+func TestRunnerTerminalMaxSessionsConfig(t *testing.T) {
+	previous := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+		require.NoError(t, viper.MergeConfigMap(previous))
+	})
+	viper.SetConfigType("yaml")
+	for _, test := range []struct {
+		name    string
+		yaml    string
+		want    int
+		wantErr string
+	}{
+		{name: "unset"},
+		{name: "trusted YAML", yaml: "terminal:\n  max_sessions: 64\n", want: 64},
+		{name: "zero", yaml: "terminal:\n  max_sessions: 0\n", wantErr: "positive integer"},
+		{name: "unknown key", yaml: "terminal:\n  max_session: 8\n", wantErr: "trusted terminal configuration"},
+		{name: "wrong type", yaml: "terminal:\n  max_sessions: many\n", wantErr: "trusted terminal configuration"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.NoError(t, viper.ReadConfig(strings.NewReader(test.yaml)))
+			got, err := runnerTerminalMaxSessionsFromConfig()
+			if test.wantErr != "" {
+				require.ErrorContains(t, err, test.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, test.want, got)
+		})
 	}
 }
 

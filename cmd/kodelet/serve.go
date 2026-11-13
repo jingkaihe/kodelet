@@ -56,6 +56,7 @@ type ServeConfig struct {
 	EmbeddedRunner       bool
 	BrowserEnabled       bool
 	Browser              browser.Config
+	TerminalMaxSessions  int
 	RunnerWorkspace      string
 	RunnerSettings       map[string]any
 	CORSOrigins          []string
@@ -266,6 +267,11 @@ func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
 	if config.EmbeddedRunner {
 		browserConfig, err := runnerBrowserConfigFromFlags(cmd)
 		config.Browser = browserConfig
+		if err != nil && config.ConfigError == nil {
+			config.ConfigError = err
+		}
+		terminalMaxSessions, err := runnerTerminalMaxSessionsFromConfig()
+		config.TerminalMaxSessions = terminalMaxSessions
 		if err != nil && config.ConfigError == nil {
 			config.ConfigError = err
 		}
@@ -647,6 +653,7 @@ func buildControlPlaneServerConfig(config *ServeConfig) (*controlplane.ServerCon
 			ProfileConfigLoader:     loader,
 			RefreshResourceSettings: resources.Refresh,
 			Browser:                 config.Browser,
+			TerminalMaxSessions:     config.TerminalMaxSessions,
 		}
 		serverConfig.EmbeddedRunner = &controlplane.EmbeddedRunnerConfig{
 			Workspace:      workspace,

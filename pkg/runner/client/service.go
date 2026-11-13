@@ -82,7 +82,8 @@ type EnvironmentFactory func(workingDirectory string, runtime *extensions.Runtim
 
 // ServiceOptions configures the runner-side request service.
 type ServiceOptions struct {
-	Browser browser.Config
+	Browser             browser.Config
+	TerminalMaxSessions int
 	// ArtifactBaseURL is the runner's control-plane address, not the advertised image host.
 	ArtifactBaseURL           string
 	RuntimeProvider           RuntimeProvider
@@ -118,7 +119,7 @@ type Service struct {
 	browserManager        *browser.Manager
 	browserRelays         map[*webBrowserRelay]struct{}
 	terminalManagers      map[workspaceTerminalScope]*workspaceTerminalManager
-	terminalSessionLimit  int
+	terminalMaxSessions   int
 	cleanupTimeout        time.Duration
 	snapshotWaitTimeout   time.Duration
 	peer                  Peer
@@ -251,7 +252,10 @@ func NewService(parent context.Context, workspace string, options ServiceOptions
 	service.browserManager = browser.NewManager(service.ctx, options.Browser)
 	service.browserRelays = make(map[*webBrowserRelay]struct{})
 	service.terminalManagers = make(map[workspaceTerminalScope]*workspaceTerminalManager)
-	service.terminalSessionLimit = workspaceTerminalSessionLimit
+	service.terminalMaxSessions = options.TerminalMaxSessions
+	if service.terminalMaxSessions <= 0 {
+		service.terminalMaxSessions = DefaultTerminalMaxSessions
+	}
 	service.workspaceSessionLeases = make(map[string]time.Time)
 	service.workspaceSessionsStop = make(chan struct{})
 	service.workspaceSessionsDone = make(chan struct{})

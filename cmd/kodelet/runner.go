@@ -35,12 +35,13 @@ import (
 const defaultRunnerServer = "http://localhost:8080"
 
 type runnerStartConfig struct {
-	Server      string
-	AuthToken   string
-	DisplayName string
-	Browser     browser.Config
-	Debug       debugConfig
-	ConfigError error
+	Server              string
+	AuthToken           string
+	DisplayName         string
+	Browser             browser.Config
+	TerminalMaxSessions int
+	Debug               debugConfig
+	ConfigError         error
 }
 
 type runnerEnrollConfig struct {
@@ -158,13 +159,18 @@ func runnerStartConfigFromFlags(cmd *cobra.Command) runnerStartConfig {
 	server, _ := serverFlagOrConfig(cmd)
 	displayName, _ := cmd.Flags().GetString("name")
 	browserConfig, err := runnerBrowserConfigFromFlags(cmd)
+	terminalMaxSessions, terminalErr := runnerTerminalMaxSessionsFromConfig()
+	if err == nil {
+		err = terminalErr
+	}
 	return runnerStartConfig{
-		Server:      server,
-		AuthToken:   authTokenFlagOrEnvironment(cmd, runnerAuthTokenEnv),
-		DisplayName: displayName,
-		Browser:     browserConfig,
-		Debug:       resolveDebugConfig(cmd),
-		ConfigError: err,
+		Server:              server,
+		AuthToken:           authTokenFlagOrEnvironment(cmd, runnerAuthTokenEnv),
+		DisplayName:         displayName,
+		Browser:             browserConfig,
+		TerminalMaxSessions: terminalMaxSessions,
+		Debug:               resolveDebugConfig(cmd),
+		ConfigError:         err,
 	}
 }
 
@@ -227,6 +233,7 @@ func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
 		WorkspaceConfigLoader:   loader,
 		RefreshResourceSettings: resources.Refresh,
 		Browser:                 config.Browser,
+		TerminalMaxSessions:     config.TerminalMaxSessions,
 	}
 
 	var registered bool
@@ -278,6 +285,7 @@ func runnerBrowserConfigFromFlags(cmd *cobra.Command) (browser.Config, error) {
 		Executable  string `mapstructure:"executable"`
 		DevToolsDir string `mapstructure:"devtools_dir"`
 		IdleTimeout string `mapstructure:"idle_timeout"`
+		MaxSessions *int   `mapstructure:"max_sessions"`
 	}
 	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
 		Result:      &trusted,
@@ -318,7 +326,40 @@ func runnerBrowserConfigFromFlags(cmd *cobra.Command) (browser.Config, error) {
 		}
 		config.IdleTimeout = duration
 	}
+	config.MaxSessions, err = configuredMaxSessions("browser", trusted.MaxSessions)
+	if err != nil {
+		return browser.Config{}, err
+	}
 	return config, nil
+}
+
+func runnerTerminalMaxSessionsFromConfig() (int, error) {
+	var trusted struct {
+		MaxSessions *int `mapstructure:"max_sessions"`
+	}
+	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		Result:      &trusted,
+		TagName:     "mapstructure",
+		ErrorUnused: true,
+	})
+	if err != nil {
+		return 0, errors.Wrap(err, "failed to initialize trusted terminal configuration decoder")
+	}
+	if err := decoder.Decode(viper.Get("terminal")); err != nil {
+		return 0, errors.Wrap(err, "failed to decode trusted terminal configuration")
+	}
+	return configuredMaxSessions("terminal", trusted.MaxSessions)
+}
+
+// Zero means unset, so the runner applies its default.
+func configuredMaxSessions(namespace string, value *int) (int, error) {
+	if value == nil {
+		return 0, nil
+	}
+	if *value <= 0 {
+		return 0, errors.Errorf("%s.max_sessions must be a positive integer", namespace)
+	}
+	return *value, nil
 }
 
 func runRunnerEnroll(ctx context.Context, config runnerEnrollConfig, output io.Writer) error {

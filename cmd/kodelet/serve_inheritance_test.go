@@ -107,7 +107,8 @@ func TestServePinsBrowserConfigAtStartup(t *testing.T) {
 	t.Setenv("KODELET_BROWSER_EXECUTABLE", "")
 	t.Setenv("KODELET_BROWSER_DEVTOOLS_DIR", "")
 	t.Setenv("KODELET_BROWSER_IDLE_TIMEOUT", "")
-	viper.Set("browser", map[string]any{"executable": "/yaml/chrome", "devtools_dir": "/yaml/devtools", "idle_timeout": "7m"})
+	viper.Set("browser", map[string]any{"executable": "/yaml/chrome", "devtools_dir": "/yaml/devtools", "idle_timeout": "7m", "max_sessions": 8})
+	viper.Set("terminal", map[string]any{"max_sessions": 64})
 	viper.Set("profiles.deep.browser.executable", "/profile/chrome")
 	viper.Set("profiles.deep.provider", "openai")
 	viper.Set("profiles.deep.model", "gpt-4.1")
@@ -121,8 +122,9 @@ func TestServePinsBrowserConfigAtStartup(t *testing.T) {
 	require.NoError(t, cmd.Flags().Set("browser-executable", "/flag/chrome"))
 	config = getServeConfigFromFlags(cmd)
 	require.NoError(t, config.ConfigError)
-	want := browser.Config{Executable: "/flag/chrome", DevToolsDir: "/yaml/devtools", IdleTimeout: 7 * time.Minute}
+	want := browser.Config{Executable: "/flag/chrome", DevToolsDir: "/yaml/devtools", IdleTimeout: 7 * time.Minute, MaxSessions: 8}
 	assert.Equal(t, want, config.Browser)
+	assert.Equal(t, 64, config.TerminalMaxSessions)
 
 	viper.Set("browser.executable", "/changed/chrome")
 	t.Setenv("KODELET_BROWSER_EXECUTABLE", "/changed-env/chrome")
@@ -130,6 +132,7 @@ func TestServePinsBrowserConfigAtStartup(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, server.EmbeddedRunner)
 	assert.Equal(t, want, server.EmbeddedRunner.ServiceOptions.Browser)
+	assert.Equal(t, 64, server.EmbeddedRunner.ServiceOptions.TerminalMaxSessions)
 
 	// A server without an embedded runner does not consume local browser settings.
 	t.Setenv("KODELET_BROWSER_IDLE_TIMEOUT", "invalid")
