@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -111,7 +112,7 @@ This tool takes two parameters:
 
 IMPORTANT: If you want to create an empty file, use ${bash} tool to run "touch" command instead of calling this tool.
 IMPORTANT: If you are performing file overwrites, read the file using the ${read_file} tool first to get the existing text, and then append the new text to the existing text.
-IMPORTANT: Make sure that the directory of the file exists before writing to it. You can verify it via running "ls" command.
+Missing parent directories are created automatically with 0755 permissions.
 By default the file is created with 0644 permissions. You can change the permissions by using ${bash} tool chmod command as a follow up.
 `
 }
@@ -159,6 +160,13 @@ func (t *FileWriteTool) Execute(_ context.Context, state tooltypes.State, parame
 		return &FileWriteToolResult{
 			filename: input.FilePath,
 			err:      fmt.Sprintf("failed to read the file before writing: %s", err.Error()),
+		}
+	}
+
+	if err := os.MkdirAll(filepath.Dir(input.FilePath), 0o755); err != nil {
+		return &FileWriteToolResult{
+			filename: input.FilePath,
+			err:      fmt.Sprintf("failed to create parent directories: %s", err.Error()),
 		}
 	}
 

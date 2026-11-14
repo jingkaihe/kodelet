@@ -132,11 +132,12 @@ func TestFileWriteTool_Execute(t *testing.T) {
 		assert.Contains(t, result.GetError(), "invalid input")
 	})
 
-	t.Run("non-existent directory", func(t *testing.T) {
-		nonExistentPath := filepath.Join(tempDir, "non-existent-dir", "test_file.txt")
+	t.Run("creates missing parent directories", func(t *testing.T) {
+		parentDir := filepath.Join(tempDir, "non-existent-dir", "nested")
+		nestedPath := filepath.Join(parentDir, "test_file.txt")
 
 		input := FileWriteInput{
-			FilePath: nonExistentPath,
+			FilePath: nestedPath,
 			Text:     "test content",
 		}
 
@@ -144,10 +145,37 @@ func TestFileWriteTool_Execute(t *testing.T) {
 		require.NoError(t, err)
 
 		result := tool.Execute(ctx, state, string(inputJSON))
+		require.False(t, result.IsError(), result.GetError())
+
+		info, err := os.Stat(parentDir)
+		require.NoError(t, err)
+		assert.True(t, info.IsDir())
+
+		content, err := os.ReadFile(nestedPath)
+		require.NoError(t, err)
+		assert.Equal(t, "test content", string(content))
+	})
+
+	t.Run("cannot create parent directories", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root bypasses directory permission checks")
+		}
+
+		readOnlyDir := filepath.Join(tempDir, "read-only")
+		require.NoError(t, os.Mkdir(readOnlyDir, 0o555))
+		t.Cleanup(func() {
+			_ = os.Chmod(readOnlyDir, 0o755)
+		})
+
+		blockedPath := filepath.Join(readOnlyDir, "child", "test_file.txt")
+		inputJSON, err := json.Marshal(FileWriteInput{FilePath: blockedPath, Text: "test content"})
+		require.NoError(t, err)
+
+		result := tool.Execute(ctx, state, string(inputJSON))
 		assert.True(t, result.IsError())
-		assert.Contains(t, result.GetError(), "failed to write the file")
+		assert.Contains(t, result.GetError(), "failed to create parent directories")
 		meta := result.StructuredData().Metadata.(*tooltypes.FileWriteMetadata)
-		assert.Equal(t, nonExistentPath, meta.FilePath)
+		assert.Equal(t, blockedPath, meta.FilePath)
 		assert.Empty(t, meta.UnifiedDiff)
 	})
 
