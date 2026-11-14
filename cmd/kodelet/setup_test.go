@@ -55,6 +55,8 @@ func TestRecommendedSetupConfigYAML_SeparatesModelProfilesFromRunnerDefaults(t *
 					assert.Equal(t, profile, definition["provider"])
 				}
 			} else {
+				assert.Equal(t, "claude-fable-5-2", config.Aliases["fable-52"])
+				assert.Equal(t, "claude-mythos-5-2", config.Aliases["mythos-52"])
 				assert.Equal(t, "claude-opus-5", config.Aliases["opus-5"])
 				assert.Equal(t, "claude-opus-5-5", config.Aliases["opus-55"])
 				assert.Equal(t, "claude-sonnet-5-5", config.Aliases["sonnet-55"])

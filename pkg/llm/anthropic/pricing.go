@@ -7,6 +7,10 @@ import (
 )
 
 const (
+	// These model IDs are not yet defined in anthropic-sdk-go v1.84.0.
+	modelClaudeFable52  anthropic.Model = "claude-fable-5-2"
+	modelClaudeMythos52 anthropic.Model = "claude-mythos-5-2"
+
 	modelClaudeMythosPreview   anthropic.Model = "claude-mythos-preview"
 	modelClaude35Haiku         anthropic.Model = "claude-3-5-haiku"
 	modelClaude35Haiku20241022 anthropic.Model = "claude-3-5-haiku-20241022"
@@ -27,6 +31,24 @@ type ModelPricing struct {
 
 // ModelPricingMap maps model names to their pricing information
 var ModelPricingMap = map[anthropic.Model]ModelPricing{
+	modelClaudeFable52: {
+		// https://platform.claude.com/docs/en/models/fable-5-2/overview
+		Input:                0.000008,  // $8.00 per million tokens
+		Output:               0.000040,  // $40.00 per million tokens
+		PromptCachingWrite5m: 0.000010,  // $10.00 per million tokens
+		PromptCachingWrite1h: 0.000016,  // $16.00 per million tokens
+		PromptCachingRead:    0.0000002, // $0.20 per million tokens
+		ContextWindow:        1_000_000,
+	},
+	modelClaudeMythos52: {
+		// https://platform.claude.com/docs/en/models/mythos-5-2/overview
+		Input:                0.000008,  // $8.00 per million tokens
+		Output:               0.000040,  // $40.00 per million tokens
+		PromptCachingWrite5m: 0.000010,  // $10.00 per million tokens
+		PromptCachingWrite1h: 0.000016,  // $16.00 per million tokens
+		PromptCachingRead:    0.0000002, // $0.20 per million tokens
+		ContextWindow:        1_000_000,
+	},
 	anthropic.ModelClaudeHaiku5_5: {
 		// Base rates for prompts up to 100K tokens; longer prompts cost 5x.
 		// https://platform.claude.com/docs/en/models/haiku-5-5/overview
@@ -197,6 +219,10 @@ func getModelPricing(model anthropic.Model) ModelPricing {
 		return ModelPricingMap[anthropic.ModelClaudeSonnet5_5]
 	} else if strings.Contains(lowerModel, "claude-sonnet-5") {
 		return ModelPricingMap[anthropic.ModelClaudeSonnet5]
+	} else if strings.Contains(lowerModel, "claude-fable-5-2") {
+		return ModelPricingMap[modelClaudeFable52]
+	} else if strings.Contains(lowerModel, "claude-mythos-5-2") {
+		return ModelPricingMap[modelClaudeMythos52]
 	} else if strings.Contains(lowerModel, "claude-fable-5-1") {
 		return ModelPricingMap[anthropic.ModelClaudeFable5_1]
 	} else if strings.Contains(lowerModel, "claude-fable-5") {

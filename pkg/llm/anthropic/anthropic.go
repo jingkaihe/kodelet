@@ -1095,6 +1095,8 @@ func anthropicReasoningEffort(configured string, supportsXhigh bool) (anthropic.
 
 func isAdaptiveThinkingModel(model anthropic.Model) bool {
 	adaptiveThinkingModels := []anthropic.Model{
+		modelClaudeFable52,
+		modelClaudeMythos52,
 		anthropic.ModelClaudeHaiku5_5,
 		anthropic.ModelClaudeSonnet5_5,
 		anthropic.ModelClaudeFable5_1,
@@ -1113,6 +1115,8 @@ func isAdaptiveThinkingModel(model anthropic.Model) bool {
 
 func isAlwaysOnAdaptiveThinkingModel(model anthropic.Model) bool {
 	alwaysOnAdaptiveThinkingModels := []anthropic.Model{
+		modelClaudeFable52,
+		modelClaudeMythos52,
 		anthropic.ModelClaudeSonnet5_5,
 		anthropic.ModelClaudeFable5_1,
 		anthropic.ModelClaudeFable5,
@@ -1125,6 +1129,8 @@ func isAlwaysOnAdaptiveThinkingModel(model anthropic.Model) bool {
 
 func isXhighEffortModel(model anthropic.Model) bool {
 	xhighEffortModels := []anthropic.Model{
+		modelClaudeFable52,
+		modelClaudeMythos52,
 		anthropic.ModelClaudeHaiku5_5,
 		anthropic.ModelClaudeSonnet5_5,
 		anthropic.ModelClaudeFable5_1,
@@ -1140,6 +1146,8 @@ func isXhighEffortModel(model anthropic.Model) bool {
 
 func isThinkingModel(model anthropic.Model) bool {
 	thinkingModels := []anthropic.Model{
+		modelClaudeFable52,
+		modelClaudeMythos52,
 		anthropic.ModelClaudeHaiku5_5,
 		anthropic.ModelClaudeSonnet5_5,
 		anthropic.ModelClaudeFable5_1,
@@ -1226,7 +1234,11 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 	defer func() { base.FinishModelSpan(span, stderrors.Join(err, ctx.Err(), accumulationErr)) }()
 
 	retryAttempts := t.Config.Retry.Attempts
-	requestOpts := []option.RequestOption{option.WithMaxRetries(retryAttempts)}
+	requestOpts := []option.RequestOption{
+		option.WithMaxRetries(retryAttempts),
+		// Kodelet owns model spans and content capture; avoid duplicate SDK spans.
+		option.WithoutOpenTelemetry(),
+	}
 	if requiresInterleavedThinkingBeta(params) {
 		requestOpts = append(requestOpts, option.WithHeaderAdd("anthropic-beta", "interleaved-thinking-2025-05-14"))
 	}

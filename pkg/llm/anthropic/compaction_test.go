@@ -16,6 +16,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
+	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -171,6 +172,20 @@ func (*nativeCompactionTestEnvironment) ProcessAgentInit(
 	ctx context.Context, _ string, _ []string,
 ) (agentenv.AgentInitDecision, error) {
 	return agentenv.AgentInitDecision{SystemPrompt: "Keep this system instruction."}, ctx.Err()
+}
+
+func TestNativeCompactionTracing(t *testing.T) {
+	recorder, _ := telemetrytest.NewRecorder(t, false)
+	thread, _ := newNativeCompactionTestThread(t,
+		compactionTestStream(nativeCompactionTestBlock, "compaction", nativeCompactionTestUsage),
+	)
+	params, err := thread.messageParams(thread.Config.Model, 4096, "system", llmtypes.MessageOpt{NoToolUse: true})
+	require.NoError(t, err)
+	require.NoError(t, thread.compactContextNative(t.Context(), params))
+
+	spans := recorder.Ended()
+	require.Len(t, spans, 1, "SDK tracing must not duplicate Kodelet's compaction model span")
+	assert.Equal(t, "chat "+thread.Config.Model, spans[0].Name())
 }
 
 func TestNativeCompactionLifecycle(t *testing.T) {

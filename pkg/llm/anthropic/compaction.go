@@ -177,7 +177,11 @@ func (t *Thread) compactContextNative(ctx context.Context, params anthropic.Mess
 	betaParams.Compaction = anthropic.BetaCompactionConfigUnionParam{
 		OfSummarize: &anthropic.BetaSummarizeCompactionParam{},
 	}
-	requestOpts := []option.RequestOption{option.WithMaxRetries(t.Config.Retry.Attempts)}
+	requestOpts := []option.RequestOption{
+		option.WithMaxRetries(t.Config.Retry.Attempts),
+		// Kodelet owns the compaction model span and its content capture policy.
+		option.WithoutOpenTelemetry(),
+	}
 	if requiresInterleavedThinkingBeta(params) {
 		requestOpts = append(requestOpts,
 			option.WithHeaderAdd("anthropic-beta", "interleaved-thinking-2025-05-14"),

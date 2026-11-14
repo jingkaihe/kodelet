@@ -37,6 +37,7 @@ func TestModelOptionsScopedCatalogs(t *testing.T) {
 				},
 			},
 			contains: []string{
+				"claude-fable-5-2", "claude-mythos-5-2",
 				"claude-sonnet-4-5", "claude-sonnet-5-5", "claude-opus-4-6", "claude-opus-5-5", "claude-haiku-5-5",
 			},
 			excludes: []string{"gpt-5", "unrelated-model", "openai-custom", "priced-openai"},

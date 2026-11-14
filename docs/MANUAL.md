@@ -1170,16 +1170,20 @@ Kodelet supports various Anthropic Claude models:
 - `claude-sonnet-5-5` (Sonnet 5.5, 1M-token context window, available through the sample configuration's `sonnet-55` alias)
 - `claude-haiku-5-5` (Haiku 5.5, 1M-token context window, recommended for lightweight tasks and the weak model in `kodelet setup`; available through the sample configuration's `haiku-55` alias)
 - `claude-opus-5` (Opus 5, available through the retained `opus-5` alias)
-- `claude-fable-5` (most capable widely released model for demanding reasoning and long-horizon agentic work)
-- `claude-sonnet-4-6` (recommended for standard tasks)
-- `claude-haiku-4-5-20251001` (Haiku 4.5, retained for compatibility)
-- `claude-opus-4-5-20251101` (most intelligent model for building agents and coding)
-- `claude-opus-4-1-20250805` (high-end model for complex tasks)
+- `claude-fable-5-2`
+- `claude-mythos-5-2`
+- `claude-fable-5`
+- `claude-sonnet-4-6`
+- `claude-haiku-4-5-20251001`
+- `claude-opus-4-5-20251101`
+- `claude-opus-4-1-20250805`
 
 Features:
 - Vision capabilities for image analysis
 - Message caching for improved performance
 - Thinking mode for complex reasoning
+
+Fable 5.2 and Mythos 5.2 use always-on adaptive thinking with `reasoning_effort: low|medium|high|xhigh|max`; `none` is rejected, and `thinking_budget_tokens` is ignored. Both support original-detail image input.
 
 ### OpenAI
 

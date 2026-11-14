@@ -706,7 +706,7 @@ func TestUsageMetricsRecordPerResponseIncrements(t *testing.T) {
 	}
 }
 
-func TestHaiku55UsagePricingTiers(t *testing.T) {
+func TestUsagePricingTiers(t *testing.T) {
 	tests := []struct {
 		name       string
 		model      anthropic.Model
@@ -753,6 +753,20 @@ func TestHaiku55UsagePricingTiers(t *testing.T) {
 			name:       "haiku 4.5 pricing is unchanged",
 			model:      anthropic.ModelClaudeHaiku4_5,
 			input:      94_001,
+			cacheRead:  3000,
+			multiplier: 1,
+		},
+		{
+			name:       "fable 5.2 has no long-context surcharge",
+			model:      modelClaudeFable52,
+			input:      500_000,
+			cacheRead:  3000,
+			multiplier: 1,
+		},
+		{
+			name:       "mythos 5.2 has no long-context surcharge",
+			model:      modelClaudeMythos52,
+			input:      500_000,
 			cacheRead:  3000,
 			multiplier: 1,
 		},
@@ -830,6 +844,27 @@ func TestFable51Pricing(t *testing.T) {
 	assert.Equal(t, 0.00000025, pricing.PromptCachingRead)
 	assert.Equal(t, 0.000050, pricing.Output)
 	assert.Equal(t, 1_000_000, pricing.ContextWindow)
+}
+
+func TestFableAndMythos52Pricing(t *testing.T) {
+	want := ModelPricing{
+		Input:                0.000008,
+		Output:               0.000040,
+		PromptCachingWrite5m: 0.000010,
+		PromptCachingWrite1h: 0.000016,
+		PromptCachingRead:    0.0000002,
+		ContextWindow:        1_000_000,
+	}
+	for _, model := range []anthropic.Model{modelClaudeFable52, modelClaudeMythos52} {
+		t.Run(model, func(t *testing.T) {
+			pricing, ok := ModelPricingMap[model]
+			require.True(t, ok)
+			assert.Equal(t, want, pricing)
+			assert.Equal(t, want, getModelPricing(model))
+			assert.Equal(t, want, getModelPricing(model+"-latest"))
+			assert.Equal(t, want, getModelPricing(strings.ToUpper(model)+"-custom"))
+		})
+	}
 }
 
 func TestSonnet55Pricing(t *testing.T) {
@@ -1946,6 +1981,16 @@ func TestIsThinkingModel(t *testing.T) {
 		expected bool
 	}{
 		{
+			name:     "fable 5.2 supports thinking",
+			model:    modelClaudeFable52,
+			expected: true,
+		},
+		{
+			name:     "mythos 5.2 supports thinking",
+			model:    modelClaudeMythos52,
+			expected: true,
+		},
+		{
 			name:     "haiku 5.5 supports thinking",
 			model:    anthropic.ModelClaudeHaiku5_5,
 			expected: true,
@@ -2047,6 +2092,8 @@ func TestThinkingConfigForModel(t *testing.T) {
 	})
 
 	for _, model := range []anthropic.Model{
+		modelClaudeFable52,
+		modelClaudeMythos52,
 		anthropic.ModelClaudeOpus5_5,
 		anthropic.ModelClaudeSonnet5_5,
 		anthropic.ModelClaudeHaiku5_5,
@@ -2135,6 +2182,61 @@ func TestThinkingConfigForModel(t *testing.T) {
 		require.NotNil(t, config.OfAdaptive)
 		assert.Equal(t, "adaptive", *config.GetType())
 	})
+}
+
+func TestFableAndMythos52MessageParams(t *testing.T) {
+	for _, model := range []anthropic.Model{modelClaudeFable52, modelClaudeMythos52} {
+		for _, subscription := range []bool{false, true} {
+			for _, weak := range []bool{false, true} {
+				name := fmt.Sprintf("%s/subscription=%t/weak=%t", model, subscription, weak)
+				t.Run(name, func(t *testing.T) {
+					for _, effort := range []string{"low", "medium", "high", "xhigh", "max", "none"} {
+						t.Run(effort, func(t *testing.T) {
+							config := llmtypes.Config{
+								Provider:             "anthropic",
+								Model:                model,
+								MaxTokens:            64000,
+								ReasoningEffort:      effort,
+								ThinkingBudgetTokens: 4096,
+							}
+							if weak {
+								config.Model = anthropic.ModelClaudeSonnet4_6
+								config.WeakModel = model
+								config.WeakModelMaxTokens = 8192
+							}
+							thread := &Thread{
+								Thread:          base.NewThread(config, "model-test"),
+								useSubscription: subscription,
+							}
+							opt := llmtypes.MessageOpt{UseWeakModel: weak, NoToolUse: true}
+							selectedModel, maxTokens := thread.getModelAndTokens(opt)
+							params, err := thread.messageParams(selectedModel, maxTokens, "system", opt)
+							if effort == "none" {
+								require.ErrorContains(t, err, model+" does not support disabling adaptive thinking")
+								return
+							}
+							require.NoError(t, err)
+							assert.Equal(t, model, params.Model)
+							require.NotNil(t, params.Thinking.OfAdaptive)
+							assert.Nil(t, params.Thinking.GetBudgetTokens())
+							assert.Equal(t, anthropic.OutputConfigEffort(effort), params.OutputConfig.Effort)
+							assert.False(t, requiresInterleavedThinkingBeta(params))
+
+							raw, err := json.Marshal(params)
+							require.NoError(t, err)
+							var body map[string]any
+							require.NoError(t, json.Unmarshal(raw, &body))
+							assert.Equal(t, map[string]any{"type": "adaptive", "display": "summarized"}, body["thinking"])
+							assert.Equal(t, map[string]any{"effort": effort}, body["output_config"])
+							for _, field := range []string{"temperature", "top_p", "top_k", "tool_choice"} {
+								assert.NotContains(t, body, field)
+							}
+						})
+					}
+				})
+			}
+		}
+	}
 }
 
 func TestValidateThinkingConfigForModel(t *testing.T) {

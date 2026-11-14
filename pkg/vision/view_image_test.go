@@ -180,6 +180,8 @@ func TestSupportsViewImageOriginalDetail(t *testing.T) {
 		"gpt-5.4",
 		"gpt-5.4-mini",
 		"gpt-5.3-codex",
+		"claude-fable-5-2",
+		"claude-mythos-5-2",
 		"claude-sonnet-5-5",
 		"claude-fable-5-1",
 		"claude-fable-5",
