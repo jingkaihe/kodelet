@@ -33,14 +33,12 @@ func TestEmbeddedDiscoveryAndRemoteRunShareInheritedPermissionCeilings(t *testin
 		"profiles": map[string]any{
 			"deep": map[string]any{
 				"tool_mode": "patch", "allowed_tools": []string{"bash"},
-				"allowed_commands": []string{"git diff"},
-				"skills":           map[string]any{"enabled": false}, "extensions": map[string]any{"enabled": false},
+				"skills": map[string]any{"enabled": false}, "extensions": map[string]any{"enabled": false},
 			},
 		},
 	}, map[string]any{
 		"tool_mode": "full", "allowed_tools": []string{"bash", "file_read"},
-		"allowed_commands": []string{"git diff", "git status"},
-		"skills":           map[string]any{"enabled": true}, "extensions": map[string]any{"enabled": true},
+		"skills": map[string]any{"enabled": true}, "extensions": map[string]any{"enabled": true},
 	}, nil)
 	require.NoError(t, err)
 	config.EmbeddedRunner.ServiceOptions.ProfileConfigLoader = loader
@@ -59,7 +57,7 @@ func TestEmbeddedDiscoveryAndRemoteRunShareInheritedPermissionCeilings(t *testin
 		runID := "ordinary"
 		modelConfig := llmtypes.Config{
 			Profile: "deep", Provider: "openai", Model: "unused",
-			ToolMode: llmtypes.ToolModePatch, AllowedTools: []string{"bash"}, AllowedCommands: []string{"git diff"},
+			ToolMode: llmtypes.ToolModePatch, AllowedTools: []string{"bash"},
 			Skills: &llmtypes.SkillsConfig{Enabled: false}, ExtensionSettings: map[string]any{"enabled": false},
 		}
 		if restricted {
@@ -85,7 +83,6 @@ func TestEmbeddedDiscoveryAndRemoteRunShareInheritedPermissionCeilings(t *testin
 		}
 		require.NotNil(t, manifest.Config)
 		assert.Equal(t, llmtypes.ToolModeFull, manifest.Config.ToolMode, "explicit runner preferences still override model preferences")
-		assert.Equal(t, []string{"git diff"}, manifest.Config.AllowedCommands)
 		assert.Equal(t, new(true), manifest.Config.Options.NoSkills)
 		assert.Equal(t, new(true), manifest.Config.Options.NoExtensions)
 		require.NoError(t, environment.Close(t.Context()))

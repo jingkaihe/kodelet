@@ -146,8 +146,8 @@ func TestRemoteACPDiscoveryRejectsInvalidOptionsBeforeHTTP(t *testing.T) {
 	for _, options := range []*llmtypes.ExecutionOptions{
 		{Model: new("model")},
 		{MaxTurns: new(0)},
-		{AllowedCommands: new([]string{""})},
-		{AllowedCommands: new([]string{strings.Repeat("x", 17*1024)})},
+		{AllowedTools: new([]string{""})},
+		{AllowedTools: new([]string{strings.Repeat("x", 17*1024)})},
 	} {
 		_, err := client.DiscoverWorkspace(t.Context(), chat.WorkspaceTarget{RunnerID: "runner", Options: options})
 		require.Error(t, err)

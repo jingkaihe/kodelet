@@ -1136,23 +1136,22 @@ func TestRemoteACPOptionsAreValidatedAndClonedBeforeEffects(t *testing.T) {
 	require.ErrorContains(t, err, "maxTurns")
 	assert.Empty(t, client.targets)
 
-	options := &llmtypes.ExecutionOptions{Model: new("alias"), NoTools: new(false), MaxTurns: new(0), AllowedTools: new([]string{}), AllowedCommands: new([]string{"git status"})}
+	options := &llmtypes.ExecutionOptions{Model: new("alias"), NoTools: new(false), MaxTurns: new(0), AllowedTools: new([]string{"file_read"})}
 	manager := newRemoteSessionManager(RemoteSessionConfig{Provider: provider, Options: options})
 	*options.Model = "mutated"
-	(*options.AllowedCommands)[0] = "mutated"
+	(*options.AllowedTools)[0] = "mutated"
 	sessionID, err := manager.newSession(t.Context(), acptypes.NewSessionRequest{CWD: "/runner-only"})
 	require.NoError(t, err)
 	_, first := manager.promptTarget(sessionID)
 	assert.Equal(t, "alias", *first.Options.Model)
-	assert.Equal(t, []string{"git status"}, *first.Options.AllowedCommands)
-	assert.Equal(t, new([]string{}), first.Options.AllowedTools)
+	assert.Equal(t, new([]string{"file_read"}), first.Options.AllowedTools)
 	*first.Options.NoTools = true
 	manager.finishPrompt(sessionID, true)
 	_, second := manager.promptTarget(sessionID)
 	assert.Nil(t, second.Options.Model, "subsequent prompts use daemon-frozen model semantics")
 	assert.Equal(t, new(false), second.Options.NoTools)
 	assert.Equal(t, new(0), second.Options.MaxTurns)
-	assert.Equal(t, new([]string{}), second.Options.AllowedTools)
+	assert.Equal(t, new([]string{"file_read"}), second.Options.AllowedTools)
 }
 
 func TestRemoteACPUncertainSubmissionIsNotRepeated(t *testing.T) {

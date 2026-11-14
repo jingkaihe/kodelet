@@ -252,8 +252,6 @@ func TestWorkspaceConfigLoaderEnforcesHostPolicy(t *testing.T) {
 	}{
 		{"widen tools", map[string]any{"allowed_tools": []string{"file_read"}}, "allowed_tools: [file_read, bash]", "cannot widen runner restrictions"},
 		{"clear tools", map[string]any{"allowed_tools": []string{"file_read"}}, "allowed_tools: []", "cannot remove runner restrictions"},
-		{"widen commands", map[string]any{"allowed_commands": []string{"git status"}}, "allowed_commands: ['*']", "cannot widen runner restrictions"},
-		{"clear commands", map[string]any{"allowed_commands": []string{"git status"}}, "allowed_commands: []", "cannot remove runner restrictions"},
 		{"replace domains", map[string]any{"allowed_domains_file": "/trusted/domains"}, "allowed_domains_file: /repo/domains", "cannot replace runner policy"},
 		{"enable extensions", map[string]any{"extensions": map[string]any{"enabled": false}}, "extensions:\n  enabled: true", "cannot enable extensions"},
 		{"enable extensions disabled by environment", map[string]any{"extensions": map[string]any{"enabled": "false"}}, "extensions:\n  enabled: true", "cannot enable extensions"},

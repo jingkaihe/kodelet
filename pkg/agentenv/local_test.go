@@ -223,8 +223,6 @@ func TestLocalEnvironmentExecutesWorkspaceRecipeCommand(t *testing.T) {
 description: Review the workspace
 allowed_tools:
   - file_read
-allowed_commands:
-  - git status
 ---
 Review this workspace carefully.`), 0o644))
 
@@ -241,7 +239,6 @@ Review this workspace carefully.`), 0o644))
 	assert.Contains(t, result.Prompt, "Review this workspace carefully.")
 	assert.Contains(t, result.Prompt, "focus on tests")
 	assert.Equal(t, []string{"file_read"}, result.AllowedTools)
-	assert.Equal(t, []string{"git status"}, result.AllowedCommands)
 }
 
 func TestLocalEnvironmentRejectsRecipeChangesAfterManifestIsPinned(t *testing.T) {
@@ -372,18 +369,13 @@ func TestLocalEnvironmentLifecycleAndToolExecutionFromProvidedState(t *testing.T
 	assert.Contains(t, blocked.Result.GetError(), "not allowed")
 
 	environment.ApplyCommandResult(CommandResult{
-		Matched:         true,
-		RecipeName:      "updated-recipe",
-		AllowedTools:    []string{"bash"},
-		AllowedCommands: []string{"echo *"},
+		Matched:      true,
+		RecipeName:   "updated-recipe",
+		AllowedTools: []string{"bash"},
 	})
 	pinned := environment.runSpec()
 	assert.Equal(t, "updated-recipe", pinned.Config.RecipeName)
 	assert.Equal(t, []string{"bash"}, pinned.Config.AllowedTools)
-	assert.Equal(t, []string{"echo *"}, pinned.Config.AllowedCommands)
-	invalidCommand, err := environment.ExecuteTool(t.Context(), ToolRequest{Name: "bash", Input: `{"command":"rm -rf nowhere"}`, ToolCallID: "call-command"}, nil)
-	require.NoError(t, err)
-	assert.True(t, invalidCommand.Result.IsError())
 
 	plain, err := environment.ExecuteCommand(t.Context(), CommandRequest{Message: "not a command", RunSpec: spec})
 	require.NoError(t, err)

@@ -47,9 +47,8 @@ func TestBasicState(t *testing.T) {
 
 func TestBasicState_LLMConfig(t *testing.T) {
 	config := llmtypes.Config{
-		Provider:        "anthropic",
-		Model:           "claude-3-5-sonnet",
-		AllowedCommands: []string{"ls *", "pwd", "echo *"},
+		Provider: "anthropic",
+		Model:    "claude-3-5-sonnet",
 	}
 
 	s := NewBasicState(context.TODO(), WithLLMConfig(config))
@@ -61,7 +60,6 @@ func TestBasicState_LLMConfig(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, config.Provider, llmConfig.Provider)
 	assert.Equal(t, config.Model, llmConfig.Model)
-	assert.Equal(t, config.AllowedCommands, llmConfig.AllowedCommands)
 }
 
 func TestToolContextHelpers(t *testing.T) {
@@ -92,9 +90,8 @@ func TestToolContextHelpers(t *testing.T) {
 }
 
 func TestBasicState_ConfigureBashTool(t *testing.T) {
-	allowedCommands := []string{"ls *", "pwd", "echo *", "git status"}
 	config := llmtypes.Config{
-		AllowedCommands: allowedCommands,
+		EnableFSSearchTools: true,
 	}
 
 	s := NewBasicState(context.TODO(), WithLLMConfig(config))
@@ -110,30 +107,8 @@ func TestBasicState_ConfigureBashTool(t *testing.T) {
 		}
 	}
 
-	assert.NotNil(t, bashTool)
-	assert.Equal(t, allowedCommands, bashTool.allowedCommands)
-}
-
-func TestBasicState_ConfigureBashTool_EmptyAllowedCommands(t *testing.T) {
-	config := llmtypes.Config{
-		AllowedCommands: []string{},
-	}
-
-	s := NewBasicState(context.TODO(), WithLLMConfig(config))
-
-	tools := s.BasicTools()
-	var bashTool *BashTool
-	for _, tool := range tools {
-		if tool.Name() == "bash" {
-			if bt, ok := tool.(*BashTool); ok {
-				bashTool = bt
-				break
-			}
-		}
-	}
-
-	assert.NotNil(t, bashTool)
-	assert.Equal(t, []string{}, bashTool.allowedCommands)
+	require.NotNil(t, bashTool)
+	assert.True(t, bashTool.enableFSSearchTools)
 }
 
 func TestBasicState_ConfigureBashTool_CustomTimeout(t *testing.T) {

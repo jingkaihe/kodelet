@@ -523,8 +523,6 @@ func TestExpandWebChatSlashCommandUsesResolvedCWD(t *testing.T) {
 description: Limited recipe
 allowed_tools:
   - bash
-allowed_commands:
-  - git status
 ---
 Hello {{.name}}
 `)
@@ -536,7 +534,6 @@ Hello {{.name}}
 	assert.Contains(t, prompt, "Hello Web")
 	assert.Contains(t, prompt, "Additional instructions:\ncheck this")
 	assert.Equal(t, []string{"bash"}, expansion.Metadata.AllowedTools)
-	assert.Equal(t, []string{"git status"}, expansion.Metadata.AllowedCommands)
 }
 
 func TestTryWebExtensionCommandRoutesCommand(t *testing.T) {
@@ -687,7 +684,6 @@ func TestWebSlashCommandRestrictionsApplyBeforeBuildingState(t *testing.T) {
 	config := llmtypes.Config{}
 	ApplyFragmentRestrictions(context.Background(), &config, metadata)
 	assert.Equal(t, []string{"bash"}, config.AllowedTools)
-	assert.Equal(t, []string{"git status"}, config.AllowedCommands)
 
 	state, err := BuildState(context.Background(), config, "session-1", t.TempDir(), nil)
 	require.NoError(t, err)
@@ -712,8 +708,6 @@ func expandLimitedWebChatRecipe(t *testing.T) *fragments.Metadata {
 	writeWebChatRecipe(t, workspace, "limited", `---
 allowed_tools:
   - bash
-allowed_commands:
-  - git status
 ---
 Restricted prompt
 `)

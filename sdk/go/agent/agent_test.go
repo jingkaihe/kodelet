@@ -19,12 +19,12 @@ func TestExecutionOptionsPreserveExplicitValues(t *testing.T) {
 	options := ExecutionOptions{
 		Provider: "anthropic", Model: "claude", MaxTokens: Ptr(512), MaxTurns: Ptr(0),
 		NoTools: Ptr(false), NoSkills: Ptr(true), AllowedTools: []string{"file_read", `say "hi"`},
-		AllowedCommands: []string{}, EnableFSSearchTools: Ptr(true), CodeMode: "only", ReasoningEffort: "high",
+		EnableFSSearchTools: Ptr(true), CodeMode: "only", ReasoningEffort: "high",
 	}
 	require.NoError(t, options.validate())
 	assert.Equal(t, []string{
 		"--provider=anthropic", "--model=claude", "--max-tokens=512", "--reasoning-effort=high", "--max-turns=0",
-		"--no-tools=false", "--no-skills=true", `--allowed-tools="file_read","say ""hi"""`, "--allowed-commands=",
+		"--no-tools=false", "--no-skills=true", `--allowed-tools="file_read","say ""hi"""`,
 		"--enable-fs-search-tools=true", "--code-mode=only",
 	}, options.args())
 	assert.Empty(t, ExecutionOptions{}.args())

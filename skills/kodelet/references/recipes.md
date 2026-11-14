@@ -35,7 +35,7 @@ Recipe capabilities:
 - Variable substitution: `{{.variable_name}}`.
 - Bash substitution: `{{bash "git" "branch" "--show-current"}}`.
 - Frontmatter arguments with descriptions/defaults.
-- `allowed_tools` and `allowed_commands` restrictions.
+- `allowed_tools` restrictions.
 Example:
 
 ```markdown
@@ -52,9 +52,6 @@ allowed_tools:
   - file_read
   - grep_tool
   - bash
-allowed_commands:
-  - "git *"
-  - "cat *"
 ---
 
 Current branch: {{bash "git" "branch" "--show-current"}}

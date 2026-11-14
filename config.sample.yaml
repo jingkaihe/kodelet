@@ -259,9 +259,6 @@ environment_profiles:
       - "bash"
       - "apply_patch"
       - "file_read"
-    allowed_commands:
-      - "go test *"
-      - "mise run *"
     extensions:
       allow:
         - "acp-subagent"
@@ -294,28 +291,6 @@ retry:
   # Backoff strategy: "fixed" or "exponential" (default: "exponential")
   # Used by OpenAI only
   backoff_type: "exponential"
-
-# Security Configuration
-# Command allow list for bash tool (empty means use default banned commands)
-# When specified, only commands matching these patterns are allowed
-# Supports wildcards: * matches any string
-# Example patterns:
-#   - "ls": exact match for ls command
-#   - "ls *": ls with any arguments
-#   - "npm *": any npm command
-#   - "echo hello": exact echo hello command
-allowed_commands: []
-# allowed_commands:
-#   - "ls *"
-#   - "pwd"
-#   - "echo *"
-#   - "cat *"
-#   - "grep *"
-#   - "find *"
-#   - "npm *"
-#   - "yarn *"
-#   - "git status"
-#   - "git log *"
 
 # Bash tool configuration
 bash:
@@ -525,7 +500,6 @@ tracing:
 # - KODELET_RETRY_INITIAL_DELAY: Overrides the retry.initial_delay setting (milliseconds)
 # - KODELET_RETRY_MAX_DELAY: Overrides the retry.max_delay setting (milliseconds)
 # - KODELET_RETRY_BACKOFF_TYPE: Overrides the retry.backoff_type setting (fixed, exponential)
-# - KODELET_ALLOWED_COMMANDS: Comma-separated list of allowed command patterns
 # - KODELET_ALLOWED_TOOLS: Comma-separated list of allowed tools for main agent
 # - KODELET_CONTEXT_PATTERNS: Comma-separated list of context file patterns (e.g., "AGENTS.md,README.md")
 # - KODELET_TRACING_ENABLED: Enables/disables tracing

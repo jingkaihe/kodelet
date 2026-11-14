@@ -51,7 +51,6 @@ type Manifest struct {
 // EnvironmentConfig is the runner-owned configuration projection pinned with a manifest.
 type EnvironmentConfig struct {
 	Options             *llmtypes.ExecutionOptions
-	AllowedCommands     []string
 	ToolMode            llmtypes.ToolMode
 	CodeMode            string
 	EnableFSSearchTools bool
@@ -68,7 +67,6 @@ func (c *EnvironmentConfig) Clone() *EnvironmentConfig {
 	}
 	cloned := *c
 	cloned.Options = c.Options.Clone()
-	cloned.AllowedCommands = slices.Clone(c.AllowedCommands)
 	cloned.SystemPromptArgs = maps.Clone(c.SystemPromptArgs)
 	cloned.SystemInformation = c.SystemInformation.Clone()
 	return &cloned
@@ -265,7 +263,6 @@ type CommandResult struct {
 	DisplayOverride bool
 	RecipeName      string
 	AllowedTools    []string
-	AllowedCommands []string
 }
 
 // Environment is the run-scoped boundary between the central agent loop and its workspace resources.

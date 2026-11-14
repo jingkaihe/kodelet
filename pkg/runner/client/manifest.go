@@ -141,7 +141,6 @@ func buildWireManifest(
 		Commands:         commands,
 		Config: runnerpayload.EnvironmentConfig{
 			Options:             config.EnvironmentOptions(),
-			AllowedCommands:     append([]string(nil), config.AllowedCommands...),
 			ToolMode:            config.ToolMode,
 			CodeMode:            codeMode,
 			EnableFSSearchTools: config.EnableFSSearchTools,

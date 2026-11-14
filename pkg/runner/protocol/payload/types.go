@@ -51,7 +51,6 @@ type SkillDefinition struct {
 // EnvironmentConfig is the sanitized runner-owned configuration projection.
 type EnvironmentConfig struct {
 	Options             *llmtypes.ExecutionOptions  `json:"options,omitempty"`
-	AllowedCommands     []string                    `json:"allowedCommands,omitempty"`
 	ToolMode            llmtypes.ToolMode           `json:"toolMode,omitempty"`
 	CodeMode            string                      `json:"codeMode,omitempty"`
 	EnableFSSearchTools bool                        `json:"enableFSSearchTools,omitempty"`
@@ -182,7 +181,6 @@ type CommandExecuteResult struct {
 	DisplayOverride bool     `json:"displayOverride,omitempty"`
 	RecipeName      string   `json:"recipeName,omitempty"`
 	AllowedTools    []string `json:"allowedTools,omitempty"`
-	AllowedCommands []string `json:"allowedCommands,omitempty"`
 }
 
 // LifecycleEvent identifies one proxied extension lifecycle operation.

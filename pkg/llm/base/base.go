@@ -186,10 +186,9 @@ func (t *Thread) GetConfig() llmtypes.Config {
 
 // SetCommandConfig applies command routing results without replacing provider
 // clients or changing the admitted model policy.
-func (t *Thread) SetCommandConfig(recipe string, allowedTools, allowedCommands []string) {
+func (t *Thread) SetCommandConfig(recipe string, allowedTools []string) {
 	t.Config.RecipeName = recipe
 	t.Config.AllowedTools = append([]string(nil), allowedTools...)
-	t.Config.AllowedCommands = append([]string(nil), allowedCommands...)
 }
 
 // ApplyEnvironmentConfig applies runner-owned, non-secret configuration pinned at run.open.
@@ -198,7 +197,6 @@ func (t *Thread) ApplyEnvironmentConfig(config agentenv.EnvironmentConfig) {
 		t.Config.ExecutionOptions = config.Options.Clone()
 	}
 	t.Config.WorkingDirectory = t.Environment.Manifest().WorkingDirectory
-	t.Config.AllowedCommands = append([]string(nil), config.AllowedCommands...)
 	t.Config.ToolMode = config.ToolMode
 	t.Config.CodeMode = config.CodeMode
 	t.Config.EnableFSSearchTools = config.EnableFSSearchTools

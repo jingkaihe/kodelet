@@ -37,11 +37,10 @@ type ArgumentMeta struct {
 
 // Metadata represents YAML frontmatter in fragment files
 type Metadata struct {
-	Name            string                  `yaml:"name,omitempty"`
-	Description     string                  `yaml:"description,omitempty"`
-	AllowedTools    []string                `yaml:"allowed_tools,omitempty"`
-	AllowedCommands []string                `yaml:"allowed_commands,omitempty"`
-	Arguments       map[string]ArgumentMeta `yaml:"arguments,omitempty"` // Argument definitions with descriptions
+	Name         string                  `yaml:"name,omitempty"`
+	Description  string                  `yaml:"description,omitempty"`
+	AllowedTools []string                `yaml:"allowed_tools,omitempty"`
+	Arguments    map[string]ArgumentMeta `yaml:"arguments,omitempty"` // Argument definitions with descriptions
 }
 
 // Fragment represents a fragment with its metadata and content
@@ -272,11 +271,6 @@ func (fp *Processor) parseFrontmatter(content string) (Metadata, string, error) 
 		// Parse allowed_tools (support both string array and comma-separated string)
 		if allowedTools := metaData["allowed_tools"]; allowedTools != nil {
 			metadata.AllowedTools = fp.parseStringArrayField(allowedTools)
-		}
-
-		// Parse allowed_commands (support both string array and comma-separated string)
-		if allowedCommands := metaData["allowed_commands"]; allowedCommands != nil {
-			metadata.AllowedCommands = fp.parseStringArrayField(allowedCommands)
 		}
 
 		// Parse arguments (map of argument name -> argument meta with description and default)

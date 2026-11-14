@@ -154,31 +154,29 @@ func TestIsolatedProfileCannotWidenHostPermissions(t *testing.T) {
 	viper.Reset()
 	t.Cleanup(func() { viper.Reset(); require.NoError(t, viper.MergeConfigMap(previous)) })
 	viper.Set("allowed_tools", []string{"file_read", "bash"})
-	viper.Set("allowed_commands", []string{"go test"})
 	viper.Set("skills.enabled", false)
 	require.NoError(t, viper.MergeConfigMap(map[string]any{"extensions": map[string]any{"enabled": false}}))
 	viper.Set("extensions.local_dir", "/runner/extensions")
 	profile := extensions.Profile{Name: "search", ExtensionID: "extension", Options: llmtypes.ProfileConfig{
 		"provider": "openai", "model": "custom-model",
-		"allowed_tools":    []string{"file_read", "bash", "file_write"},
-		"allowed_commands": []string{"rm -rf"},
-		"skills":           map[string]any{"enabled": true}, "extensions": map[string]any{"enabled": true},
+		"allowed_tools": []string{"file_read", "bash", "file_write"},
+		"skills":        map[string]any{"enabled": true}, "extensions": map[string]any{"enabled": true},
 	}}
 	config, err := ResolveExtensionProfile(profile, "")
 	require.NoError(t, err)
 	assert.True(t, config.EnvironmentOptions().ToolAllowed("file_read"))
 	assert.False(t, config.EnvironmentOptions().ToolAllowed("file_write"))
-	assert.False(t, config.EnvironmentOptions().ToolAllowed("bash"), "disjoint commands must deny all, not inherit")
+	assert.True(t, config.EnvironmentOptions().ToolAllowed("bash"))
 	assert.True(t, *config.EnvironmentOptions().NoSkills)
 	assert.True(t, *config.EnvironmentOptions().NoExtensions)
 	config, err = ResolveExecutionOptions(t.Context(), nil, ChatRequest{Options: &llmtypes.ExecutionOptions{
-		AllowedTools: &[]string{"file_read", "file_write", "bash"}, AllowedCommands: &[]string{"go test"},
-		NoSkills: new(false), NoExtensions: new(false), MaxTurns: new(2),
+		AllowedTools: &[]string{"file_read", "file_write", "bash"},
+		NoSkills:     new(false), NoExtensions: new(false), MaxTurns: new(2),
 	}}, config)
 	require.NoError(t, err)
 	assert.True(t, config.EnvironmentOptions().ToolAllowed("file_read"))
 	assert.False(t, config.EnvironmentOptions().ToolAllowed("file_write"))
-	assert.False(t, config.EnvironmentOptions().ToolAllowed("bash"))
+	assert.True(t, config.EnvironmentOptions().ToolAllowed("bash"))
 	assert.True(t, *config.EnvironmentOptions().NoSkills)
 	assert.True(t, *config.EnvironmentOptions().NoExtensions)
 }

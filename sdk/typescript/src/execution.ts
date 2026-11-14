@@ -15,7 +15,6 @@ export const executionOptionsSchema = z.strictObject({
   noExtensions: z.boolean().optional(),
   noSkills: z.boolean().optional(),
   allowedTools: z.array(z.string().min(1)).optional(),
-  allowedCommands: z.array(z.string().min(1)).optional(),
   enableFSSearchTools: z.boolean().optional(),
   /** Code mode for this run, instead of the runner's configured code_mode. */
   codeMode: z.enum(["off", "on", "only"]).optional(),
@@ -49,7 +48,7 @@ export function remoteExecutionOptions(input: Record<string, unknown>): Executio
     weak_model: "weakModel", max_tokens: "maxTokens", weak_model_max_tokens: "weakModelMaxTokens",
     thinking_budget_tokens: "thinkingBudgetTokens", reasoning_effort: "reasoningEffort", max_turns: "maxTurns",
     use_weak_model: "useWeakModel", no_tools: "noTools", no_extensions: "noExtensions", no_skills: "noSkills",
-    allowed_tools: "allowedTools", allowed_commands: "allowedCommands", enable_fs_search_tools: "enableFSSearchTools",
+    allowed_tools: "allowedTools", enable_fs_search_tools: "enableFSSearchTools",
     code_mode: "codeMode",
   };
   const options: Record<string, unknown> = {};

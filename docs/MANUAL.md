@@ -40,7 +40,6 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [Default Profile Selection](#default-profile-selection)
 - [Observability](#observability)
 - [Security Configuration](#security-configuration)
-  - [Bash Command Restrictions](#bash-command-restrictions)
 - [LLM Providers](#llm-providers)
   - [Anthropic Claude](#anthropic-claude)
   - [OpenAI](#openai)
@@ -889,9 +888,6 @@ export KODELET_PROFILE="anthropic"  # Select a configured named profile
 
 # Default Kodelet server
 export KODELET_SERVER="https://kodelet.example"
-
-# Command restriction configuration
-export KODELET_ALLOWED_COMMANDS="ls *,pwd,echo *,git status"  # Comma-separated allowed command patterns
 ```
 
 ### Configuration File
@@ -926,7 +922,6 @@ Runners read `kodelet-config.yaml` from the conversation's working directory. It
 
 ```yaml
 # Repository config (kodelet-config.yaml)
-allowed_commands: ["git status", "git diff *"]
 extensions:
   enabled: false
 ```
@@ -961,20 +956,6 @@ extensions:
 tracing:
   enabled: false
 
-# Security configuration
-allowed_commands: []  # Empty means use default banned commands
-# allowed_commands:   # Example: restrict bash tool to specific commands
-#   - "ls *"
-#   - "pwd"
-#   - "echo *"
-#   - "cat *"
-#   - "grep *"
-#   - "find *"
-#   - "npm *"
-#   - "yarn *"
-#   - "git status"
-#   - "git log *"
-
 bash:
   # Maximum execution timeout for bash tool calls (default: 120s)
   timeout: 120s
@@ -1002,9 +983,6 @@ kodelet run --provider "anthropic" --model "claude-opus-4-1-20250805" --max-toke
 
 # OpenAI example
 kodelet run --provider "openai" --model "gpt-4.1" --max-tokens 4096 --reasoning-effort "high" "query"
-
-# Command restriction example
-kodelet run --allowed-commands "ls *,pwd,echo *" "query"
 
 # Enable filesystem search tools (`glob_tool` and `grep_tool`)
 kodelet run --enable-fs-search-tools "query"
@@ -1085,7 +1063,6 @@ Define workspace presets under `environment_profiles` in the daemon configuratio
 environment_profiles:
   workspace:
     allowed_tools: [bash, apply_patch, file_read]
-    allowed_commands: ["go test *", "mise run *"]
     extensions:
       allow: [acp-subagent]
 ```
@@ -1162,56 +1139,6 @@ Routine lifecycle and UI-cleanup RPC spans are hidden by default; actual extensi
 For liveness and readiness probes and opt-in Go profiling with `--debug-addr`, see [Health checks and profiling](#health-checks-and-profiling).
 
 ## Security Configuration
-
-Kodelet includes security features to control command execution and protect your system from potentially harmful operations.
-
-### Bash Command Restrictions
-
-The `allowed_commands` configuration option provides fine-grained control over which bash commands Kodelet can execute. This is particularly useful in automated environments or when working with untrusted queries.
-
-**Pattern Matching:**
-
-The allowed commands support glob patterns for flexible matching:
-
-- `ls` - Exact match for the `ls` command only
-- `ls *` - Allows `ls` with any arguments (e.g., `ls -la`, `ls /home`)
-- `git status` - Exact match for `git status`
-- `git log *` - Allows `git log` with any arguments
-- `npm *` - Allows any npm command
-
-**Configuration Examples:**
-
-Environment variable:
-```bash
-export KODELET_ALLOWED_COMMANDS="ls *,pwd,echo *,git status,git log *"
-```
-
-Configuration file:
-```yaml
-allowed_commands:
-  - "ls *"
-  - "pwd"
-  - "echo *"
-  - "cat *"
-  - "grep *"
-  - "find *"
-  - "npm *"
-  - "yarn *"
-  - "git status"
-  - "git log *"
-```
-
-Command line:
-```bash
-kodelet run --allowed-commands "ls *,pwd,echo *" "analyze this directory"
-```
-
-**Usage Notes:**
-
-- If the command appears in the default banned commands list, it will be rejected even if it matches the allowed commands pattern
-- Commands are validated before execution, and non-matching commands are rejected with an error
-- Patterns are matched against the entire command string, not just the command name
-- Use specific patterns rather than overly broad wildcards for better security
 
 ### Bash Tool Timeout
 
@@ -2110,8 +2037,6 @@ For detailed skill creation guide, see [docs/SKILLS.md](SKILLS.md).
 - API keys are stored in environment variables or configuration files
 - No sensitive data is logged by default
 - All external connections use secure protocols
-- Bash command execution can be restricted using `allowed_commands` configuration (see [Security Configuration](#security-configuration))
-- Default banned commands list prevents execution of interactive commands like `vim`, `view`, `less`, and `more`
 
 ## Troubleshooting
 
@@ -2135,13 +2060,7 @@ For detailed skill creation guide, see [docs/SKILLS.md](SKILLS.md).
    - Check image format and size limitations
    - Verify image URLs are accessible (HTTPS only)
 
-5. **Command Execution Blocked**
-   - Check if the command is in the banned commands list (default behavior)
-   - If using `allowed_commands`, ensure the command matches one of the allowed patterns
-   - Verify glob patterns are correctly formatted (e.g., `ls *` not `ls*`)
-   - Use `--allowed-commands` flag to override configuration for testing
-
-6. **Context Files Not Loading**
+5. **Context Files Not Loading**
    - Ensure the context file (`AGENTS.md`) is in the current working directory
    - Verify file permissions are readable
    - Use `KODELET_LOG_LEVEL=debug` to see which context file is being loaded

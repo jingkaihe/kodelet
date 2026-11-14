@@ -248,7 +248,6 @@ func (e *RemoteEnvironment) ExecuteCommand(ctx context.Context, request CommandR
 		e.mu.Lock()
 		e.hostConfig.RecipeName = result.RecipeName
 		e.hostConfig.AllowedTools = slices.Clone(result.AllowedTools)
-		e.hostConfig.AllowedCommands = slices.Clone(result.AllowedCommands)
 		e.mu.Unlock()
 	}
 	return CommandResult{
@@ -261,7 +260,6 @@ func (e *RemoteEnvironment) ExecuteCommand(ctx context.Context, request CommandR
 		DisplayOverride: result.DisplayOverride,
 		RecipeName:      result.RecipeName,
 		AllowedTools:    slices.Clone(result.AllowedTools),
-		AllowedCommands: slices.Clone(result.AllowedCommands),
 	}, nil
 }
 
@@ -625,7 +623,6 @@ func (e *RemoteEnvironment) convertManifest(wire runnerpayload.Manifest, config 
 		Commands:            slices.Clone(wire.Commands),
 		Config: (&EnvironmentConfig{
 			Options:             wire.Config.Options.Clone(),
-			AllowedCommands:     slices.Clone(wire.Config.AllowedCommands),
 			ToolMode:            wire.Config.ToolMode,
 			CodeMode:            wire.Config.CodeMode,
 			EnableFSSearchTools: wire.Config.EnableFSSearchTools,

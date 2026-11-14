@@ -42,7 +42,7 @@ func remoteRunCommandForTest() *cobra.Command {
 	for _, flag := range []string{"max-turns", "max-tokens", "weak-model-max-tokens", "thinking-budget-tokens"} {
 		cmd.Flags().Int(flag, 0, "")
 	}
-	for _, flag := range []string{"allowed-tools", "allowed-commands", "image", "fragment-dirs", "context-patterns"} {
+	for _, flag := range []string{"allowed-tools", "image", "fragment-dirs", "context-patterns"} {
 		cmd.Flags().StringSlice(flag, nil, "")
 	}
 	cmd.Flags().StringToString("arg", nil, "")

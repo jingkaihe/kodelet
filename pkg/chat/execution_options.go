@@ -215,8 +215,7 @@ func ResolveExtensionProfile(profile extensions.Profile, reasoningEffort string)
 // Host permissions remain independent of isolated model/provider defaults.
 func restrictExtensionProfile(config llmtypes.Config) (llmtypes.Config, error) {
 	host := llmtypes.Config{
-		AllowedTools:    viper.GetStringSlice("allowed_tools"),
-		AllowedCommands: viper.GetStringSlice("allowed_commands"),
+		AllowedTools: viper.GetStringSlice("allowed_tools"),
 	}
 	if viper.IsSet("skills.enabled") {
 		host.Skills = &llmtypes.SkillsConfig{Enabled: viper.GetBool("skills.enabled")}

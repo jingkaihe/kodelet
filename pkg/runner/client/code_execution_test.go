@@ -487,7 +487,7 @@ func TestRunnerCodeReplyMetadata(t *testing.T) {
 }
 
 func TestBuildWireManifestAddsCodeModeNotesOnlyWithCodeMode(t *testing.T) {
-	bash := tools.NewBashTool(nil, false)
+	bash := tools.NewBashTool(false)
 	local := agentenv.Manifest{
 		WorkingDirectory: t.TempDir(),
 		Tools: []agentenv.ToolDefinition{{
@@ -520,7 +520,7 @@ func TestRunnerCodeBashReturnsExecutionResults(t *testing.T) {
 		{name: "text-only timeout", command: "sleep 5", textOnly: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			bash := tools.NewBashTool(nil, false)
+			bash := tools.NewBashTool(false)
 			cwd := t.TempDir()
 			state := tools.NewBasicState(t.Context(), tools.WithWorkingDirectory(cwd))
 			var calls int
@@ -587,7 +587,7 @@ func TestRunnerCodeBashReturnsExecutionResults(t *testing.T) {
 }
 
 func TestRunnerCodeBashLargeOutputReturnsNormally(t *testing.T) {
-	bash := tools.NewBashTool(nil, false)
+	bash := tools.NewBashTool(false)
 	state := tools.NewBasicState(t.Context(), tools.WithWorkingDirectory(t.TempDir()))
 	var calls int
 	environment := &codeTestEnvironment{execute: func(ctx context.Context, request agentenv.ToolRequest, _ agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
@@ -633,7 +633,7 @@ return reply.text;
 
 func TestRunnerCodeReplyBuiltinContracts(t *testing.T) {
 	t.Run("bash output is not duplicated", func(t *testing.T) {
-		tool := tools.NewBashTool(nil, false)
+		tool := tools.NewBashTool(false)
 		result := tool.Execute(t.Context(), tools.NewBasicState(t.Context()),
 			`{"command":"printf 'contract-output'; exit 7","description":"Test return contract","timeout":10}`)
 		require.True(t, result.IsError())

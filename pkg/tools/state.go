@@ -473,7 +473,7 @@ func (s *BasicState) configureToolSlice(tools []tooltypes.Tool) []tooltypes.Tool
 	for i, tool := range tools {
 		switch tool.Name() {
 		case "bash":
-			tools[i] = NewBashToolWithTimeout(s.llmConfig.AllowedCommands, s.llmConfig.EnableFSSearchTools, s.llmConfig.BashTimeout())
+			tools[i] = NewBashToolWithTimeout(s.llmConfig.EnableFSSearchTools, s.llmConfig.BashTimeout())
 		case "web_fetch":
 			tools[i] = NewWebFetchTool(s.llmConfig.AllowedDomainsFile)
 		case "view_image":

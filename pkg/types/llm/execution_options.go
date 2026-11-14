@@ -27,7 +27,6 @@ type ExecutionOptions struct {
 	NoExtensions         *bool     `json:"noExtensions,omitempty"`
 	NoSkills             *bool     `json:"noSkills,omitempty"`
 	AllowedTools         *[]string `json:"allowedTools,omitempty"` // Explicit catalog selection within inherited policy, independent of tool mode.
-	AllowedCommands      *[]string `json:"allowedCommands,omitempty"`
 	EnableFSSearchTools  *bool     `json:"enableFSSearchTools,omitempty"`
 	// CodeMode selects off, on, or only for this run instead of the runner's
 	// configured mode. It changes how tools are presented, never which are allowed.
@@ -99,10 +98,6 @@ func (o *ExecutionOptions) Clone() *ExecutionOptions {
 		values := append([]string{}, (*o.AllowedTools)...)
 		c.AllowedTools = &values
 	}
-	if o.AllowedCommands != nil {
-		values := append([]string{}, (*o.AllowedCommands)...)
-		c.AllowedCommands = &values
-	}
 	return &c
 }
 
@@ -145,13 +140,10 @@ func (o *ExecutionOptions) Validate() error {
 	if o.CodeMode != nil && !ValidCodeMode(*o.CodeMode) {
 		return errors.Errorf("execution option codeMode must be off, on, or only, got %q", *o.CodeMode)
 	}
-	for name, values := range map[string]*[]string{"allowedTools": o.AllowedTools, "allowedCommands": o.AllowedCommands} {
-		if values == nil {
-			continue
-		}
-		for _, value := range *values {
+	if o.AllowedTools != nil {
+		for _, value := range *o.AllowedTools {
 			if strings.TrimSpace(value) == "" || strings.ContainsRune(value, '\x00') {
-				return errors.Errorf("execution option %s contains an empty or invalid entry", name)
+				return errors.New("execution option allowedTools contains an empty or invalid entry")
 			}
 		}
 	}
@@ -181,12 +173,12 @@ func (o *ExecutionOptions) ToolsDisabled() bool {
 }
 
 // ToolAllowed enforces request restrictions independently of discovery and
-// extension tool-list patches. An empty command list also disables bash.
+// extension tool-list patches.
 func (o *ExecutionOptions) ToolAllowed(name string) bool {
 	if o == nil {
 		return true
 	}
-	if o.ToolsDisabled() || (name == "bash" && o.AllowedCommands != nil && len(*o.AllowedCommands) == 0) {
+	if o.ToolsDisabled() {
 		return false
 	}
 	if name == "skill" && o.NoSkills != nil && *o.NoSkills {
@@ -236,7 +228,6 @@ func (c Config) EnvironmentOptions() *ExecutionOptions {
 		o = &ExecutionOptions{}
 	}
 	o.AllowedTools = intersectPolicy(c.AllowedTools, o.AllowedTools)
-	o.AllowedCommands = intersectPolicy(c.AllowedCommands, o.AllowedCommands)
 	if c.Skills != nil && !c.Skills.Enabled {
 		o.NoSkills = new(true)
 	}
@@ -309,7 +300,6 @@ func ApplyEnvironmentOptions(config Config, options *ExecutionOptions) (Config, 
 	}
 	o := config.ExecutionOptions
 	o.AllowedTools = intersectRestrictions(host.AllowedTools, o.AllowedTools)
-	o.AllowedCommands = intersectRestrictions(host.AllowedCommands, o.AllowedCommands)
 	for _, restriction := range []struct {
 		host   *bool
 		target **bool
@@ -336,11 +326,6 @@ func ApplyEnvironmentOptions(config Config, options *ExecutionOptions) (Config, 
 	}
 	if o.CodeMode != nil {
 		config.CodeMode = *o.CodeMode
-	}
-	if o.AllowedCommands != nil {
-		// Bash consumes Config.AllowedCommands; keep the explicit-empty deny
-		// marker in ExecutionOptions as legacy empty Config lists allow all.
-		config.AllowedCommands = slices.Clone(*o.AllowedCommands)
 	}
 	if o.NoExtensions != nil && *o.NoExtensions {
 		if config.ExtensionSettings == nil {

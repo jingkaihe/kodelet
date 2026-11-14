@@ -19,7 +19,7 @@ import (
 )
 
 func TestBashTool_GenerateSchema(t *testing.T) {
-	tool := NewBashTool(nil, false)
+	tool := NewBashTool(false)
 	schema := tool.GenerateSchema()
 	assert.NotNil(t, schema)
 
@@ -32,7 +32,7 @@ func TestBashTool_GenerateSchema(t *testing.T) {
 }
 
 func TestBashTool_GenerateSchema_CustomTimeout(t *testing.T) {
-	tool := NewBashToolWithTimeout(nil, false, 5*time.Minute)
+	tool := NewBashToolWithTimeout(false, 5*time.Minute)
 	schema := tool.GenerateSchema()
 	assert.NotNil(t, schema)
 
@@ -47,7 +47,7 @@ func TestBashTool_ShortStatesTimeoutUnit(t *testing.T) {
 	assert.Equal(t,
 		"Run a non-interactive bash command; shell state such as cd and export does not persist; timeout is in seconds (10-120).",
 		(&BashTool{}).Short())
-	assert.Contains(t, NewBashToolWithTimeout(nil, false, 5*time.Minute).Short(), "in seconds (10-300).")
+	assert.Contains(t, NewBashToolWithTimeout(false, 5*time.Minute).Short(), "in seconds (10-300).")
 }
 
 func TestBashTool_Name(t *testing.T) {
@@ -56,7 +56,7 @@ func TestBashTool_Name(t *testing.T) {
 }
 
 func TestBashTool_Description(t *testing.T) {
-	tool := NewBashTool(nil, false)
+	tool := NewBashTool(false)
 	desc := tool.Description()
 	assert.Contains(t, desc, "Run a bash command non-interactively in the working directory.")
 	assert.Contains(t, desc, "does not persist between bash tool calls")
@@ -65,75 +65,29 @@ func TestBashTool_Description(t *testing.T) {
 }
 
 func TestBashTool_Description_CustomTimeout(t *testing.T) {
-	tool := NewBashToolWithTimeout(nil, false, 5*time.Minute)
+	tool := NewBashToolWithTimeout(false, 5*time.Minute)
 	desc := tool.Description()
 
 	assert.Contains(t, desc, "timeout: required, 10-300")
 }
 
-func TestBashTool_Description_BannedCommands(t *testing.T) {
-	// Test with no allowed commands configured (uses banned commands)
-	tool := NewBashTool([]string{}, false)
-	desc := tool.Description()
-
-	// Should contain banned commands section
-	assert.Contains(t, desc, "Banned commands:")
-	assert.Contains(t, desc, "- vim")
-	assert.Contains(t, desc, "- view")
-	assert.Contains(t, desc, "- less")
-	assert.Contains(t, desc, "- more")
-	assert.NotContains(t, BannedCommands, "cd")
-
-	// Should NOT contain allowed commands section
-	assert.NotContains(t, desc, "Allowed command patterns:")
-}
-
-func TestBashTool_Description_AllowedCommands(t *testing.T) {
-	// Test with allowed commands configured
-	allowedCommands := []string{"ls *", "pwd", "echo *", "git status"}
-	tool := NewBashTool(allowedCommands, false)
-	desc := tool.Description()
-
-	// Should contain allowed commands section
-	assert.Contains(t, desc, "Allowed command patterns:")
-	assert.Contains(t, desc, "- ls *")
-	assert.Contains(t, desc, "- pwd")
-	assert.Contains(t, desc, "- echo *")
-	assert.Contains(t, desc, "- git status")
-	assert.Contains(t, desc, "Commands outside these patterns are rejected.")
-
-	// Should NOT contain banned commands section
-	assert.NotContains(t, desc, "Banned commands:")
-}
-
 func TestBashTool_Description_FSSearchToolsDisabled(t *testing.T) {
-	tool := NewBashTool(nil, false)
+	tool := NewBashTool(false)
 	desc := tool.Description()
 
 	assert.Contains(t, desc, "use fd and rg via this tool only")
 	assert.NotContains(t, desc, "Prefer grep_tool/glob_tool over grep/find in bash.")
 }
 
-func TestBashTool_Description_EmptyAllowedCommands(t *testing.T) {
-	// Test with empty allowed commands (should fall back to banned commands)
-	tool := NewBashTool(nil, false)
-	desc := tool.Description()
-
-	// Should contain banned commands section since no allowed commands configured
-	assert.Contains(t, desc, "Banned commands:")
-	assert.Contains(t, desc, "- vim")
-	assert.NotContains(t, desc, "Allowed command patterns:")
-}
-
 func TestBashTool_Description_ConsistentOutput(t *testing.T) {
 	// Test that the description is consistent and contains all expected sections
-	tool := NewBashTool([]string{"test *", "example"}, false)
+	tool := NewBashTool(false)
 	desc := tool.Description()
 
 	// Basic structure should always be present
 	assert.Contains(t, desc, "Run a bash command non-interactively in the working directory.")
 	assert.Contains(t, desc, "does not persist between bash tool calls")
-	assert.Contains(t, desc, "# Restrictions")
+	assert.NotContains(t, desc, "# Restrictions")
 	assert.Contains(t, desc, "# Input")
 	assert.Contains(t, desc, "# Rules")
 	assert.Contains(t, desc, "Examples:")
@@ -147,27 +101,8 @@ func TestBashTool_Description_ConsistentOutput(t *testing.T) {
 	assert.Equal(t, desc, desc2)
 }
 
-func TestBashTool_Description_SpecialCharacters(t *testing.T) {
-	// Test with allowed commands that contain special characters
-	allowedCommands := []string{
-		"find . -name '*.go'",
-		"grep -r \"pattern\" .",
-		"awk '{print $1}'",
-		"sed 's/old/new/g'",
-	}
-	tool := NewBashTool(allowedCommands, false)
-	desc := tool.Description()
-
-	// Should handle special characters in command patterns
-	assert.Contains(t, desc, "Allowed command patterns:")
-	assert.Contains(t, desc, "- find . -name '*.go'")
-	assert.Contains(t, desc, "- grep -r \"pattern\" .")
-	assert.Contains(t, desc, "- awk '{print $1}'")
-	assert.Contains(t, desc, "- sed 's/old/new/g'")
-}
-
 func TestBashTool_Execute_Success(t *testing.T) {
-	tool := NewBashTool(nil, false)
+	tool := NewBashTool(false)
 	input := BashInput{
 		Description: "Echo test",
 		Command:     "echo 'hello world'",
@@ -182,7 +117,7 @@ func TestBashTool_Execute_Success(t *testing.T) {
 }
 
 func TestBashTool_Execute_Timeout(t *testing.T) {
-	tool := NewBashTool(nil, false)
+	tool := NewBashTool(false)
 	input := BashInput{
 		Description: "Sleep test",
 		Command:     "sleep 0.2",
@@ -203,7 +138,7 @@ func TestBashTool_Execute_Timeout(t *testing.T) {
 }
 
 func TestBashTool_Execute_Error(t *testing.T) {
-	tool := NewBashTool(nil, false)
+	tool := NewBashTool(false)
 	input := BashInput{
 		Description: "Invalid command",
 		Command:     "nonexistentcommand",
@@ -223,7 +158,7 @@ func TestBashTool_Execute_DirectoryChangeDoesNotPersist(t *testing.T) {
 	other, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
 	state := NewBasicState(t.Context(), WithWorkingDirectory(cwd))
-	tool := NewBashTool(nil, false)
+	tool := NewBashTool(false)
 
 	run := func(command string) string {
 		params, err := json.Marshal(BashInput{
@@ -243,7 +178,7 @@ func TestBashTool_Execute_DirectoryChangeDoesNotPersist(t *testing.T) {
 }
 
 func TestBashTool_Execute_InvalidJSON(t *testing.T) {
-	tool := NewBashTool(nil, false)
+	tool := NewBashTool(false)
 	result := tool.Execute(context.Background(), NewBasicState(context.TODO()), "invalid json")
 	assert.True(t, result.IsError())
 	assert.Empty(t, result.GetResult())
@@ -288,7 +223,7 @@ func TestBashTool_Execute_CodeMode(t *testing.T) {
 			})
 			require.NoError(t, err)
 			state := NewBasicState(t.Context(), WithWorkingDirectory(cwd))
-			result := NewBashTool(nil, false).Execute(ctx, state, string(params))
+			result := NewBashTool(false).Execute(ctx, state, string(params))
 			assert.Equal(t, test.wantErr, result.IsError(), result.GetError())
 			assert.Equal(t, !test.wantErr, result.StructuredData().Success)
 			assert.Equal(t, test.exitCode, result.StructuredData().Data.(map[string]any)["exitCode"])
@@ -313,7 +248,7 @@ func TestBashTool_CodeModeTimeoutNoticeSurvivesTruncation(t *testing.T) {
 		Timeout:     1,
 	})
 	require.NoError(t, err)
-	result := NewBashTool(nil, false).Execute(ctx, NewBasicState(t.Context()), string(params))
+	result := NewBashTool(false).Execute(ctx, NewBasicState(t.Context()), string(params))
 	require.False(t, result.IsError(), result.GetError())
 	metadata := result.StructuredData().Metadata.(*tooltypes.BashMetadata)
 	require.NotNil(t, metadata.Truncation)
@@ -328,7 +263,7 @@ func TestBashTool_CodeModeTimeoutNoticeSurvivesTruncation(t *testing.T) {
 }
 
 func TestBashTool_Execute_ContextCancellation(t *testing.T) {
-	tool := NewBashTool(nil, false)
+	tool := NewBashTool(false)
 	input := BashInput{
 		Description: "Long running command",
 		Command:     "sleep 5",
@@ -345,7 +280,7 @@ func TestBashTool_Execute_ContextCancellation(t *testing.T) {
 }
 
 func TestBashTool_ExecuteStreamingEmitsAccumulatedSnapshots(t *testing.T) {
-	tool := NewBashTool(nil, false)
+	tool := NewBashTool(false)
 	input := BashInput{
 		Description: "Stream command output",
 		Command:     "printf 'first\\n'; sleep 0.25; printf 'second\\n'",
@@ -371,7 +306,7 @@ func TestBashTool_ExecuteStreamingEmitsAccumulatedSnapshots(t *testing.T) {
 }
 
 func TestBashTool_ExecuteStreamingSlowUpdateDoesNotConsumeCommandTimeout(t *testing.T) {
-	tool := NewBashTool(nil, false)
+	tool := NewBashTool(false)
 	input := BashInput{
 		Description: "Run despite slow callback",
 		Command:     "printf 'ran\\n'",
@@ -413,7 +348,7 @@ func TestBashTool_ExecuteStreamingSlowUpdateDoesNotConsumeCommandTimeout(t *test
 }
 
 func TestBashTool_ExecuteStreamingSlowUpdateDoesNotRelabelFailureAsTimeout(t *testing.T) {
-	tool := NewBashTool(nil, false)
+	tool := NewBashTool(false)
 	input := BashInput{
 		Description: "Preserve command failure status",
 		Command:     "printf 'failed\\n'; exit 7",
@@ -456,7 +391,7 @@ func TestBashTool_ExecuteStreamingSlowUpdateDoesNotRelabelFailureAsTimeout(t *te
 }
 
 func TestBashTool_ExecuteStreamingPreservesOutputOnTimeout(t *testing.T) {
-	tool := NewBashTool(nil, false)
+	tool := NewBashTool(false)
 	input := BashInput{
 		Description: "Capture output before timeout",
 		Command:     "printf 'ready\\n'; sleep 5",
@@ -475,7 +410,7 @@ func TestBashTool_ExecuteStreamingPreservesOutputOnTimeout(t *testing.T) {
 }
 
 func TestBashTool_ExecuteStreamingPreservesMergedOutputOnFailure(t *testing.T) {
-	tool := NewBashTool(nil, false)
+	tool := NewBashTool(false)
 	input := BashInput{
 		Description: "Stream mixed failing output",
 		Command:     "printf 'stdout-1\\n'; sleep 0.05; printf 'stderr-1\\n' >&2; sleep 0.05; printf 'stdout-2\\n'; exit 7",
@@ -617,7 +552,7 @@ func TestBashToolResult_AssistantFacing_PreservesSmallOutput(t *testing.T) {
 }
 
 func TestBashTool_ValidateInput(t *testing.T) {
-	tool := NewBashTool(nil, false)
+	tool := NewBashTool(false)
 	tests := []struct {
 		name        string
 		input       BashInput
@@ -661,32 +596,13 @@ func TestBashTool_ValidateInput(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "cd is allowed by default",
+			name: "commands are not filtered",
 			input: BashInput{
 				Description: "test",
-				Command:     "cd /tmp && ls -la",
+				Command:     "cd /tmp && less file.txt; vim file.txt",
 				Timeout:     10,
 			},
 			expectError: false,
-		},
-		{
-			name: "cd inside a quoted string is allowed",
-			input: BashInput{
-				Description: "test",
-				Command:     "echo \"note; cd is mentioned\"",
-				Timeout:     10,
-			},
-			expectError: false,
-		},
-		{
-			name: "banned command",
-			input: BashInput{
-				Description: "test",
-				Command:     "echo hello && vim file.txt",
-				Timeout:     10,
-			},
-			expectError: true,
-			errorMsg:    "command is banned",
 		},
 		{
 			name: "empty command",
@@ -746,7 +662,7 @@ func TestBashTool_ValidateInput(t *testing.T) {
 }
 
 func TestBashTool_ValidateInput_CustomTimeout(t *testing.T) {
-	tool := NewBashToolWithTimeout(nil, false, 5*time.Minute)
+	tool := NewBashToolWithTimeout(false, 5*time.Minute)
 
 	for _, timeout := range []int{120, 300} {
 		t.Run(strconv.Itoa(timeout), func(t *testing.T) {
@@ -771,451 +687,8 @@ func TestBashTool_ValidateInput_CustomTimeout(t *testing.T) {
 	assert.Contains(t, err.Error(), "timeout must be between 10 and 300 seconds")
 }
 
-func TestBashTool_GlobPatternMatching(t *testing.T) {
-	tests := []struct {
-		name     string
-		command  string
-		pattern  string
-		expected bool
-	}{
-		// Exact matches
-		{"exact match", "ls", "ls", true},
-		{"exact match with args", "git status", "git status", true},
-		{"no match exact", "ls", "cat", false},
-
-		// Realistic wildcard patterns
-		{"wildcard with args", "ls -la", "ls *", true},
-		{"wildcard with multiple args", "ls -la /home", "ls *", true},
-		{"wildcard no match", "cat file.txt", "ls *", false},
-
-		// Multiple wildcards
-		{"multiple wildcards", "git log --oneline", "git * --oneline", true},
-		{"multiple wildcards no match", "git status", "git * --oneline", false},
-
-		// Wildcard at start
-		{"wildcard at start", "npm start", "* start", true},
-		{"wildcard at start no match", "npm build", "* start", false},
-
-		// Wildcard at end
-		{"wildcard at end", "npm start", "npm *", true},
-		{"wildcard at end no match", "yarn start", "npm *", false},
-
-		// Full wildcard
-		{"full wildcard", "any command here", "*", true},
-		{"full wildcard empty", "", "*", true},
-
-		// Edge cases
-		{"empty command exact", "", "", true},
-		{"empty command pattern", "", "ls", false},
-		{"command with pattern empty", "ls", "", false},
-
-		// Complex patterns
-		{"complex pattern match", "docker run -it ubuntu bash", "docker * ubuntu *", true},
-		{"complex pattern no match", "docker run -it alpine bash", "docker * ubuntu *", false},
-
-		// Real world examples
-		{"npm commands", "npm install", "npm *", true},
-		{"yarn commands", "yarn build", "yarn *", true},
-		{"git status exact", "git status", "git status", true},
-		{"git log with args", "git log --oneline --graph", "git log *", true},
-		{"echo variations", "echo hello world", "echo *", true},
-		{"ls variations", "ls -la", "ls *", true},
-		{"pwd exact", "pwd", "pwd", true},
-		{"find commands", "find . -name '*.go'", "find *", true},
-
-		// Prefix matches
-		{"prefix match", "git status", "git", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tool := NewBashTool([]string{tt.pattern}, false)
-			result := tool.MatchesCommand(tt.command)
-			assert.Equal(t, tt.expected, result,
-				"BashTool.MatchesCommand(%q) with pattern %q = %v, want %v",
-				tt.command, tt.pattern, result, tt.expected)
-		})
-	}
-}
-
-func TestNewBashTool(t *testing.T) {
-	tests := []struct {
-		name            string
-		allowedCommands []string
-	}{
-		{"empty allowed commands", []string{}},
-		{"single command", []string{"ls"}},
-		{"multiple commands", []string{"ls *", "pwd", "echo *"}},
-		{"complex patterns", []string{"git status", "npm *", "docker * ubuntu *"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tool := NewBashTool(tt.allowedCommands, false)
-			assert.NotNil(t, tool)
-			assert.Equal(t, "bash", tool.Name())
-			assert.Equal(t, tt.allowedCommands, tool.allowedCommands)
-		})
-	}
-}
-
-func TestBashTool_ValidateInput_AllowedCommands(t *testing.T) {
-	tests := []struct {
-		name            string
-		allowedCommands []string
-		input           BashInput
-		expectError     bool
-		errorMsg        string
-	}{
-		// Empty allowed commands (should use banned commands)
-		{
-			name:            "empty allowed commands - valid command",
-			allowedCommands: []string{},
-			input: BashInput{
-				Description: "test",
-				Command:     "echo hello",
-				Timeout:     10,
-			},
-			expectError: false,
-		},
-		{
-			name:            "empty allowed commands - banned command",
-			allowedCommands: []string{},
-			input: BashInput{
-				Description: "test",
-				Command:     "vim file.txt",
-				Timeout:     10,
-			},
-			expectError: true,
-			errorMsg:    "command is banned: vim",
-		},
-
-		// Single exact command allowed
-		{
-			name:            "exact command allowed",
-			allowedCommands: []string{"pwd"},
-			input: BashInput{
-				Description: "test",
-				Command:     "pwd",
-				Timeout:     10,
-			},
-			expectError: false,
-		},
-		{
-			name:            "exact command not allowed",
-			allowedCommands: []string{"pwd"},
-			input: BashInput{
-				Description: "test",
-				Command:     "ls",
-				Timeout:     10,
-			},
-			expectError: true,
-			errorMsg:    "command not in allowed list: ls",
-		},
-
-		// Wildcard patterns
-		{
-			name:            "wildcard pattern allows command",
-			allowedCommands: []string{"ls *"},
-			input: BashInput{
-				Description: "test",
-				Command:     "ls -la",
-				Timeout:     10,
-			},
-			expectError: false,
-		},
-		{
-			name:            "wildcard pattern allows command with args",
-			allowedCommands: []string{"ls *"},
-			input: BashInput{
-				Description: "test",
-				Command:     "ls -la",
-				Timeout:     10,
-			},
-			expectError: false,
-		},
-		{
-			name:            "wildcard pattern rejects non-matching command",
-			allowedCommands: []string{"ls *"},
-			input: BashInput{
-				Description: "test",
-				Command:     "cat file.txt",
-				Timeout:     10,
-			},
-			expectError: true,
-			errorMsg:    "command not in allowed list: cat file.txt",
-		},
-
-		// Multiple allowed commands
-		{
-			name:            "multiple commands - first matches",
-			allowedCommands: []string{"ls *", "pwd", "echo *"},
-			input: BashInput{
-				Description: "test",
-				Command:     "ls -la",
-				Timeout:     10,
-			},
-			expectError: false,
-		},
-		{
-			name:            "multiple commands - second matches",
-			allowedCommands: []string{"ls *", "pwd", "echo *"},
-			input: BashInput{
-				Description: "test",
-				Command:     "pwd",
-				Timeout:     10,
-			},
-			expectError: false,
-		},
-		{
-			name:            "multiple commands - third matches",
-			allowedCommands: []string{"ls *", "pwd", "echo *"},
-			input: BashInput{
-				Description: "test",
-				Command:     "echo hello world",
-				Timeout:     10,
-			},
-			expectError: false,
-		},
-		{
-			name:            "multiple commands - none match",
-			allowedCommands: []string{"ls *", "pwd", "echo *"},
-			input: BashInput{
-				Description: "test",
-				Command:     "cat file.txt",
-				Timeout:     10,
-			},
-			expectError: true,
-			errorMsg:    "command not in allowed list: cat file.txt",
-		},
-
-		// Complex commands with operators
-		{
-			name:            "compound command - both parts allowed",
-			allowedCommands: []string{"echo *", "ls *"},
-			input: BashInput{
-				Description: "test",
-				Command:     "echo hello && ls -la",
-				Timeout:     10,
-			},
-			expectError: false,
-		},
-		{
-			name:            "compound command - first part not allowed",
-			allowedCommands: []string{"echo *", "ls *"},
-			input: BashInput{
-				Description: "test",
-				Command:     "cat file.txt && ls -la",
-				Timeout:     10,
-			},
-			expectError: true,
-			errorMsg:    "command not in allowed list: cat file.txt",
-		},
-		{
-			name:            "compound command - second part not allowed",
-			allowedCommands: []string{"echo *", "ls *"},
-			input: BashInput{
-				Description: "test",
-				Command:     "echo hello && cat file.txt",
-				Timeout:     10,
-			},
-			expectError: true,
-			errorMsg:    "command not in allowed list: cat file.txt",
-		},
-		{
-			name:            "complex compound command with semicolon",
-			allowedCommands: []string{"echo *", "pwd"},
-			input: BashInput{
-				Description: "test",
-				Command:     "echo start; pwd; echo done",
-				Timeout:     10,
-			},
-			expectError: false,
-		},
-		{
-			name:            "complex compound command with or operator",
-			allowedCommands: []string{"echo *", "pwd"},
-			input: BashInput{
-				Description: "test",
-				Command:     "echo start || pwd",
-				Timeout:     10,
-			},
-			expectError: false,
-		},
-
-		// Real world scenarios
-		{
-			name:            "npm commands",
-			allowedCommands: []string{"npm *", "yarn *"},
-			input: BashInput{
-				Description: "build project",
-				Command:     "npm run build",
-				Timeout:     60,
-			},
-			expectError: false,
-		},
-		{
-			name:            "git commands",
-			allowedCommands: []string{"git status", "git log *", "git diff *"},
-			input: BashInput{
-				Description: "check git status",
-				Command:     "git status",
-				Timeout:     10,
-			},
-			expectError: false,
-		},
-		{
-			name:            "git commands with args",
-			allowedCommands: []string{"git status", "git log *", "git diff *"},
-			input: BashInput{
-				Description: "check git log",
-				Command:     "git log --oneline -10",
-				Timeout:     10,
-			},
-			expectError: false,
-		},
-		{
-			name:            "git command not allowed",
-			allowedCommands: []string{"git status", "git log *", "git diff *"},
-			input: BashInput{
-				Description: "git push",
-				Command:     "git push origin main",
-				Timeout:     10,
-			},
-			expectError: true,
-			errorMsg:    "command not in allowed list: git push origin main",
-		},
-
-		// DENY FIRST: Test that banned commands are rejected even if in allowed list
-		{
-			name:            "banned command denied even when in allowed list - vim",
-			allowedCommands: []string{"vim *", "echo *", "ls *"},
-			input: BashInput{
-				Description: "edit file",
-				Command:     "vim file.txt",
-				Timeout:     10,
-			},
-			expectError: true,
-			errorMsg:    "command is banned: vim",
-		},
-		{
-			name:            "cd allowed when it matches allowed list",
-			allowedCommands: []string{"cd *", "echo *", "pwd"},
-			input: BashInput{
-				Description: "change directory",
-				Command:     "cd /home",
-				Timeout:     10,
-			},
-			expectError: false,
-		},
-		{
-			name:            "cd rejected when not in allowed list",
-			allowedCommands: []string{"ls *", "pwd"},
-			input: BashInput{
-				Description: "change dir then list",
-				Command:     "cd /tmp && ls -la",
-				Timeout:     10,
-			},
-			expectError: true,
-			errorMsg:    "command not in allowed list: cd /tmp",
-		},
-		{
-			name:            "banned command denied even when in allowed list - less",
-			allowedCommands: []string{"less *", "cat *", "echo *"},
-			input: BashInput{
-				Description: "view file",
-				Command:     "less file.txt",
-				Timeout:     10,
-			},
-			expectError: true,
-			errorMsg:    "command is banned: less",
-		},
-		{
-			name:            "banned command denied even when in allowed list - more",
-			allowedCommands: []string{"more *", "cat *", "echo *"},
-			input: BashInput{
-				Description: "view file",
-				Command:     "more file.txt",
-				Timeout:     10,
-			},
-			expectError: true,
-			errorMsg:    "command is banned: more",
-		},
-		{
-			name:            "banned command denied even when in allowed list - view",
-			allowedCommands: []string{"view *", "cat *", "echo *"},
-			input: BashInput{
-				Description: "view file",
-				Command:     "view file.txt",
-				Timeout:     10,
-			},
-			expectError: true,
-			errorMsg:    "command is banned: view",
-		},
-		{
-			name:            "banned command in compound statement denied - with allowed",
-			allowedCommands: []string{"echo *", "vim *"},
-			input: BashInput{
-				Description: "echo then edit",
-				Command:     "echo hello && vim file.txt",
-				Timeout:     10,
-			},
-			expectError: true,
-			errorMsg:    "command is banned: vim",
-		},
-		{
-			name:            "cd mixed with allowed commands",
-			allowedCommands: []string{"ls *", "cd *", "pwd"},
-			input: BashInput{
-				Description: "change dir then list",
-				Command:     "cd /tmp && ls -la",
-				Timeout:     10,
-			},
-			expectError: false,
-		},
-		{
-			name:            "banned command mixed with allowed commands - second command banned",
-			allowedCommands: []string{"ls *", "vim *", "pwd"},
-			input: BashInput{
-				Description: "list then edit",
-				Command:     "ls -la && vim file.txt",
-				Timeout:     10,
-			},
-			expectError: true,
-			errorMsg:    "command is banned: vim",
-		},
-		{
-			name:            "subshell with cd matches allowed pattern",
-			allowedCommands: []string{"(cd *", "ls *", "pwd"},
-			input: BashInput{
-				Description: "cd then ls",
-				Command:     "(cd /foo && ls -la) && pwd",
-				Timeout:     10,
-			},
-			expectError: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tool := NewBashTool(tt.allowedCommands, false)
-			input, _ := json.Marshal(tt.input)
-			err := tool.ValidateInput(NewBasicState(context.TODO()), string(input))
-
-			if tt.expectError {
-				assert.Error(t, err)
-				if tt.errorMsg != "" {
-					assert.Contains(t, err.Error(), tt.errorMsg)
-				}
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
 func TestBashToolResult_StructuredDataFields(t *testing.T) {
-	tool := NewBashTool(nil, false)
+	tool := NewBashTool(false)
 	state := NewBasicState(context.TODO())
 
 	t.Run("successful command has all metadata fields", func(t *testing.T) {
@@ -1351,7 +824,7 @@ func TestBashToolCanonicalData(t *testing.T) {
 	result.timedOut = true
 	assert.Equal(t, true, result.StructuredData().Data.(map[string]any)["timedOut"])
 
-	tool := NewBashTool(nil, false)
+	tool := NewBashTool(false)
 	schema := tooltypes.OutputSchemaForTool(tool)
 	assert.Equal(t, []string{"exitCode", "timedOut"}, schema["required"])
 	schema["properties"].(map[string]any)["exitCode"] = false

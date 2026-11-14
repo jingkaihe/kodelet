@@ -156,42 +156,41 @@ type Service struct {
 }
 
 type activeRun struct {
-	openParams             protocol.RunOpenParams
-	attachments            map[string]*sessionExtensionTransport
-	id                     string
-	conversationID         string
-	invokedBy              string
-	clientCaps             protocol.ClientCapabilities
-	codeExecution          bool
-	codeAllowedTools       *[]string
-	commandAllowedTools    []string
-	commandAllowedCommands []string
-	browserEnabled         bool
-	withheldBrowser        bool // The manifest omits the browser tool that idle probes list; protected by Service.mu.
-	config                 llmtypes.Config
-	runtime                *extensions.Runtime
-	instance               ExecutionInstance
-	resources              *runnerBackgroundResources
-	reloadResources        *runnerBackgroundResources
-	environment            agentenv.Environment
-	environmentCloseMu     sync.Mutex
-	environmentCloseOnce   sync.Once
-	environmentCloseErr    error
-	manifest               runnerpayload.Manifest
-	ctx                    context.Context
-	cancel                 context.CancelFunc
-	updates                atomic.Uint64
-	ops                    sync.WaitGroup
-	environmentOps         sync.WaitGroup
-	reloading              bool
-	opening                bool
-	checkpointed           bool
-	agentStarted           bool
-	explicitlyCanceled     bool
-	closing                bool
-	stopping               bool
-	cleanupOnce            sync.Once
-	cleanupErr             error
+	openParams           protocol.RunOpenParams
+	attachments          map[string]*sessionExtensionTransport
+	id                   string
+	conversationID       string
+	invokedBy            string
+	clientCaps           protocol.ClientCapabilities
+	codeExecution        bool
+	codeAllowedTools     *[]string
+	commandAllowedTools  []string
+	browserEnabled       bool
+	withheldBrowser      bool // The manifest omits the browser tool that idle probes list; protected by Service.mu.
+	config               llmtypes.Config
+	runtime              *extensions.Runtime
+	instance             ExecutionInstance
+	resources            *runnerBackgroundResources
+	reloadResources      *runnerBackgroundResources
+	environment          agentenv.Environment
+	environmentCloseMu   sync.Mutex
+	environmentCloseOnce sync.Once
+	environmentCloseErr  error
+	manifest             runnerpayload.Manifest
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	updates              atomic.Uint64
+	ops                  sync.WaitGroup
+	environmentOps       sync.WaitGroup
+	reloading            bool
+	opening              bool
+	checkpointed         bool
+	agentStarted         bool
+	explicitlyCanceled   bool
+	closing              bool
+	stopping             bool
+	cleanupOnce          sync.Once
+	cleanupErr           error
 }
 
 // NewService creates a runner-side request handler bound to one canonical workspace.
@@ -916,9 +915,6 @@ func (s *Service) reloadRun(ctx context.Context, params protocol.RunReloadParams
 	if run.commandAllowedTools != nil {
 		config.AllowedTools = slices.Clone(run.commandAllowedTools)
 	}
-	if run.commandAllowedCommands != nil {
-		config.AllowedCommands = slices.Clone(run.commandAllowedCommands)
-	}
 	if err := operationCtx.Err(); err != nil {
 		return result, err
 	}
@@ -1587,10 +1583,6 @@ func (s *Service) executeCommand(ctx context.Context, params runnerpayload.Comma
 		run.config.AllowedTools = append([]string(nil), result.AllowedTools...)
 		run.commandAllowedTools = slices.Clone(result.AllowedTools)
 	}
-	if len(result.AllowedCommands) > 0 {
-		run.config.AllowedCommands = append([]string(nil), result.AllowedCommands...)
-		run.commandAllowedCommands = slices.Clone(result.AllowedCommands)
-	}
 	s.mu.Unlock()
 	return runnerpayload.CommandExecuteResult{
 		Matched:         result.Matched,
@@ -1602,7 +1594,6 @@ func (s *Service) executeCommand(ctx context.Context, params runnerpayload.Comma
 		DisplayOverride: result.DisplayOverride,
 		RecipeName:      result.RecipeName,
 		AllowedTools:    append([]string(nil), result.AllowedTools...),
-		AllowedCommands: append([]string(nil), result.AllowedCommands...),
 	}, nil
 }
 

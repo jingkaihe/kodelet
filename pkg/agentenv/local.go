@@ -193,9 +193,6 @@ func (e *LocalEnvironment) ApplyCommandResult(result CommandResult) {
 	if len(result.AllowedTools) > 0 {
 		e.spec.Config.AllowedTools = slices.Clone(result.AllowedTools)
 	}
-	if len(result.AllowedCommands) > 0 {
-		e.spec.Config.AllowedCommands = slices.Clone(result.AllowedCommands)
-	}
 }
 
 // ExecuteCommand resolves extension commands first, then workspace recipes.
@@ -273,14 +270,13 @@ func (e *LocalEnvironment) ExecuteCommand(ctx context.Context, request CommandRe
 	}
 
 	return CommandResult{
-		Matched:         true,
-		Action:          CommandActionRunAgent,
-		CommandName:     expansion.Command,
-		Prompt:          expansion.Prompt,
-		Display:         expansion.Display,
-		RecipeName:      expansion.Command,
-		AllowedTools:    slices.Clone(expansion.Metadata.AllowedTools),
-		AllowedCommands: slices.Clone(expansion.Metadata.AllowedCommands),
+		Matched:      true,
+		Action:       CommandActionRunAgent,
+		CommandName:  expansion.Command,
+		Prompt:       expansion.Prompt,
+		Display:      expansion.Display,
+		RecipeName:   expansion.Command,
+		AllowedTools: slices.Clone(expansion.Metadata.AllowedTools),
 	}, nil
 }
 
@@ -453,15 +449,6 @@ func (e *LocalEnvironment) ExecuteTool(ctx context.Context, request ToolRequest,
 		result := tooltypes.NewBlockedToolResult(request.Name, "tool is not allowed by the active workspace command")
 		return finish(result, "blocked", "not_started")
 	}
-	commandPolicy := spec.Config.EnvironmentOptions().AllowedCommands
-	if request.Name == "bash" && commandPolicy != nil && len(*commandPolicy) > 0 {
-		validator := tools.NewBashToolWithTimeout(*commandPolicy, spec.Config.EnableFSSearchTools, spec.Config.BashTimeout())
-		if err := validator.ValidateInput(state, effectiveInput); err != nil {
-			result := tooltypes.BaseToolResult{Error: err.Error()}
-			return finish(result, "invalid_input", "not_started")
-		}
-	}
-
 	var onUpdate tooltypes.ToolUpdateCallback
 	if updates != nil && e.CanStreamToolUpdates() {
 		onUpdate = func(result tooltypes.ToolResult) {

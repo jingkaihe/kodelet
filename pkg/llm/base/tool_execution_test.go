@@ -146,7 +146,6 @@ func (t *environmentThreadStub) SetEnvironmentState(state tooltypes.State) {
 
 func (t *environmentThreadStub) ApplyEnvironmentConfig(config agentenv.EnvironmentConfig) {
 	t.config.WorkingDirectory = t.environment.Manifest().WorkingDirectory
-	t.config.AllowedCommands = append([]string(nil), config.AllowedCommands...)
 	t.config.ToolMode = config.ToolMode
 	t.config.CodeMode = config.CodeMode
 	t.config.EnableFSSearchTools = config.EnableFSSearchTools
@@ -324,7 +323,6 @@ func TestOpenEnvironmentAppliesPinnedRunnerConfiguration(t *testing.T) {
 	environment := &projectedEnvironment{manifest: agentenv.Manifest{
 		WorkingDirectory: "/runner/workspace",
 		Config: &agentenv.EnvironmentConfig{
-			AllowedCommands:     []string{"go test *"},
 			ToolMode:            llmtypes.ToolModePatch,
 			CodeMode:            "only",
 			EnableFSSearchTools: true,
@@ -349,7 +347,6 @@ func TestOpenEnvironmentAppliesPinnedRunnerConfiguration(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, CloseEnvironment(t.Context(), thread)) })
 	config := thread.GetConfig()
 	assert.Equal(t, "/runner/workspace", config.WorkingDirectory)
-	assert.Equal(t, []string{"go test *"}, config.AllowedCommands)
 	assert.Equal(t, llmtypes.ToolModePatch, config.ToolMode)
 	assert.Equal(t, "only", config.CodeMode)
 	assert.True(t, config.EnableFSSearchTools)

@@ -176,18 +176,14 @@ func remoteRunExecutionOptions(cmd *cobra.Command, ignoredFlags ...string) (*llm
 			*target = &value
 		}
 	}
-	for flag, target := range map[string]**[]string{
-		"allowed-tools": &options.AllowedTools, "allowed-commands": &options.AllowedCommands,
-	} {
-		if cmd.Flags().Changed(flag) {
-			value, err := cmd.Flags().GetStringSlice(flag)
-			if err != nil {
-				return nil, err
-			}
-			// Encode an explicit empty list as [], never null (which is rejected).
-			value = append([]string{}, value...)
-			*target = &value
+	if cmd.Flags().Changed("allowed-tools") {
+		value, err := cmd.Flags().GetStringSlice("allowed-tools")
+		if err != nil {
+			return nil, err
 		}
+		// Encode an explicit empty list as [], never null (which is rejected).
+		value = append([]string{}, value...)
+		options.AllowedTools = &value
 	}
 	return options, options.Validate()
 }

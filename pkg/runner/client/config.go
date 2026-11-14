@@ -67,7 +67,7 @@ func NewWorkspaceConfigLoader(defaults map[string]any, resources ResourceSetting
 
 func environmentSettings(settings map[string]any) map[string]any {
 	result := make(map[string]any)
-	for _, key := range []string{"allowed_commands", "allowed_domains_file", "allowed_tools", "tool_mode", "code_mode", "bash", "sysprompt", "sysprompt_args", "skills", "context", "extensions", "enable_fs_search_tools", "environment_profiles"} {
+	for _, key := range []string{"allowed_domains_file", "allowed_tools", "tool_mode", "code_mode", "bash", "sysprompt", "sysprompt_args", "skills", "context", "extensions", "enable_fs_search_tools", "environment_profiles"} {
 		if value, ok := settings[key]; ok {
 			result[key] = value
 		}
@@ -87,8 +87,7 @@ func environmentSettings(settings map[string]any) map[string]any {
 
 func validateWorkspacePolicy(host, config llmtypes.Config) error {
 	for name, pair := range map[string][2][]string{
-		"allowed_tools":    {host.AllowedTools, config.AllowedTools},
-		"allowed_commands": {host.AllowedCommands, config.AllowedCommands},
+		"allowed_tools": {host.AllowedTools, config.AllowedTools},
 	} {
 		if len(pair[0]) == 0 {
 			continue

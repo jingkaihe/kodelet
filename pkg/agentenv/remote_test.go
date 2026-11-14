@@ -64,7 +64,6 @@ func (c *fakeRemoteController) CallRun(_ context.Context, _ string, method strin
 			DisplayOverride: true,
 			RecipeName:      "review",
 			AllowedTools:    []string{"file_read"},
-			AllowedCommands: []string{"go test *"},
 		})
 	case protocol.MethodLifecycleDispatch:
 		if c.lifecycleReply != nil {
@@ -457,7 +456,6 @@ func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 			},
 		},
 		Config: runnerpayload.EnvironmentConfig{
-			AllowedCommands:     []string{"go test *"},
 			ToolMode:            llmtypes.ToolModePatch,
 			EnableFSSearchTools: true,
 			SystemPromptPath:    "/runner/custom.tmpl",

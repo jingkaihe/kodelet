@@ -507,12 +507,11 @@ func TestFragmentProcessor_ParseAllowedToolsAndCommands(t *testing.T) {
 
 	fragmentContent := `---
 name: Test Restrictions
-description: Fragment with tool and command restrictions
+description: Fragment with tool restrictions
 allowed_tools:
   - "bash"
   - "file_read"
   - "thinking"
-allowed_commands: "ls *,echo *,pwd"
 ---
 
 Test content here.`
@@ -528,17 +527,13 @@ Test content here.`
 	require.NoError(t, err)
 
 	assert.Equal(t, "Test Restrictions", metadata.Metadata.Name)
-	assert.Equal(t, "Fragment with tool and command restrictions", metadata.Metadata.Description)
+	assert.Equal(t, "Fragment with tool restrictions", metadata.Metadata.Description)
 	assert.Equal(t, []string{"bash", "file_read", "thinking"}, metadata.Metadata.AllowedTools)
-	assert.Equal(t, []string{"ls *", "echo *", "pwd"}, metadata.Metadata.AllowedCommands)
 
 	fragmentContent2 := `---
 name: Test Comma Format
 description: Fragment with comma-separated tools
 allowed_tools: "bash,file_read,grep_tool"
-allowed_commands:
-  - "git *"
-  - "cat *"
 ---
 
 Test content here.`
@@ -552,7 +547,6 @@ Test content here.`
 
 	assert.Equal(t, "Test Comma Format", metadata2.Metadata.Name)
 	assert.Equal(t, []string{"bash", "file_read", "grep_tool"}, metadata2.Metadata.AllowedTools)
-	assert.Equal(t, []string{"git *", "cat *"}, metadata2.Metadata.AllowedCommands)
 }
 
 func TestFragmentProcessor_Subdirectories(t *testing.T) {

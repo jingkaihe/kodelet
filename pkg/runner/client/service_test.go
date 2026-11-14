@@ -598,7 +598,6 @@ func TestServiceReloadRunKeepsIdentityAndRefreshesOnlyItsEnvironment(t *testing.
 	// A recipe can narrow the environment after run.open; retain those patches.
 	run.config.RecipeName = "read-only"
 	run.commandAllowedTools = []string{"file_read"}
-	run.commandAllowedCommands = []string{"help"}
 	config.SyspromptArgs = map[string]string{"version": "new"}
 	result := callService[runnerpayload.RunReloadResult](t, service, protocol.MethodRunReload, protocol.RunReloadParams{
 		RunID: "one", ExpectedEnvironmentRevision: first.EnvironmentRevision,
@@ -610,7 +609,6 @@ func TestServiceReloadRunKeepsIdentityAndRefreshesOnlyItsEnvironment(t *testing.
 	assert.Equal(t, int64(2), result.Manifest.EnvironmentRevision)
 	assert.Equal(t, "new", result.Manifest.Config.SystemPromptArgs["version"])
 	assert.ElementsMatch(t, []string{"file_read"}, manifestToolNames(result.Manifest))
-	assert.Equal(t, []string{"help"}, result.Manifest.Config.AllowedCommands)
 	assert.Equal(t, "read-only", run.config.RecipeName)
 	assert.Same(t, untouched, service.runs["two"].environment)
 	assert.Equal(t, other, service.runs["two"].manifest)
@@ -824,8 +822,6 @@ func TestServiceOpensPinnedManifestAndExecutesRunnerTool(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(recipeDir, "review.md"), []byte(`---
 allowed_tools:
   - file_read
-allowed_commands:
-  - go test *
 ---
 Review the runner workspace.`), 0o600))
 	promptPath := filepath.Join(workspace, "runner.tmpl")
@@ -839,12 +835,11 @@ Review the runner workspace.`), 0o600))
 		ConfigLoader: func(profile string) (llmtypes.Config, error) {
 			loadedEnvironmentProfile = profile
 			return llmtypes.Config{
-				Provider:        "runner-default",
-				Model:           "runner-model",
-				Sysprompt:       promptPath,
-				AllowedCommands: []string{"go test *"},
-				AllowedTools:    []string{"file_read"},
-				ToolMode:        llmtypes.ToolModeFull,
+				Provider:     "runner-default",
+				Model:        "runner-model",
+				Sysprompt:    promptPath,
+				AllowedTools: []string{"file_read"},
+				ToolMode:     llmtypes.ToolModeFull,
 			}, nil
 		},
 	})
@@ -1474,7 +1469,6 @@ func TestBuildWireManifestSortsContentAndRejectsReservedToolCollisions(t *testin
 			{Name: "a_tool", Description: "a", InputSchema: map[string]any{"type": "object"}, Placement: agentenv.ToolPlacementEnvironment},
 		},
 	}, llmtypes.Config{
-		AllowedCommands:     []string{"go test ./..."},
 		EnableFSSearchTools: true,
 		SyspromptArgs:       map[string]string{"audience": "developer"},
 	}, nil, "runner-1", "run-1", 4, []string{"reserved_tool", " "})

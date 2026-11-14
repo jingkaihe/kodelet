@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -86,7 +87,6 @@ type ExecutionOptions struct {
 	NoExtensions         *bool
 	NoSkills             *bool
 	AllowedTools         []string
-	AllowedCommands      []string
 	EnableFSSearchTools  *bool
 	// CodeMode is "off", "on", or "only" for this run, instead of the runner's
 	// configured code_mode.
@@ -112,13 +112,8 @@ func (o ExecutionOptions) validate() error {
 	positive("weakModelMaxTokens", o.WeakModelMaxTokens)
 	nonNegative("thinkingBudgetTokens", o.ThinkingBudgetTokens)
 	nonNegative("maxTurns", o.MaxTurns)
-	for name, values := range map[string][]string{"allowedTools": o.AllowedTools, "allowedCommands": o.AllowedCommands} {
-		for _, value := range values {
-			if value == "" {
-				problems = append(problems, name+" must not contain empty names")
-				break
-			}
-		}
+	if slices.Contains(o.AllowedTools, "") {
+		problems = append(problems, "allowedTools must not contain empty names")
 	}
 	if o.CodeMode != "" && o.CodeMode != "off" && o.CodeMode != "on" && o.CodeMode != "only" {
 		problems = append(problems, "codeMode must be off, on, or only")
@@ -171,7 +166,6 @@ func (o ExecutionOptions) args() []string {
 	boolean("no-extensions", o.NoExtensions)
 	boolean("no-skills", o.NoSkills)
 	list("allowed-tools", o.AllowedTools)
-	list("allowed-commands", o.AllowedCommands)
 	boolean("enable-fs-search-tools", o.EnableFSSearchTools)
 	text("code-mode", o.CodeMode)
 	return args

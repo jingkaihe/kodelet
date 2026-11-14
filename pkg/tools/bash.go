@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,7 +17,6 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/gobwas/glob"
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/binaries"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
@@ -31,27 +29,7 @@ var (
 	// bashMaxOutputTokens to preserve context window usage
 	bashMaxOutputTokens = 10_000
 
-	// BannedCommands lists commands that are not allowed to run through the bash tool
-	BannedCommands = []string{
-		"vim",
-		"view",
-		"less",
-		"more",
-	}
-
 	descriptionTemplate = `Run a bash command non-interactively in the working directory.
-
-# Restrictions
-{{if .AllowedCommands}}
-Allowed command patterns:
-{{range .AllowedCommands}}- {{.}}
-{{end}}
-Commands outside these patterns are rejected.
-{{else}}
-Banned commands:
-{{range .BannedCommands}}- {{.}}
-{{end}}
-{{end}}
 
 # Input
 - command: required single-line bash command
@@ -78,53 +56,28 @@ const (
 	bashToolUpdateInterval  = 100 * time.Millisecond
 )
 
-// BashTool executes bash commands with configurable restrictions and timeout support
+// BashTool executes bash commands with timeout support.
 type BashTool struct {
-	allowedCommands     []string
-	compiledGlobs       []glob.Glob
 	enableFSSearchTools bool
 	maxTimeout          time.Duration
 }
 
 var _ tooltypes.StreamingTool = (*BashTool)(nil)
 
-// NewBashTool creates a new BashTool with the specified allowed commands
-func NewBashTool(allowedCommands []string, enableFSSearchTools bool) *BashTool {
-	return NewBashToolWithTimeout(allowedCommands, enableFSSearchTools, llmtypes.DefaultBashTimeout)
+// NewBashTool creates a BashTool with the default maximum timeout.
+func NewBashTool(enableFSSearchTools bool) *BashTool {
+	return NewBashToolWithTimeout(enableFSSearchTools, llmtypes.DefaultBashTimeout)
 }
 
 // NewBashToolWithTimeout creates a BashTool with the specified maximum timeout.
-func NewBashToolWithTimeout(allowedCommands []string, enableFSSearchTools bool, maxTimeout time.Duration) *BashTool {
-	globs := make([]glob.Glob, len(allowedCommands))
-	for i, pattern := range allowedCommands {
-		// Compile glob patterns without custom separators (default behavior)
-		globs[i] = glob.MustCompile(pattern)
-	}
+func NewBashToolWithTimeout(enableFSSearchTools bool, maxTimeout time.Duration) *BashTool {
 	if maxTimeout == 0 {
 		maxTimeout = llmtypes.DefaultBashTimeout
 	}
 	return &BashTool{
-		allowedCommands:     allowedCommands,
-		compiledGlobs:       globs,
 		enableFSSearchTools: enableFSSearchTools,
 		maxTimeout:          maxTimeout,
 	}
-}
-
-// MatchesCommand checks if a command matches any of the compiled glob patterns
-func (b *BashTool) MatchesCommand(command string) bool {
-	for _, c := range b.allowedCommands {
-		if c != "" && strings.Contains(command, c) {
-			return true
-		}
-	}
-
-	for _, g := range b.compiledGlobs {
-		if g.Match(command) {
-			return true
-		}
-	}
-	return false
 }
 
 // BashInput reuses the shared bash tool input schema while preserving pkg/tools schema IDs.
@@ -220,53 +173,6 @@ func (b *BashTool) ValidateInput(_ tooltypes.State, parameters string) error {
 		return errors.Errorf("timeout must be between %d and %d seconds", bashMinTimeoutSeconds, b.maxTimeoutSeconds())
 	}
 
-	validateCommand := func(command string) error {
-		command = strings.TrimSpace(command)
-		if command == "" {
-			return nil
-		}
-
-		splitted := strings.Split(command, " ")
-		if len(splitted) == 0 {
-			return errors.New("command must contain at least one word")
-		}
-
-		firstWord := splitted[0]
-
-		// DENY FIRST: Check if command is banned - if yes, deny it regardless of allowed commands
-		if slices.Contains(BannedCommands, firstWord) {
-			return errors.New("command is banned: " + firstWord)
-		}
-
-		// Check if allowed commands are configured
-		if len(b.allowedCommands) > 0 {
-			// If allowed commands are configured, only allow commands that match patterns
-			if !b.MatchesCommand(command) {
-				return errors.Errorf("command not in allowed list: %s", command)
-			}
-		}
-
-		return nil
-	}
-
-	// Split by all operators and validate each command
-	operators := []string{"&&", "||", ";"}
-	commands := []string{input.Command}
-
-	for _, op := range operators {
-		var newCommands []string
-		for _, cmd := range commands {
-			newCommands = append(newCommands, strings.Split(cmd, op)...)
-		}
-		commands = newCommands
-	}
-
-	for _, command := range commands {
-		if err := validateCommand(command); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -275,18 +181,14 @@ func (b *BashTool) Description() string {
 	tmpl, err := template.New("bash_description").Parse(descriptionTemplate)
 	if err != nil {
 		// Fallback to a simple description if template parsing fails
-		return "Executes bash commands with configurable restrictions."
+		return "Run a bash command non-interactively in the working directory."
 	}
 
 	data := struct {
-		AllowedCommands     []string
-		BannedCommands      []string
 		EnableFSSearchTools bool
 		MinTimeoutSeconds   int
 		MaxTimeoutSeconds   int
 	}{
-		AllowedCommands:     b.allowedCommands,
-		BannedCommands:      BannedCommands,
 		EnableFSSearchTools: b.enableFSSearchTools,
 		MinTimeoutSeconds:   bashMinTimeoutSeconds,
 		MaxTimeoutSeconds:   b.maxTimeoutSeconds(),
@@ -295,7 +197,7 @@ func (b *BashTool) Description() string {
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		// Fallback to a simple description if template execution fails
-		return "Executes bash commands with configurable restrictions."
+		return "Run a bash command non-interactively in the working directory."
 	}
 
 	return buf.String()

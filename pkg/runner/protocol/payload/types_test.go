@@ -231,7 +231,6 @@ func TestComputeManifestDigestIgnoresRunIdentityAndDetectsContentChanges(t *test
 		ContextFiles:     []ContextFile{{Path: "AGENTS.md", Content: "rules", Digest: "sha256:rules"}},
 		Tools:            []ToolDefinition{{Name: "file_read", Description: "Read files", InputSchema: map[string]any{"type": "object"}, Placement: "environment"}},
 		Config: EnvironmentConfig{
-			AllowedCommands: []string{"go test ./..."},
 			SystemInformation: &llmtypes.SystemInformation{
 				IsGitRepo: true,
 				Platform:  "darwin",
@@ -310,7 +309,6 @@ func TestDiscoveryDigestIgnoresToolAvailabilityButPinsPolicyAndRegistrations(t *
 		"tool permissions": func(m *Manifest) {
 			m.Config.Options = &llmtypes.ExecutionOptions{NoSkills: new(true), AllowedTools: &[]string{}}
 		},
-		"command permissions": func(m *Manifest) { m.Config.AllowedCommands = []string{"git status"} },
 		"disabled extensions": func(m *Manifest) {
 			m.Config.Options = &llmtypes.ExecutionOptions{NoSkills: new(true), NoExtensions: new(true)}
 		},

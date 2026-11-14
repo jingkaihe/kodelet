@@ -547,7 +547,6 @@ Runner profiles are defined under the separate `environment_profiles` configurat
 environment_profiles:
   workspace:
     allowed_tools: [bash, apply_patch, file_read]
-    allowed_commands: ["go test *", "mise run *"]
     extensions:
       allow: [acp-subagent]
 ```

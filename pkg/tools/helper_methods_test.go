@@ -90,7 +90,7 @@ func TestCoreToolTracingKVs(t *testing.T) {
 	})
 
 	t.Run("bash", func(t *testing.T) {
-		kvs, err := NewBashTool(nil, false).TracingKVs(`{"command":"echo hi","description":"print greeting","timeout":10}`)
+		kvs, err := NewBashTool(false).TracingKVs(`{"command":"echo hi","description":"print greeting","timeout":10}`)
 		require.NoError(t, err)
 
 		attrs := attributeMap(kvs)
@@ -98,7 +98,7 @@ func TestCoreToolTracingKVs(t *testing.T) {
 		assert.Equal(t, "print greeting", attrs["description"])
 		assert.Equal(t, int64(10), attrs["timeout"])
 
-		kvs, err = NewBashTool(nil, false).TracingKVs(`{`)
+		kvs, err = NewBashTool(false).TracingKVs(`{`)
 		require.Error(t, err)
 		assert.Nil(t, kvs)
 	})

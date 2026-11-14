@@ -1295,12 +1295,11 @@ func TestAddWebChatDisplayMetadata(t *testing.T) {
 	assert.Equal(t, extensionResult.CommandName, display.Command)
 
 	environmentResult := agentenv.CommandResult{
-		Matched:         true,
-		CommandName:     "runner-review",
-		Prompt:          "Review on the runner",
-		Display:         "/runner-review staged",
-		AllowedTools:    []string{"file_read"},
-		AllowedCommands: []string{"git diff --cached"},
+		Matched:      true,
+		CommandName:  "runner-review",
+		Prompt:       "Review on the runner",
+		Display:      "/runner-review staged",
+		AllowedTools: []string{"file_read"},
 	}
 	AddEnvironmentCommandDisplay(thread, environmentResult)
 	display, ok = conversations.LookupMessageDisplay(thread.metadata, environmentResult.Prompt)
@@ -1325,7 +1324,6 @@ func TestAddWebChatDisplayMetadata(t *testing.T) {
 	config := llmtypes.Config{}
 	ApplyCommandRestrictions(t.Context(), &config, environmentResult)
 	assert.Equal(t, []string{"file_read"}, config.AllowedTools)
-	assert.Equal(t, []string{"git diff --cached"}, config.AllowedCommands)
 	AddEnvironmentCommandDisplay(nil, environmentResult)
 	AddEnvironmentCommandDisplay(thread, agentenv.CommandResult{})
 }

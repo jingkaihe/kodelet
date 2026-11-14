@@ -72,7 +72,6 @@ type Config struct {
 	ThinkingBudgetTokens    int                `mapstructure:"thinking_budget_tokens" json:"thinking_budget_tokens" yaml:"thinking_budget_tokens"`                              // ThinkingBudgetTokens is sent as Anthropic manual budget_tokens on non-adaptive Claude models; adaptive Claude models ignore it
 	ReasoningEffort         string             `mapstructure:"reasoning_effort" json:"reasoning_effort" yaml:"reasoning_effort"`                                                // ReasoningEffort controls supported provider effort settings (e.g. OpenAI reasoning models, Anthropic adaptive thinking models where "none" disables adaptive thinking)
 	AllowedReasoningEfforts []string           `mapstructure:"allowed_reasoning_efforts" json:"allowed_reasoning_efforts,omitempty" yaml:"allowed_reasoning_efforts,omitempty"` // AllowedReasoningEfforts restricts selectable reasoning efforts (empty means unrestricted)
-	AllowedCommands         []string           `mapstructure:"allowed_commands" json:"allowed_commands" yaml:"allowed_commands"`                                                // AllowedCommands is a list of allowed command patterns for the bash tool
 	AllowedDomainsFile      string             `mapstructure:"allowed_domains_file" json:"allowed_domains_file" yaml:"allowed_domains_file"`                                    // AllowedDomainsFile is the path to the file containing allowed domains for web_fetch tool
 	AllowedTools            []string           `mapstructure:"allowed_tools" json:"allowed_tools" yaml:"allowed_tools"`                                                         // AllowedTools is a list of allowed tools for the main agent (empty means use defaults)
 	WorkingDirectory        string             `mapstructure:"working_directory" json:"working_directory" yaml:"working_directory"`
@@ -121,7 +120,6 @@ type Config struct {
 // used at run boundaries so per-run restrictions cannot mutate shared config.
 func (c Config) Clone() Config {
 	c.AllowedTools = slices.Clone(c.AllowedTools)
-	c.AllowedCommands = slices.Clone(c.AllowedCommands)
 	c.AllowedReasoningEfforts = slices.Clone(c.AllowedReasoningEfforts)
 	c.Aliases = maps.Clone(c.Aliases)
 	c.SyspromptArgs = maps.Clone(c.SyspromptArgs)

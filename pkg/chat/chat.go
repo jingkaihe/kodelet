@@ -703,12 +703,12 @@ func runDefaultChat(
 	}
 	if checkpointSaved && commandResult.Matched {
 		setter, ok := thread.(interface {
-			SetCommandConfig(string, []string, []string)
+			SetCommandConfig(string, []string)
 		})
 		if !ok {
 			return sessionID, errors.New("conversation provider cannot apply command restrictions")
 		}
-		setter.SetCommandConfig(llmConfig.RecipeName, llmConfig.AllowedTools, llmConfig.AllowedCommands)
+		setter.SetCommandConfig(llmConfig.RecipeName, llmConfig.AllowedTools)
 	}
 	if extensionSetter, ok := thread.(interface{ SetExtensions(any) }); ok {
 		extensionSetter.SetExtensions(extensionRuntime)
@@ -1518,17 +1518,12 @@ func ApplyFragmentRestrictions(ctx context.Context, llmConfig *llmtypes.Config, 
 			llmConfig.AllowedTools = fragmentMetadata.AllowedTools
 		}
 	}
-
-	if len(fragmentMetadata.AllowedCommands) > 0 {
-		llmConfig.AllowedCommands = fragmentMetadata.AllowedCommands
-	}
 }
 
 // ApplyCommandRestrictions applies model/tool restrictions returned by an environment command.
 func ApplyCommandRestrictions(ctx context.Context, llmConfig *llmtypes.Config, result agentenv.CommandResult) {
 	ApplyFragmentRestrictions(ctx, llmConfig, &fragments.Metadata{
-		AllowedTools:    result.AllowedTools,
-		AllowedCommands: result.AllowedCommands,
+		AllowedTools: result.AllowedTools,
 	})
 }
 

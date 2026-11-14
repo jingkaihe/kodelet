@@ -62,7 +62,6 @@ func TestConfigClonePinsMutableSettings(t *testing.T) {
 		Provider:                "openai",
 		Model:                   "main",
 		AllowedTools:            []string{"file_read"},
-		AllowedCommands:         []string{"git status"},
 		AllowedReasoningEfforts: []string{"medium"},
 		Aliases:                 map[string]string{"short": "main"},
 		SyspromptArgs:           map[string]string{"name": "original"},
@@ -112,7 +111,6 @@ func TestConfigClonePinsMutableSettings(t *testing.T) {
 	assert.Equal(t, original, cloned)
 	assert.Same(t, original.Extensions, cloned.Extensions, "opaque runtime ownership is not duplicated")
 	cloned.AllowedTools[0] = "bash"
-	cloned.AllowedCommands[0] = "rm *"
 	cloned.AllowedReasoningEfforts[0] = "high"
 	cloned.Aliases["short"] = "other"
 	cloned.SyspromptArgs["name"] = "changed"

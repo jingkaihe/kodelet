@@ -191,22 +191,6 @@ kodelet acp --no-extensions
 
 ## Command and tool restrictions
 
-Restrict bash commands:
-
-```yaml
-allowed_commands:
-  - "ls *"
-  - "pwd"
-  - "git status"
-  - "npm *"
-```
-
-Or with an environment variable:
-
-```bash
-export KODELET_ALLOWED_COMMANDS="ls *,pwd,git status"
-```
-
 Set the maximum timeout the bash tool can request. Default is `120s`:
 
 ```yaml

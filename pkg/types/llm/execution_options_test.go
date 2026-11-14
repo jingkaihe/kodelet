@@ -17,7 +17,7 @@ func TestExecutionOptionsJSONPresence(t *testing.T) {
 	assert.True(t, omitted.ToolAllowed("bash"))
 	assert.False(t, omitted.ToolsDisabled())
 
-	input := `{"maxTurns":0,"thinkingBudgetTokens":0,"useWeakModel":false,"noTools":false,"noExtensions":false,"noSkills":false,"enableFSSearchTools":false,"allowedTools":[],"allowedCommands":[]}`
+	input := `{"maxTurns":0,"thinkingBudgetTokens":0,"useWeakModel":false,"noTools":false,"noExtensions":false,"noSkills":false,"enableFSSearchTools":false,"allowedTools":[]}`
 	var explicit ExecutionOptions
 	require.NoError(t, json.Unmarshal([]byte(input), &explicit))
 	assert.Equal(t, new(0), explicit.MaxTurns)
@@ -26,9 +26,7 @@ func TestExecutionOptionsJSONPresence(t *testing.T) {
 		assert.Equal(t, new(false), value)
 	}
 	require.NotNil(t, explicit.AllowedTools)
-	require.NotNil(t, explicit.AllowedCommands)
 	assert.Equal(t, []string{}, *explicit.AllowedTools)
-	assert.Equal(t, []string{}, *explicit.AllowedCommands)
 	assert.True(t, explicit.ToolsDisabled(), "an empty allowlist wins over noTools=false")
 	data, err := json.Marshal(explicit.Clone())
 	require.NoError(t, err)
@@ -44,16 +42,15 @@ func TestExecutionOptionsJSONPresence(t *testing.T) {
 }
 
 func TestExecutionOptionsNilSlicePointersMarshalAsDenyAll(t *testing.T) {
-	options := ExecutionOptions{AllowedTools: new([]string(nil)), AllowedCommands: new([]string(nil))}
+	options := ExecutionOptions{AllowedTools: new([]string(nil))}
 	data, err := json.Marshal(options)
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"allowedTools":[],"allowedCommands":[]}`, string(data))
+	assert.JSONEq(t, `{"allowedTools":[]}`, string(data))
 	var decoded ExecutionOptions
 	require.NoError(t, json.Unmarshal(data, &decoded))
 	assert.True(t, decoded.ToolsDisabled())
 	assert.False(t, decoded.ToolAllowed("bash"))
 	assert.Nil(t, *options.AllowedTools, "serialization does not mutate the caller's lists")
-	assert.Nil(t, *options.AllowedCommands)
 }
 
 func TestExecutionOptionsRejectInvalidJSON(t *testing.T) {
@@ -69,8 +66,8 @@ func TestExecutionOptionsRejectInvalidJSON(t *testing.T) {
 		`{"model":"bad\u0000model"}`, `{"reasoningEffort":"extreme"}`,
 		`{"maxTokens":0}`, `{"weakModelMaxTokens":-1}`, `{"maxTurns":-1}`,
 		`{"thinkingBudgetTokens":-1}`, `{"allowedTools":[null]}`,
-		`{"allowedTools":[""]}`, `{"allowedCommands":[" "]}`,
-		`{"allowedCommands":["ls\u0000"]}`,
+		`{"allowedTools":[""]}`, `{"allowedTools":[" "]}`,
+		`{"allowedTools":["ls\u0000"]}`, `{"allowedCommands":["git status"]}`,
 	}
 	// Every known option must reject null, including new fields added later.
 	typ := reflect.TypeFor[ExecutionOptions]()
@@ -89,7 +86,7 @@ func TestExecutionOptionsRejectInvalidJSON(t *testing.T) {
 
 func TestExecutionOptionsCloneAndRestrictions(t *testing.T) {
 	var options ExecutionOptions
-	require.NoError(t, json.Unmarshal([]byte(`{"provider":"anthropic","model":"main","weakModel":"weak","maxTokens":4096,"weakModelMaxTokens":2048,"thinkingBudgetTokens":1024,"reasoningEffort":"high","maxTurns":2,"useWeakModel":true,"noTools":false,"noExtensions":true,"noSkills":true,"enableFSSearchTools":false,"allowedTools":["file_read"],"allowedCommands":["git status"],"codeMode":"only"}`), &options))
+	require.NoError(t, json.Unmarshal([]byte(`{"provider":"anthropic","model":"main","weakModel":"weak","maxTokens":4096,"weakModelMaxTokens":2048,"thinkingBudgetTokens":1024,"reasoningEffort":"high","maxTurns":2,"useWeakModel":true,"noTools":false,"noExtensions":true,"noSkills":true,"enableFSSearchTools":false,"allowedTools":["file_read"],"codeMode":"only"}`), &options))
 	cloned := options.Clone()
 	assert.Equal(t, &options, cloned)
 	// All scalar pointers and allowlist storage belong to the clone.
@@ -99,10 +96,8 @@ func TestExecutionOptionsCloneAndRestrictions(t *testing.T) {
 	}
 	*cloned.Model = "changed"
 	(*cloned.AllowedTools)[0] = "bash"
-	(*cloned.AllowedCommands)[0] = "rm *"
 	assert.Equal(t, "main", *options.Model)
 	assert.Equal(t, []string{"file_read"}, *options.AllowedTools)
-	assert.Equal(t, []string{"git status"}, *options.AllowedCommands)
 
 	restrictions := options.Restrictions()
 	assert.True(t, options.HasModelOptions())
@@ -129,7 +124,6 @@ func TestExecutionOptionsToolPolicy(t *testing.T) {
 		{"tool free", ExecutionOptions{NoTools: new(true)}, nil, []string{"bash", "file_read", "ext_tool", "web_search"}},
 		{"empty tools", ExecutionOptions{AllowedTools: new([]string{})}, nil, []string{"bash", "ext_tool", "web_search"}},
 		{"allowlist", ExecutionOptions{AllowedTools: new([]string{"file_read", "ext_tool"})}, []string{"file_read", "ext_tool"}, []string{"bash", "web_search"}},
-		{"empty commands", ExecutionOptions{AllowedCommands: new([]string{})}, []string{"file_read"}, []string{"bash"}},
 		{"skills disabled", ExecutionOptions{NoSkills: new(true)}, []string{"file_read"}, []string{"skill"}},
 		{"search disabled", ExecutionOptions{EnableFSSearchTools: new(false)}, []string{"file_read"}, []string{"glob_tool", "grep_tool"}},
 	} {
@@ -161,20 +155,16 @@ func TestApplyEnvironmentOptionsNarrowsPolicy(t *testing.T) {
 		{"disjoint denies all", []string{"file_read"}, new([]string{"bash"}), new([]string{})},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			host := Config{AllowedTools: tt.host, AllowedCommands: tt.host}
-			options := &ExecutionOptions{AllowedTools: tt.requested, AllowedCommands: tt.requested}
+			host := Config{AllowedTools: tt.host}
+			options := &ExecutionOptions{AllowedTools: tt.requested}
 			config, err := ApplyEnvironmentOptions(host, options)
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, config.ExecutionOptions.AllowedTools)
-			assert.Equal(t, tt.want, config.ExecutionOptions.AllowedCommands)
-			if tt.want != nil {
-				assert.Equal(t, *tt.want, config.AllowedCommands, "bash must receive the effective command policy")
-				if len(*tt.want) == 0 {
-					assert.False(t, config.ExecutionOptions.ToolAllowed("bash"))
-				}
+			if tt.want != nil && len(*tt.want) == 0 {
+				assert.False(t, config.ExecutionOptions.ToolAllowed("bash"))
 			}
-			assert.Equal(t, tt.host, host.AllowedCommands)
-			assert.Equal(t, tt.requested, options.AllowedCommands)
+			assert.Equal(t, tt.host, host.AllowedTools)
+			assert.Equal(t, tt.requested, options.AllowedTools)
 		})
 	}
 }
@@ -206,7 +196,7 @@ func TestApplyEnvironmentOptionsFeaturePolicy(t *testing.T) {
 	assert.False(t, config.Skills.Enabled)
 	assert.Equal(t, false, config.ExtensionSettings["enabled"])
 
-	for _, options := range []*ExecutionOptions{{Model: new("main")}, {Provider: new("openai")}, {MaxTurns: new(0)}, {UseWeakModel: new(false)}, {AllowedCommands: new([]string{""})}} {
+	for _, options := range []*ExecutionOptions{{Model: new("main")}, {Provider: new("openai")}, {MaxTurns: new(0)}, {UseWeakModel: new(false)}, {AllowedTools: new([]string{""})}} {
 		_, err := ApplyEnvironmentOptions(host, options)
 		require.Error(t, err)
 	}
@@ -282,13 +272,13 @@ func TestApplyEnvironmentOptionsPreservesInheritedRestrictions(t *testing.T) {
 		nil,
 		{},
 		{NoTools: new(false), NoExtensions: new(false), NoSkills: new(false)},
-		{AllowedTools: new([]string{"bash"}), AllowedCommands: new([]string{"rm *"})},
+		{AllowedTools: new([]string{"bash"})},
 	} {
 		host := Config{
 			EnableFSSearchTools: true,
 			ExecutionOptions: &ExecutionOptions{
 				NoTools: new(true), NoExtensions: new(true), NoSkills: new(true),
-				EnableFSSearchTools: new(false), AllowedTools: new([]string{}), AllowedCommands: new([]string{}),
+				EnableFSSearchTools: new(false), AllowedTools: new([]string{}),
 			},
 		}
 		config, err := ApplyEnvironmentOptions(host, options)
@@ -299,7 +289,6 @@ func TestApplyEnvironmentOptionsPreservesInheritedRestrictions(t *testing.T) {
 		assert.Equal(t, new(true), config.ExecutionOptions.NoSkills)
 		assert.Equal(t, new(false), config.ExecutionOptions.EnableFSSearchTools)
 		assert.Equal(t, new([]string{}), config.ExecutionOptions.AllowedTools)
-		assert.Equal(t, new([]string{}), config.ExecutionOptions.AllowedCommands)
 		assert.False(t, config.EnableFSSearchTools)
 		assert.False(t, config.Skills.Enabled)
 		assert.Equal(t, false, config.ExtensionSettings["enabled"])
@@ -308,9 +297,9 @@ func TestApplyEnvironmentOptionsPreservesInheritedRestrictions(t *testing.T) {
 	}
 	// Even without noTools, an inherited empty allowlist must not become the
 	// unrestricted legacy Config empty list on a subsequent application.
-	host, err := ApplyEnvironmentOptions(Config{}, &ExecutionOptions{AllowedTools: new([]string{}), AllowedCommands: new([]string{})})
+	host, err := ApplyEnvironmentOptions(Config{}, &ExecutionOptions{AllowedTools: new([]string{})})
 	require.NoError(t, err)
-	config, err := ApplyEnvironmentOptions(host, &ExecutionOptions{AllowedTools: new([]string{"bash"}), AllowedCommands: new([]string{"git status"})})
+	config, err := ApplyEnvironmentOptions(host, &ExecutionOptions{AllowedTools: new([]string{"bash"})})
 	require.NoError(t, err)
 	assert.True(t, config.ExecutionOptions.ToolsDisabled())
 	assert.False(t, config.ExecutionOptions.ToolAllowed("bash"))

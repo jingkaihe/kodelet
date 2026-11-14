@@ -182,7 +182,7 @@ func TestWorkspaceShortcutRoutesModelProfileToTemporaryRun(t *testing.T) {
 
 func TestWorkspaceShortcutDiscoveryAllowsExecutionToolsButRejectsPolicyChanges(t *testing.T) {
 	for _, policyChanged := range []bool{false, true} {
-		t.Run(map[bool]string{false: "execution-only tools", true: "changed permissions"}[policyChanged], func(t *testing.T) {
+		t.Run(map[bool]string{false: "execution-only tools", true: "changed settings"}[policyChanged], func(t *testing.T) {
 			f := newShortcutFixture(t)
 			f.manifest.Config.Options.AllowedTools = nil
 			digest, err := runnerpayload.ComputeDiscoveryDigest(f.manifest)
@@ -191,7 +191,7 @@ func TestWorkspaceShortcutDiscoveryAllowsExecutionToolsButRejectsPolicyChanges(t
 			f.request.Target.Options = f.manifest.Config.Options.Clone()
 			f.manifest.Tools = []runnerpayload.ToolDefinition{{Name: "background_only", InputSchema: map[string]any{"type": "object"}, Placement: "environment"}}
 			if policyChanged {
-				f.manifest.Config.AllowedCommands = []string{"git status"}
+				f.manifest.Config.EnableFSSearchTools = !f.manifest.Config.EnableFSSearchTools
 			}
 			f.manifest.Digest, err = runnerpayload.ComputeManifestDigest(f.manifest)
 			require.NoError(t, err)
@@ -320,7 +320,6 @@ func TestPinnedShortcutOptionsRespectMandatoryAndEmptyRestrictions(t *testing.T)
 		assert.NoError(t, validatePinnedDiscoveryOptions(options, manifest))
 	}
 	assert.Error(t, validatePinnedDiscoveryOptions(&llmtypes.ExecutionOptions{NoExtensions: new(true)}, manifest))
-	assert.Error(t, validatePinnedDiscoveryOptions(&llmtypes.ExecutionOptions{AllowedCommands: &[]string{}}, manifest))
 	assert.True(t, *manifest.Config.Options.NoSkills)
 	assert.Empty(t, *manifest.Config.Options.AllowedTools)
 }

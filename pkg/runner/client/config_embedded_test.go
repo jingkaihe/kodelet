@@ -37,7 +37,6 @@ func embeddedConfigTestSettings(cwd string) map[string]any {
 		},
 		"allowed_domains_file": filepath.Join(cwd, "domains.txt"),
 		"allowed_tools":        []string{"file_read", "bash"},
-		"allowed_commands":     []string{"git status", "git diff"},
 		"environment_profiles": map[string]any{
 			"review": map[string]any{
 				"tool_mode":      "patch",
@@ -90,10 +89,8 @@ func assertEmbeddedConfigEnvironment(t *testing.T, config llmtypes.Config, cwd s
 	}, extensionsConfig)
 	assert.Equal(t, filepath.Join(cwd, "domains.txt"), config.AllowedDomainsFile)
 	assert.Equal(t, []string{"file_read", "bash"}, config.AllowedTools)
-	assert.Equal(t, []string{"git status", "git diff"}, config.AllowedCommands)
 	require.NotNil(t, config.ExecutionOptions)
 	assert.Equal(t, new([]string{"file_read", "bash"}), config.ExecutionOptions.AllowedTools)
-	assert.Equal(t, new([]string{"git status", "git diff"}), config.ExecutionOptions.AllowedCommands)
 	require.Contains(t, config.EnvironmentProfiles, "review")
 	assert.Equal(t, "patch", config.EnvironmentProfiles["review"]["tool_mode"])
 	for _, key := range []string{"model", "provider", "openai"} {
@@ -233,7 +230,6 @@ func TestEmbeddedConfigSnapshotsDoNotLeak(t *testing.T) {
 	defaults["context"].(map[string]any)["patterns"].([]string)[0] = "CHANGED.md"
 	defaults["skills"].(map[string]any)["allowed"].([]string)[0] = "changed-skill"
 	defaults["allowed_tools"].([]string)[0] = "changed-tool"
-	defaults["allowed_commands"].([]string)[0] = "changed-command"
 	defaultExtensions := defaults["extensions"].(map[string]any)
 	defaultExtensions["allow"].([]string)[0] = "changed-extension"
 	defaultExtensions["deny"].([]string)[0] = "changed-denial"
@@ -252,7 +248,6 @@ func TestEmbeddedConfigSnapshotsDoNotLeak(t *testing.T) {
 	config.Context.Patterns[0] = "CHANGED.md"
 	config.Skills.Allowed[0] = "changed-skill"
 	config.AllowedTools[0] = "changed-tool"
-	config.AllowedCommands[0] = "changed-command"
 	require.NotNil(t, config.ExecutionOptions.AllowedTools)
 	(*config.ExecutionOptions.AllowedTools)[0] = "changed-execution-tool"
 	clear(config.ExtensionSettings["tools"].(map[string]any))
@@ -280,8 +275,8 @@ func TestEmbeddedConfigServeOverridesWinModelProfile(t *testing.T) {
 				"sysprompt": "model.tmpl", "bash": map[string]any{"timeout": "90s"},
 				"sysprompt_args": map[string]any{"origin": "model", "model_only": "retained"},
 				"context":        map[string]any{"patterns": []string{"MODEL.md"}},
-				"allowed_tools":  []string{"bash"}, "allowed_commands": []string{"git diff"},
-				"skills": map[string]any{"enabled": true, "allowed": []string{"build"}},
+				"allowed_tools":  []string{"bash"},
+				"skills":         map[string]any{"enabled": true, "allowed": []string{"build"}},
 				"extensions": map[string]any{
 					"enabled": true, "allow": []string{"format"}, "deny": []string{"unsafe"},
 					"tools": map[string]any{"write": map[string]any{"enabled": true}},
@@ -305,7 +300,6 @@ func TestEmbeddedConfigServeOverridesWinModelProfile(t *testing.T) {
 	require.NotNil(t, config.Context)
 	assert.Equal(t, []string{"AGENTS.md", "CONTRIBUTING.md"}, config.Context.Patterns)
 	assert.Equal(t, []string{"file_read", "bash"}, config.AllowedTools)
-	assert.Equal(t, []string{"git diff"}, config.AllowedCommands)
 	assert.Equal(t, new([]string{"bash"}), config.ExecutionOptions.AllowedTools, "runner overrides cannot relax inherited model permissions")
 	require.NotNil(t, config.Skills)
 	assert.Equal(t, []string{"review", "build"}, config.Skills.Allowed)
@@ -411,8 +405,6 @@ func TestEmbeddedConfigRepositoryRestrictions(t *testing.T) {
 	}{
 		{name: "widen tools", yaml: "allowed_tools: [file_read, bash, file_write]", wantErr: true},
 		{name: "clear tools", yaml: "allowed_tools: []", wantErr: true},
-		{name: "widen commands", yaml: "allowed_commands: ['*']", wantErr: true},
-		{name: "clear commands", yaml: "allowed_commands: []", wantErr: true},
 		{name: "widen skills", yaml: "skills:\n  allowed: [review, build, deploy]", wantErr: true},
 		{name: "clear skills", yaml: "skills:\n  allowed: []", wantErr: true},
 		{name: "widen extensions", yaml: "extensions:\n  allow: [inspect, format, execute]", wantErr: true},
@@ -429,12 +421,6 @@ func TestEmbeddedConfigRepositoryRestrictions(t *testing.T) {
 				require.NotNil(t, config.ExecutionOptions)
 				assert.True(t, config.ExecutionOptions.ToolAllowed("file_read"))
 				assert.False(t, config.ExecutionOptions.ToolAllowed("bash"))
-			},
-		},
-		{
-			name: "narrow commands", yaml: "allowed_commands: ['git status']",
-			check: func(t *testing.T, config llmtypes.Config) {
-				assert.Equal(t, []string{"git status"}, config.AllowedCommands)
 			},
 		},
 		{

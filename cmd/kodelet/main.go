@@ -69,7 +69,6 @@ func serverFlagOrConfig(cmd *cobra.Command) (string, bool) {
 }
 
 func init() {
-	viper.SetDefault("allowed_commands", []string{})
 	viper.SetDefault("bash.timeout", "120s")
 	viper.SetDefault("allowed_domains_file", "~/.kodelet/allowed_domains.txt")
 	viper.SetDefault("sysprompt", "")
@@ -365,7 +364,6 @@ func main() {
 	rootCmd.PersistentFlags().String("reasoning-effort", "medium", "Reasoning effort for supported models (provider-specific; e.g. OpenAI none|minimal|low|medium|high|xhigh|max; Anthropic adaptive none|low|medium|high|xhigh|max)")
 	rootCmd.PersistentFlags().String("log-level", "info", "Log level (panic, fatal, error, warn, info, debug, trace)")
 	rootCmd.PersistentFlags().String("log-format", "fmt", "Log format (json, text, fmt)")
-	rootCmd.PersistentFlags().StringSlice("allowed-commands", []string{}, "Allowed command patterns for bash tool (e.g. 'yarn start,ls *')")
 	rootCmd.PersistentFlags().String("allowed-domains-file", "~/.kodelet/allowed_domains.txt", "Path to file containing allowed domains for web_fetch tool (one domain per line)")
 	rootCmd.PersistentFlags().Bool("enable-openai-search", true, "Enable native OpenAI Responses web_search tool when supported")
 	rootCmd.PersistentFlags().String("sysprompt", "", "Path to custom system prompt template file")
@@ -389,7 +387,6 @@ func main() {
 	viper.BindPFlag("weak_reasoning_effort", rootCmd.PersistentFlags().Lookup("weak-reasoning-effort"))
 	viper.BindPFlag("log_level", rootCmd.PersistentFlags().Lookup("log-level"))
 	viper.BindPFlag("log_format", rootCmd.PersistentFlags().Lookup("log-format"))
-	viper.BindPFlag("allowed_commands", rootCmd.PersistentFlags().Lookup("allowed-commands"))
 	viper.BindPFlag("allowed_domains_file", rootCmd.PersistentFlags().Lookup("allowed-domains-file"))
 	viper.BindPFlag("openai.enable_search", rootCmd.PersistentFlags().Lookup("enable-openai-search"))
 	viper.BindPFlag("sysprompt", rootCmd.PersistentFlags().Lookup("sysprompt"))
