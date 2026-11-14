@@ -1205,12 +1205,11 @@ func TestDeleteConversationStopsRunnerWorkspaceSessions(t *testing.T) {
 		name      string
 		bound     bool
 		runnerErr error
-		calls     int
 		discarded bool
 	}{
-		{name: "bound", bound: true, calls: 1, discarded: true},
-		{name: "runner failure", bound: true, runnerErr: errors.New("runner unavailable"), calls: 1},
-		{name: "unbound", calls: 0},
+		{name: "bound", bound: true, discarded: true},
+		{name: "runner failure", bound: true, runnerErr: errors.New("runner unavailable")},
+		{name: "unbound"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			s, registration, link := newBrowserAPITestServer(t)
@@ -1227,25 +1226,52 @@ func TestDeleteConversationStopsRunnerWorkspaceSessions(t *testing.T) {
 			}}
 			requestCtx, cancelRequest := context.WithCancel(t.Context())
 			defer cancelRequest()
-			calls := 0
+			started := make(chan struct{}, 1)
+			unblock := make(chan struct{})
 			link.call = func(ctx context.Context, method string, params, _ any) error {
-				calls++
 				assert.Equal(t, protocol.MethodWorkspaceSessionsDiscard, method)
 				assert.Equal(t, protocol.WorkspaceSessionsDiscardParams{ConversationID: "deleted"}, params)
 				assert.True(t, conversationDeleted, "sessions are discarded only after deletion commits")
-				cancelRequest()
-				assert.NoError(t, ctx.Err(), "accepted cleanup outlives its HTTP observer")
+				started <- struct{}{}
+				<-unblock
+				assert.NoError(t, ctx.Err(), "cleanup outlives its HTTP observer")
 				return test.runnerErr
 			}
 
 			r := httptest.NewRequest(http.MethodDelete, "/api/conversations/deleted", nil).WithContext(requestCtx)
 			r = mux.SetURLVars(r, map[string]string{"id": "deleted"})
 			w := httptest.NewRecorder()
-			s.handleDeleteConversation(w, r)
+			responded := make(chan struct{})
+			go func() {
+				defer close(responded)
+				s.handleDeleteConversation(w, r)
+			}()
+			select {
+			case <-responded:
+			case <-time.After(5 * time.Second):
+				close(unblock)
+				t.Fatal("deletion waited for runner cleanup")
+			}
+			cancelRequest()
 
 			assert.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
 			assert.True(t, conversationDeleted)
-			assert.Equal(t, test.calls, calls)
+			if test.bound {
+				select {
+				case <-started:
+				case <-time.After(5 * time.Second):
+					close(unblock)
+					t.Fatal("runner cleanup did not start")
+				}
+				assert.False(t, s.registerActiveChat("deleted", newActiveChatRun(func() {})), "turns stay fenced during cleanup")
+				close(unblock)
+			}
+			require.Eventually(t, func() bool {
+				s.activeChatsMu.Lock()
+				defer s.activeChatsMu.Unlock()
+				return len(s.deletingConversations) == 0
+			}, 5*time.Second, 10*time.Millisecond, "cleanup releases the deletion guard")
+			assert.Empty(t, started, "unbound conversations never reach a runner")
 			s.browserMu.Lock()
 			defer s.browserMu.Unlock()
 			if test.discarded {
@@ -1254,7 +1280,6 @@ func TestDeleteConversationStopsRunnerWorkspaceSessions(t *testing.T) {
 				assert.Contains(t, s.browserHandles, deleted.ID)
 			}
 			assert.Contains(t, s.browserHandles, other.ID)
-			assert.Empty(t, s.deletingConversations, "cleanup releases the deletion guard")
 		})
 	}
 }

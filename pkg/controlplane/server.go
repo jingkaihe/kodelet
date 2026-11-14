@@ -2563,20 +2563,20 @@ func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request
 		s.writeErrorResponse(w, http.StatusConflict, "conversation is actively running", nil)
 		return
 	}
-	defer s.releaseConversationDeletion(id)
 	s.closeRealtimeConversation(id)
 	workspaceRunnerID := s.conversationWorkspaceRunner(ctx, id)
 
 	// Delete conversation
 	err := s.conversationService.DeleteConversation(ctx, id)
 	if err != nil {
+		s.releaseConversationDeletion(id)
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to delete conversation", err)
 		return
 	}
 	if s.runnerRegistry != nil {
 		s.runnerRegistry.ForgetConversation(id)
 	}
-	// Stop its runner terminals even if the client disconnects.
+	// Releases the deletion reservation once runner cleanup finishes.
 	s.discardDeletedConversationWorkspace(s.chatExecutionContext(ctx), workspaceRunnerID, id)
 	if closer, ok := s.chatRunner.(interface{ CloseConversation(string) error }); ok {
 		if err := closer.CloseConversation(id); err != nil {

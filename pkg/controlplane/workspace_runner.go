@@ -111,28 +111,35 @@ func (s *Server) conversationWorkspaceRunner(ctx context.Context, conversationID
 	return affinity.RunnerID
 }
 
-// Best-effort: the conversation is already deleted, so failures are only logged.
+// Runs in the background so a slow runner cannot delay the deletion response,
+// keeping new turns fenced until it finishes. Failures are only logged.
 func (s *Server) discardDeletedConversationWorkspace(ctx context.Context, runnerID, conversationID string) {
 	if s.runnerRegistry == nil || runnerID == "" {
+		s.releaseConversationDeletion(conversationID)
 		return
 	}
 	log := logger.G(ctx).WithField("conversation_id", conversationID).WithField("runner_id", runnerID)
 	runner, found := s.runnerRegistry.Runner(runnerID)
 	if !found {
+		s.releaseConversationDeletion(conversationID)
 		return
 	}
 	if err := s.runnerRegistry.ValidateRunnerCall(runnerID, runner.Generation, protocol.MethodWorkspaceSessionsDiscard); err != nil {
 		log.WithError(err).Debug("skipped workspace cleanup for deleted conversation")
+		s.releaseConversationDeletion(conversationID)
 		return
 	}
-	ctx, cancel := context.WithTimeout(ctx, workspaceSessionsDiscardTimeout)
-	defer cancel()
-	if err := s.runnerRegistry.CallRunner(ctx, runnerID, runner.Generation, protocol.MethodWorkspaceSessionsDiscard,
-		protocol.WorkspaceSessionsDiscardParams{ConversationID: conversationID}, nil); err != nil {
-		log.WithError(err).Warn("failed to stop deleted conversation's workspace sessions")
-		return
-	}
-	s.removeConversationBrowserHandles(runnerID, runner.Generation, conversationID)
+	go func() {
+		defer s.releaseConversationDeletion(conversationID)
+		ctx, cancel := context.WithTimeout(ctx, workspaceSessionsDiscardTimeout)
+		defer cancel()
+		if err := s.runnerRegistry.CallRunner(ctx, runnerID, runner.Generation, protocol.MethodWorkspaceSessionsDiscard,
+			protocol.WorkspaceSessionsDiscardParams{ConversationID: conversationID}, nil); err != nil {
+			log.WithError(err).Warn("failed to stop deleted conversation's workspace sessions")
+			return
+		}
+		s.removeConversationBrowserHandles(runnerID, runner.Generation, conversationID)
+	}()
 }
 
 func (s *Server) removeConversationBrowserHandles(runnerID string, generation int64, conversationID string) {
