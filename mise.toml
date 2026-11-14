@@ -344,11 +344,6 @@ run = [
   "docker run --rm -e ANTHROPIC_API_KEY -e OPENAI_API_KEY kodelet-e2e-tests",
 ]
 
-[tasks.release-note]
-description = "Generate release notes"
-depends = ["build"]
-run = ["./bin/kodelet run -r release-note"]
-
 [tasks.release]
 description = "Build GoReleaser snapshot artifacts"
 depends = ["lint", "test", "mcp-lint", "mcp-test"]
