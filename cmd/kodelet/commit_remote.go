@@ -32,13 +32,14 @@ func remoteCommitRequest(cmd *cobra.Command) (chat.ChatRequest, error) {
 	if err != nil {
 		return request, err
 	}
-	// Message generation cannot approve or perform the final Git mutation.
-	for name, value := range map[string]*bool{"no-tools": options.NoTools, "no-extensions": options.NoExtensions, "no-skills": options.NoSkills} {
+	// Keep extensions available for model profiles and lifecycle hooks, but
+	// message generation cannot approve or perform the final Git mutation.
+	for name, value := range map[string]*bool{"no-tools": options.NoTools, "no-skills": options.NoSkills} {
 		if value != nil && !*value {
 			return request, errors.Errorf("commit message generation requires --%s=true; omit this flag to use the default", name)
 		}
 	}
-	options.NoTools, options.NoExtensions, options.NoSkills = new(true), new(true), new(true)
+	options.NoTools, options.NoSkills = new(true), new(true)
 	if options.UseWeakModel == nil {
 		options.UseWeakModel = new(true)
 	}

@@ -46,7 +46,7 @@ func TestRemoteCommitRequestRestrictionAndPrompt(t *testing.T) {
 	assert.Equal(t, "/runner-only/repo", request.CWD)
 	assert.Equal(t, new("central-model"), request.Options.Model)
 	assert.Equal(t, new(true), request.Options.NoTools)
-	assert.Equal(t, new(true), request.Options.NoExtensions)
+	assert.Nil(t, request.Options.NoExtensions)
 	assert.Equal(t, new(true), request.Options.NoSkills)
 	assert.Equal(t, new(true), request.Options.UseWeakModel)
 	snapshot := protocol.WorkspaceGitCommitSnapshot{Diff: "staged diff"}
@@ -63,11 +63,42 @@ func TestRemoteCommitRequestRestrictionAndPrompt(t *testing.T) {
 	assert.Contains(t, prompt, "<git_diff>\nstaged diff\n</git_diff>")
 }
 
+func TestRemoteCommitAllowsExtensions(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+		want *bool
+	}{
+		{name: "runner default"},
+		{
+			name: "explicitly enabled",
+			args: []string{"--no-extensions=false"},
+			want: new(false),
+		},
+		{
+			name: "explicitly disabled",
+			args: []string{"--no-extensions"},
+			want: new(true),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := remoteCommitCommandForTest(t, test.args...)
+			request, err := remoteCommitRequest(cmd)
+			require.NoError(t, err)
+			assert.Equal(t, test.want, request.Options.NoExtensions)
+			assert.Equal(t, new(true), request.Options.NoTools)
+			assert.Equal(t, new(true), request.Options.NoSkills)
+			assert.False(t, request.Options.ToolAllowed("bash"))
+			assert.False(t, request.Options.ToolAllowed("extension_tool"))
+		})
+	}
+}
+
 func TestRemoteCommitRejectsInvalidOptionsBeforeHTTP(t *testing.T) {
 	var calls atomic.Int32
 	daemon := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
 	defer daemon.Close()
-	for _, flag := range []string{"--save", "--save=false", "--no-tools=false", "--no-extensions=false", "--no-skills=false", "--max-tokens=0", "--sysprompt=/client/prompt", "--allowed-domains-file=/client/policy"} {
+	for _, flag := range []string{"--save", "--save=false", "--no-tools=false", "--no-skills=false", "--max-tokens=0", "--sysprompt=/client/prompt", "--allowed-domains-file=/client/policy"} {
 		cmd := remoteCommitCommandForTest(t, "--server="+daemon.URL, "--auth-token=client", "--no-confirm", flag)
 		require.Error(t, runRemoteCommit(cmd), flag)
 	}
@@ -131,7 +162,7 @@ func testRemoteCommitProcess(t *testing.T, truncated bool, failure string, color
 				assert.Contains(t, request.Message, "patch preview is truncated")
 			}
 			assert.Equal(t, new(true), request.Options.NoTools)
-			assert.Equal(t, new(true), request.Options.NoExtensions)
+			assert.Nil(t, request.Options.NoExtensions)
 			assert.Equal(t, new(true), request.Options.NoSkills)
 			assert.NotEmpty(t, request.ConversationID)
 			assert.NotEmpty(t, request.TurnID)
