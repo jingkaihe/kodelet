@@ -45,7 +45,7 @@ func TestBashTool_GenerateSchema_CustomTimeout(t *testing.T) {
 
 func TestBashTool_ShortStatesTimeoutUnit(t *testing.T) {
 	assert.Equal(t,
-		"Run a bash command and return its combined output and exit code; timeout is in seconds (10-120).",
+		"Run a non-interactive bash command; shell state such as cd and export does not persist; timeout is in seconds (10-120).",
 		(&BashTool{}).Short())
 	assert.Contains(t, NewBashToolWithTimeout(nil, false, 5*time.Minute).Short(), "in seconds (10-300).")
 }
@@ -58,7 +58,8 @@ func TestBashTool_Name(t *testing.T) {
 func TestBashTool_Description(t *testing.T) {
 	tool := NewBashTool(nil, false)
 	desc := tool.Description()
-	assert.Contains(t, desc, "Run a bash command in a persistent shell session.")
+	assert.Contains(t, desc, "Run a bash command non-interactively in the working directory.")
+	assert.Contains(t, desc, "does not persist between bash tool calls")
 	assert.Contains(t, desc, "# Input")
 	assert.Contains(t, desc, "timeout: required, 10-120")
 }
@@ -81,7 +82,7 @@ func TestBashTool_Description_BannedCommands(t *testing.T) {
 	assert.Contains(t, desc, "- view")
 	assert.Contains(t, desc, "- less")
 	assert.Contains(t, desc, "- more")
-	assert.Contains(t, desc, "- cd")
+	assert.NotContains(t, BannedCommands, "cd")
 
 	// Should NOT contain allowed commands section
 	assert.NotContains(t, desc, "Allowed command patterns:")
@@ -130,7 +131,8 @@ func TestBashTool_Description_ConsistentOutput(t *testing.T) {
 	desc := tool.Description()
 
 	// Basic structure should always be present
-	assert.Contains(t, desc, "Run a bash command in a persistent shell session.")
+	assert.Contains(t, desc, "Run a bash command non-interactively in the working directory.")
+	assert.Contains(t, desc, "does not persist between bash tool calls")
 	assert.Contains(t, desc, "# Restrictions")
 	assert.Contains(t, desc, "# Input")
 	assert.Contains(t, desc, "# Rules")
@@ -213,6 +215,31 @@ func TestBashTool_Execute_Error(t *testing.T) {
 	assert.Contains(t, result.GetError(), "Command exited with status 127")
 	assert.Contains(t, result.GetResult(), "nonexistentcommand: command not found")
 	assert.Equal(t, 127, result.StructuredData().Data.(map[string]any)["exitCode"])
+}
+
+func TestBashTool_Execute_DirectoryChangeDoesNotPersist(t *testing.T) {
+	cwd, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	other, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	state := NewBasicState(t.Context(), WithWorkingDirectory(cwd))
+	tool := NewBashTool(nil, false)
+
+	run := func(command string) string {
+		params, err := json.Marshal(BashInput{
+			Description: "Print working directory",
+			Command:     command,
+			Timeout:     10,
+		})
+		require.NoError(t, err)
+		require.NoError(t, tool.ValidateInput(state, string(params)))
+		result := tool.Execute(t.Context(), state, string(params))
+		require.False(t, result.IsError(), result.GetError())
+		return strings.TrimSpace(result.GetResult())
+	}
+
+	assert.Equal(t, other, run("cd '"+other+"' && pwd -P"))
+	assert.Equal(t, cwd, run("pwd -P"))
 }
 
 func TestBashTool_Execute_InvalidJSON(t *testing.T) {
@@ -629,6 +656,24 @@ func TestBashTool_ValidateInput(t *testing.T) {
 			input: BashInput{
 				Description: "test",
 				Command:     "echo hello && echo world; echo test || echo fail",
+				Timeout:     10,
+			},
+			expectError: false,
+		},
+		{
+			name: "cd is allowed by default",
+			input: BashInput{
+				Description: "test",
+				Command:     "cd /tmp && ls -la",
+				Timeout:     10,
+			},
+			expectError: false,
+		},
+		{
+			name: "cd inside a quoted string is allowed",
+			input: BashInput{
+				Description: "test",
+				Command:     "echo \"note; cd is mentioned\"",
 				Timeout:     10,
 			},
 			expectError: false,
@@ -1054,15 +1099,25 @@ func TestBashTool_ValidateInput_AllowedCommands(t *testing.T) {
 			errorMsg:    "command is banned: vim",
 		},
 		{
-			name:            "banned command denied even when in allowed list - cd",
+			name:            "cd allowed when it matches allowed list",
 			allowedCommands: []string{"cd *", "echo *", "pwd"},
 			input: BashInput{
 				Description: "change directory",
 				Command:     "cd /home",
 				Timeout:     10,
 			},
+			expectError: false,
+		},
+		{
+			name:            "cd rejected when not in allowed list",
+			allowedCommands: []string{"ls *", "pwd"},
+			input: BashInput{
+				Description: "change dir then list",
+				Command:     "cd /tmp && ls -la",
+				Timeout:     10,
+			},
 			expectError: true,
-			errorMsg:    "command is banned: cd",
+			errorMsg:    "command not in allowed list: cd /tmp",
 		},
 		{
 			name:            "banned command denied even when in allowed list - less",
@@ -1109,15 +1164,14 @@ func TestBashTool_ValidateInput_AllowedCommands(t *testing.T) {
 			errorMsg:    "command is banned: vim",
 		},
 		{
-			name:            "banned command mixed with allowed commands - first command banned",
+			name:            "cd mixed with allowed commands",
 			allowedCommands: []string{"ls *", "cd *", "pwd"},
 			input: BashInput{
 				Description: "change dir then list",
 				Command:     "cd /tmp && ls -la",
 				Timeout:     10,
 			},
-			expectError: true,
-			errorMsg:    "command is banned: cd",
+			expectError: false,
 		},
 		{
 			name:            "banned command mixed with allowed commands - second command banned",
@@ -1131,7 +1185,7 @@ func TestBashTool_ValidateInput_AllowedCommands(t *testing.T) {
 			errorMsg:    "command is banned: vim",
 		},
 		{
-			name:            "work around to banned command - with parenthesis", // this is OK by design
+			name:            "subshell with cd matches allowed pattern",
 			allowedCommands: []string{"(cd *", "ls *", "pwd"},
 			input: BashInput{
 				Description: "cd then ls",

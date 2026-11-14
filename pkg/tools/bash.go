@@ -37,10 +37,9 @@ var (
 		"view",
 		"less",
 		"more",
-		"cd",
 	}
 
-	descriptionTemplate = `Run a bash command in a persistent shell session.
+	descriptionTemplate = `Run a bash command non-interactively in the working directory.
 
 # Restrictions
 {{if .AllowedCommands}}
@@ -63,13 +62,13 @@ Banned commands:
 - Use parallel tool calling for independent commands.
 - Do not run interactive commands.
 - For multiple commands, use ';' or '&&' on one line.
-- Avoid direct cd; use absolute paths or subshell: (cd /path && cmd).
+- Shell state such as cd, export and variables does not persist between bash tool calls.
 {{if .EnableFSSearchTools}}- Prefer grep_tool/glob_tool over grep/find in bash.
 {{else}}- For filesystem search activities, use fd and rg via this tool only.
 {{end}}- Do not use heredoc; use file_write or apply_patch instead.
 
 Examples:
-- (cd /repo && mise run test)
+- cd /repo && mise run test
 `
 )
 
@@ -176,7 +175,7 @@ func (*BashTool) CodeModeDescription() string {
 // The timeout unit is spelled out because JavaScript callers default to milliseconds.
 func (b *BashTool) Short() string {
 	return fmt.Sprintf(
-		"Run a bash command and return its combined output and exit code; timeout is in seconds (%d-%d).",
+		"Run a non-interactive bash command; shell state such as cd and export does not persist; timeout is in seconds (%d-%d).",
 		bashMinTimeoutSeconds, b.maxTimeoutSeconds(),
 	)
 }

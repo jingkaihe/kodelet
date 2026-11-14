@@ -681,13 +681,13 @@ func TestRenderTranscriptRendersBashGroupAsShellTranscript(t *testing.T) {
 			tools: []toolCall{
 				{
 					name:   "bash",
-					input:  `{"command":"cd /repo && mise run build","description":"build"}`,
+					input:  `{"command":"vim Makefile","description":"edit build"}`,
 					done:   true,
 					failed: true,
 					structured: &tooltypes.StructuredToolResult{
 						ToolName: "bash",
 						Success:  false,
-						Error:    "command is banned: cd",
+						Error:    "command is banned: vim",
 					},
 				},
 				{
@@ -713,8 +713,8 @@ func TestRenderTranscriptRendersBashGroupAsShellTranscript(t *testing.T) {
 	plain := xansi.Strip(content)
 
 	assert.Contains(t, plain, "✗ Ran 2 commands")
-	assert.Contains(t, plain, "$ cd /repo && mise run build")
-	assert.Contains(t, plain, "command is banned: cd")
+	assert.Contains(t, plain, "$ vim Makefile")
+	assert.Contains(t, plain, "command is banned: vim")
 	assert.Contains(t, plain, "$ mise run build  ·  14s")
 	assert.Contains(t, plain, "build ok")
 	assert.NotContains(t, plain, "input: {")

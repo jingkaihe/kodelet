@@ -2111,7 +2111,7 @@ For detailed skill creation guide, see [docs/SKILLS.md](SKILLS.md).
 - No sensitive data is logged by default
 - All external connections use secure protocols
 - Bash command execution can be restricted using `allowed_commands` configuration (see [Security Configuration](#security-configuration))
-- Default banned commands list prevents execution of potentially dangerous commands like `vim`, `less`, `more`, and `cd`
+- Default banned commands list prevents execution of interactive commands like `vim`, `view`, `less`, and `more`
 
 ## Troubleshooting
 

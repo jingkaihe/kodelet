@@ -6,7 +6,8 @@ export const sampleToolInventory: ToolInventory = {
   builtinTools: [
     {
       name: 'bash',
-      description: 'Run a bash command and return its combined output and exit code.',
+      description:
+        'Run a non-interactive bash command; shell state such as cd and export does not persist.',
     },
     {
       name: 'browser',

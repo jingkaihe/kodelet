@@ -30,12 +30,12 @@ describe('AboutToolsPanel', () => {
   it('shows names without descriptions until a row is opened', async () => {
     const user = userEvent.setup();
     render(<AboutToolsPanel inventory={sampleToolInventory} />);
-    expect(screen.queryByText(/Run a bash command/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Run a non-interactive bash command/)).not.toBeInTheDocument();
 
     await user.click(row('bash'));
-    expect(screen.getByText(/Run a bash command/)).toBeVisible();
+    expect(screen.getByText(/Run a non-interactive bash command/)).toBeVisible();
     await user.click(row('bash'));
-    expect(screen.queryByText(/Run a bash command/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Run a non-interactive bash command/)).not.toBeInTheDocument();
   });
 
   it('shows a container path while it is unfolded and hides it when folded', async () => {
