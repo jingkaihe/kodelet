@@ -1,5 +1,19 @@
 # Kodelet
 
+## 0.8.29-beta
+
+Added Claude Fable 5.2 and Mythos 5.2 (`claude-fable-5-2`, `claude-mythos-5-2`) with `fable-52` and `mythos-52` sample aliases. They use always-on adaptive thinking, so `reasoning_effort: none` is rejected.
+
+Added `browser.max_sessions` (default 32, was 4) and `terminal.max_sessions` (default 256, was 8) runner settings. Deleting a saved conversation now also stops its terminal and browser sessions on its runner.
+
+Changed `file_write` to create missing parent directories.
+
+Fixed remote `kodelet commit` disabling extensions. Updated the Anthropic SDK and OpenTelemetry, resolving Dependabot vulnerabilities.
+
+**Breaking change:** Removed bash command restrictions: `allowed_commands`, `KODELET_ALLOWED_COMMANDS`, `--allowed-commands`, recipe `allowed_commands`, the SDK `allowedCommands` option, and the banned-command list (`cd` is now allowed). Existing `allowed_commands` config entries are ignored, not enforced.
+
+**Upgrade:** Remove these settings and use `allowed_tools` to limit what an agent can call.
+
 ## 0.8.28-beta
 
 Made daemon `profile:` and `profiles:` optional. Without a selection, new conversations use the first visible profile alphabetically, including extension-registered ones, so extension-only setups need no model configuration. See [profile selection](docs/MANUAL.md#default-profile-selection).
