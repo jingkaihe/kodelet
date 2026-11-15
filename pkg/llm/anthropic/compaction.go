@@ -44,6 +44,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	fitRequestImages(ctx, params.Messages)
 	return t.compactContext(ctx, params)
 }
 

@@ -699,6 +699,7 @@ func (t *Thread) processMessageExchange(
 	if err := t.processPendingSteer(ctx, &messageParams, handler); err != nil {
 		return "", false, errors.Wrap(err, "failed to process pending steer")
 	}
+	fitRequestImages(ctx, messageParams.Messages)
 	if opt.PromptCache {
 		applyAnthropicPromptCachePolicy(&messageParams)
 	}
