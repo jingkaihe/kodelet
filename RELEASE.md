@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.8.30-beta
+
+Fixed Anthropic requests failing as conversations accumulate images by automatically fitting images from messages and tool results to request-specific dimension and base64 size limits, including during context compaction.
+
+Improved image resizing to preserve compact paletted and grayscale formats, and retain GIF canvas size and transparency.
+
 ## 0.8.29-beta
 
 Added Claude Fable 5.2 and Mythos 5.2 (`claude-fable-5-2`, `claude-mythos-5-2`) with `fable-52` and `mythos-52` sample aliases. They use always-on adaptive thinking, so `reasoning_effort: none` is rejected.
