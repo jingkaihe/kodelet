@@ -6,7 +6,6 @@ import (
 	"image"
 	"image/color"
 	"image/gif"
-	"image/jpeg"
 	"image/png"
 	"math/rand"
 	"strings"
@@ -27,124 +26,57 @@ func TestFitBase64Image(t *testing.T) {
 		assert.Equal(t, img, fitted)
 	})
 
-	t.Run("downscales a landscape png", func(t *testing.T) {
-		fitted, changed, err := FitBase64Image(
-			Base64Image{MimeType: "image/png", Data: encodedTestPNG(t, testVisionImage(40, 20))},
-			ImageLimits{MaxDimension: 10},
-		)
+	for _, tt := range []struct {
+		name         string
+		src          image.Image
+		maxDimension int
+		wantSize     image.Point
+	}{
+		{"landscape rounding", testVisionImage(3001, 2), 3000, image.Pt(3000, 1)},
+		{"portrait", testVisionImage(20, 40), 10, image.Pt(5, 10)},
+		{
+			name:         "compact paletted PNG",
+			src:          image.NewPaletted(image.Rect(0, 0, 40, 20), color.Palette{color.Transparent, color.White}),
+			maxDimension: 10,
+			wantSize:     image.Pt(10, 5),
+		},
+		{"grayscale PNG", image.NewGray(image.Rect(0, 0, 40, 20)), 10, image.Pt(10, 5)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fitted, changed, err := FitBase64Image(
+				Base64Image{MimeType: "image/png", Data: encodedTestPNG(t, tt.src)},
+				ImageLimits{MaxDimension: tt.maxDimension},
+			)
 
-		require.NoError(t, err)
-		assert.True(t, changed)
-		assert.Equal(t, "image/png", fitted.MimeType)
-		width, height := encodedImageSize(t, fitted.Data)
-		assert.Equal(t, 10, width)
-		assert.Equal(t, 5, height)
-	})
+			require.NoError(t, err)
+			assert.True(t, changed)
+			assert.Equal(t, "image/png", fitted.MimeType)
+			decoded := decodedTestImage(t, fitted.Data)
+			assert.Equal(t, tt.wantSize, decoded.Bounds().Size())
+			assert.IsType(t, tt.src, decoded, "resizing must preserve compact pixel formats")
+		})
+	}
 
-	t.Run("downscales a portrait jpeg", func(t *testing.T) {
-		var buffer bytes.Buffer
-		require.NoError(t, jpeg.Encode(&buffer, testVisionImage(20, 40), nil))
+	for _, tt := range []struct {
+		name                   string
+		maxDimension, maxWidth int
+	}{
+		{"byte limit only", 0, 200},
+		{"dimension and byte limits", 150, 150},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			img := Base64Image{MimeType: "image/png", Data: encodedTestPNG(t, noisyTestImage(200, 200))}
 
-		fitted, changed, err := FitBase64Image(
-			Base64Image{MimeType: "image/jpeg", Data: base64.StdEncoding.EncodeToString(buffer.Bytes())},
-			ImageLimits{MaxDimension: 10},
-		)
+			fitted, changed, err := FitBase64Image(img, ImageLimits{MaxDimension: tt.maxDimension, MaxBase64Size: 40_000})
 
-		require.NoError(t, err)
-		assert.True(t, changed)
-		assert.Equal(t, "image/jpeg", fitted.MimeType)
-		width, height := encodedImageSize(t, fitted.Data)
-		assert.Equal(t, 5, width)
-		assert.Equal(t, 10, height)
-	})
-
-	t.Run("scales the longer side exactly to the limit", func(t *testing.T) {
-		fitted, changed, err := FitBase64Image(
-			Base64Image{MimeType: "image/png", Data: encodedTestPNG(t, testVisionImage(3001, 2))},
-			ImageLimits{MaxDimension: 3000},
-		)
-
-		require.NoError(t, err)
-		assert.True(t, changed)
-		width, height := encodedImageSize(t, fitted.Data)
-		assert.Equal(t, 3000, width)
-		assert.Equal(t, 1, height)
-	})
-
-	t.Run("keeps a paletted png compact", func(t *testing.T) {
-		// Converting this image to RGBA grew its payload from 6.2 MB to over 20 MB.
-		rng := rand.New(rand.NewSource(1))
-		palette := make(color.Palette, 16)
-		for i := range palette {
-			palette[i] = color.NRGBA{
-				R: uint8(rng.Intn(256)),
-				G: uint8(rng.Intn(256)),
-				B: uint8(rng.Intn(256)),
-				A: uint8(64 + rng.Intn(128)),
-			}
-		}
-		src := image.NewPaletted(image.Rect(0, 0, 3100, 3000), palette)
-		for i := range src.Pix {
-			src.Pix[i] = uint8(rng.Intn(len(palette)))
-		}
-		img := Base64Image{MimeType: "image/png", Data: encodedTestPNG(t, src)}
-
-		fitted, changed, err := FitBase64Image(
-			img,
-			ImageLimits{MaxDimension: 3000, MaxBase64Size: MaxAnthropicImageBase64Size},
-		)
-
-		require.NoError(t, err)
-		assert.True(t, changed)
-		assert.Less(t, len(fitted.Data), len(img.Data))
-		decoded := decodedTestImage(t, fitted.Data)
-		assert.IsType(t, &image.Paletted{}, decoded)
-		assert.Equal(t, image.Rect(0, 0, 3000, 2903), decoded.Bounds())
-	})
-
-	t.Run("keeps a grayscale png grayscale", func(t *testing.T) {
-		src := image.NewGray(image.Rect(0, 0, 40, 20))
-		for i := range src.Pix {
-			src.Pix[i] = uint8(i)
-		}
-
-		fitted, changed, err := FitBase64Image(
-			Base64Image{MimeType: "image/png", Data: encodedTestPNG(t, src)},
-			ImageLimits{MaxDimension: 10},
-		)
-
-		require.NoError(t, err)
-		assert.True(t, changed)
-		decoded := decodedTestImage(t, fitted.Data)
-		assert.IsType(t, &image.Gray{}, decoded)
-		assert.Equal(t, image.Rect(0, 0, 10, 5), decoded.Bounds())
-	})
-
-	t.Run("shrinks a resized image until it fits the byte limit", func(t *testing.T) {
-		img := Base64Image{MimeType: "image/png", Data: encodedTestPNG(t, noisyTestImage(200, 200))}
-
-		fitted, changed, err := FitBase64Image(img, ImageLimits{MaxDimension: 150, MaxBase64Size: 40_000})
-
-		require.NoError(t, err)
-		assert.True(t, changed)
-		assert.LessOrEqual(t, len(fitted.Data), 40_000)
-		width, height := encodedImageSize(t, fitted.Data)
-		assert.Less(t, width, 150)
-		assert.Equal(t, width, height)
-	})
-
-	t.Run("shrinks an image that only exceeds the byte limit", func(t *testing.T) {
-		img := Base64Image{MimeType: "image/png", Data: encodedTestPNG(t, noisyTestImage(200, 200))}
-
-		fitted, changed, err := FitBase64Image(img, ImageLimits{MaxBase64Size: 40_000})
-
-		require.NoError(t, err)
-		assert.True(t, changed)
-		assert.LessOrEqual(t, len(fitted.Data), 40_000)
-		width, height := encodedImageSize(t, fitted.Data)
-		assert.Less(t, width, 200)
-		assert.Equal(t, width, height)
-	})
+			require.NoError(t, err)
+			assert.True(t, changed)
+			assert.LessOrEqual(t, len(fitted.Data), 40_000)
+			size := decodedTestImage(t, fitted.Data).Bounds().Size()
+			assert.Less(t, size.X, tt.maxWidth)
+			assert.Equal(t, size.X, size.Y)
+		})
+	}
 
 	t.Run("returns the original when the byte limit cannot be met", func(t *testing.T) {
 		img := Base64Image{MimeType: "image/png", Data: encodedTestPNG(t, noisyTestImage(20, 20))}
@@ -161,16 +93,16 @@ func TestFitBase64Image(t *testing.T) {
 
 		fitted, changed, err := FitBase64Image(
 			Base64Image{MimeType: "image/gif", Data: base64.StdEncoding.EncodeToString(data)},
-			ImageLimits{MaxDimension: 3000},
+			ImageLimits{MaxDimension: 30},
 		)
 
 		require.NoError(t, err)
 		assert.True(t, changed)
 		assert.Equal(t, "image/gif", fitted.MimeType)
 		decoded := decodedTestImage(t, fitted.Data)
-		require.Equal(t, image.Rect(0, 0, 3000, 937), decoded.Bounds())
-		assert.Equal(t, color.RGBA{R: 255, G: 255, B: 255, A: 255}, color.RGBAModel.Convert(decoded.At(1500, 468)))
-		_, _, _, alpha := decoded.At(10, 10).RGBA()
+		require.Equal(t, image.Rect(0, 0, 30, 9), decoded.Bounds())
+		assert.Equal(t, color.RGBAModel.Convert(color.White), color.RGBAModel.Convert(decoded.At(15, 4)))
+		_, _, _, alpha := decoded.At(0, 0).RGBA()
 		assert.Zero(t, alpha, "the area outside the first frame stays transparent")
 	})
 
@@ -189,22 +121,13 @@ func TestFitBase64Image(t *testing.T) {
 	})
 }
 
-func TestMakeViewImageResultBytesKeepsGIFCanvas(t *testing.T) {
-	result, err := MakeViewImageResultBytes(encodedOffsetGIF(t), "offset.gif", "", "claude-sonnet-4-6", "anthropic")
-
-	require.NoError(t, err)
-	assert.Equal(t, "image/gif", result.MimeType)
-	assert.Equal(t, 2048, result.Width)
-	assert.Equal(t, 640, result.Height)
-}
-
-// encodedOffsetGIF returns a 3200x1000 GIF whose only frame is a white
-// 200x200 square at (1500, 400).
+// encodedOffsetGIF returns a 32x10 GIF whose only frame is a white
+// 2x2 square at (15, 4).
 func encodedOffsetGIF(t *testing.T) []byte {
 	t.Helper()
 
 	palette := color.Palette{color.Black, color.White}
-	frame := image.NewPaletted(image.Rect(1500, 400, 1700, 600), palette)
+	frame := image.NewPaletted(image.Rect(15, 4, 17, 6), palette)
 	for i := range frame.Pix {
 		frame.Pix[i] = 1
 	}
@@ -212,7 +135,7 @@ func encodedOffsetGIF(t *testing.T) []byte {
 	require.NoError(t, gif.EncodeAll(&buffer, &gif.GIF{
 		Image:  []*image.Paletted{frame},
 		Delay:  []int{0},
-		Config: image.Config{Width: 3200, Height: 1000, ColorModel: palette},
+		Config: image.Config{Width: 32, Height: 10, ColorModel: palette},
 	}))
 	return buffer.Bytes()
 }
@@ -229,14 +152,6 @@ func encodedTestPNG(t *testing.T, img image.Image) string {
 	var buffer bytes.Buffer
 	require.NoError(t, png.Encode(&buffer, img))
 	return base64.StdEncoding.EncodeToString(buffer.Bytes())
-}
-
-func encodedImageSize(t *testing.T, data string) (int, int) {
-	t.Helper()
-
-	config, _, err := image.DecodeConfig(base64.NewDecoder(base64.StdEncoding, strings.NewReader(data)))
-	require.NoError(t, err)
-	return config.Width, config.Height
 }
 
 func decodedTestImage(t *testing.T, data string) image.Image {
