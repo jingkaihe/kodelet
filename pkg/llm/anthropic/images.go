@@ -18,10 +18,11 @@ const (
 )
 
 // fitRequestImages downscales base64 images in place so that each one fits the
-// request's dimension limit. Every image in the request counts toward the
-// many-image threshold, including images resent from earlier turns and tool
-// results, so an image accepted early in a conversation can make later requests
-// fail. Updating the shared blocks keeps the fix in the saved conversation.
+// request's dimension limit and the per-image base64 size limit. Every image in
+// the request counts toward the many-image threshold, including images resent
+// from earlier turns and tool results, so an image accepted early in a
+// conversation can make later requests fail. Updating the shared blocks keeps
+// the fix in the saved conversation.
 func fitRequestImages(ctx context.Context, messages []anthropic.MessageParam) {
 	images := requestImages(messages)
 	maxDimension := anthropicMaxImageDimension
@@ -37,12 +38,15 @@ func fitRequestImages(ctx context.Context, messages []anthropic.MessageParam) {
 		fitted, changed, err := vision.FitBase64Image(vision.Base64Image{
 			MimeType: string(source.MediaType),
 			Data:     source.Data,
-		}, maxDimension)
+		}, vision.ImageLimits{
+			MaxDimension:  maxDimension,
+			MaxBase64Size: vision.MaxAnthropicImageBase64Size,
+		})
 		if err != nil {
 			logger.G(ctx).
 				WithError(err).
 				WithField("max_dimension", maxDimension).
-				Warn("failed to fit image within Anthropic dimension limit")
+				Warn("failed to fit image within Anthropic image limits")
 			continue
 		}
 		if !changed {
@@ -53,7 +57,7 @@ func fitRequestImages(ctx context.Context, messages []anthropic.MessageParam) {
 		logger.G(ctx).
 			WithField("image_count", len(images)).
 			WithField("max_dimension", maxDimension).
-			Info("downscaled image to fit Anthropic dimension limit")
+			Info("downscaled image to fit Anthropic image limits")
 	}
 }
 

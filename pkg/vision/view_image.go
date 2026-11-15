@@ -59,10 +59,11 @@ const (
 	viewImageOriginalMaxDimension = 6000
 	viewImageOriginalMaxPatches   = 10_000
 	viewImageMaxDownscaleAttempts = 7
-	// The direct Claude API limits each base64-encoded image to 10 MB.
-	// https://platform.claude.com/docs/en/build-with-claude/vision#request-limits
-	maxAnthropicImageBase64Size = 10_000_000
 )
+
+// MaxAnthropicImageBase64Size is the direct Claude API limit for each base64-encoded image.
+// https://platform.claude.com/docs/en/build-with-claude/vision#request-limits
+const MaxAnthropicImageBase64Size = 10_000_000
 
 // Result stores the processed image payload used across providers.
 type Result struct {
@@ -167,7 +168,7 @@ func MakeViewImageResultBytes(fileBytes []byte, label, detail, model, provider s
 		return nil, errors.New("image exceeds the decoded pixel limit")
 	}
 
-	img, format, err := image.Decode(bytes.NewReader(fileBytes))
+	img, format, err := decodeImage(fileBytes)
 	if err != nil {
 		guessedMime := mime.TypeByExtension(strings.ToLower(filepath.Ext(label)))
 		if guessedMime == "" {
@@ -205,39 +206,20 @@ func MakeViewImageResultBytes(fileBytes []byte, label, detail, model, provider s
 		outputHeight = maxInt(1, int(math.Floor(float64(originalHeight)*scale)))
 	}
 
-	isAnthropic := strings.EqualFold(strings.TrimSpace(provider), "anthropic")
+	maxBase64Size := 0
+	if strings.EqualFold(strings.TrimSpace(provider), "anthropic") {
+		maxBase64Size = MaxAnthropicImageBase64Size
+	}
 	needsResize := outputWidth != originalWidth || outputHeight != originalHeight
-	needsReencode := isAnthropic && base64.StdEncoding.EncodedLen(len(outputBytes)) > maxAnthropicImageBase64Size
-	if needsResize || needsReencode {
-		// Re-encode at the requested resolution first. This strips padding/metadata
-		// and converts to eight bits per channel without losing transparency.
-		resized := resizeImageNearest(img, outputWidth, outputHeight)
-		outputBytes, mimeType, err = encodeImageBytes(resized, mimeType)
+	if needsResize || !fitsBase64Size(base64.StdEncoding.EncodedLen(len(outputBytes)), maxBase64Size) {
+		// Re-encoding strips padding/metadata and converts to eight bits per
+		// channel without losing transparency.
+		output, err := encodeResized(img, outputWidth, outputHeight, mimeType, maxBase64Size)
 		if err != nil {
 			return nil, err
 		}
-	}
-
-	if isAnthropic {
-		for attempt := 0; ; attempt++ {
-			encodedSize := base64.StdEncoding.EncodedLen(len(outputBytes))
-			if encodedSize <= maxAnthropicImageBase64Size {
-				break
-			}
-			if attempt >= viewImageMaxDownscaleAttempts {
-				return nil, errors.Errorf("image could not fit within the %d byte base64 limit", maxAnthropicImageBase64Size)
-			}
-
-			// Reduce pixel area in proportion to the excess bytes, with encoding headroom.
-			scale := math.Min(0.9, math.Sqrt(float64(maxAnthropicImageBase64Size)/float64(encodedSize))*0.95)
-			outputWidth = maxInt(1, int(math.Floor(float64(outputWidth)*scale)))
-			outputHeight = maxInt(1, int(math.Floor(float64(outputHeight)*scale)))
-			resized := resizeImageNearest(img, outputWidth, outputHeight)
-			outputBytes, mimeType, err = encodeImageBytes(resized, mimeType)
-			if err != nil {
-				return nil, err
-			}
-		}
+		outputBytes, mimeType = output.data, output.mimeType
+		outputWidth, outputHeight = output.width, output.height
 	}
 
 	encoded := base64.StdEncoding.EncodeToString(outputBytes)
@@ -316,19 +298,56 @@ func encodeImageBytes(img image.Image, mimeType string) ([]byte, string, error) 
 	}
 }
 
+// resizeImageNearest keeps paletted and grayscale images in their compact
+// formats, since converting them to RGBA can enlarge the encoded image several times.
 func resizeImageNearest(src image.Image, width int, height int) image.Image {
-	dst := image.NewRGBA(image.Rect(0, 0, width, height))
 	srcBounds := src.Bounds()
-	srcWidth := srcBounds.Dx()
-	srcHeight := srcBounds.Dy()
+	srcXs := make([]int, width)
+	for x := range srcXs {
+		srcXs[x] = srcBounds.Min.X + (x*srcBounds.Dx())/width
+	}
+	srcY := func(y int) int {
+		return srcBounds.Min.Y + (y*srcBounds.Dy())/height
+	}
+	rect := image.Rect(0, 0, width, height)
+
+	switch src := src.(type) {
+	case *image.Paletted:
+		dst := image.NewPaletted(rect, src.Palette)
+		resizePixelBytesNearest(dst.Pix, dst.Stride, src.Pix, src.PixOffset, srcXs, height, srcY)
+		return dst
+	case *image.Gray:
+		dst := image.NewGray(rect)
+		resizePixelBytesNearest(dst.Pix, dst.Stride, src.Pix, src.PixOffset, srcXs, height, srcY)
+		return dst
+	}
+
+	dst := image.NewRGBA(rect)
 	for y := 0; y < height; y++ {
-		srcY := srcBounds.Min.Y + (y*srcHeight)/height
-		for x := 0; x < width; x++ {
-			srcX := srcBounds.Min.X + (x*srcWidth)/width
-			dst.Set(x, y, src.At(srcX, srcY))
+		sy := srcY(y)
+		for x, sx := range srcXs {
+			dst.Set(x, y, src.At(sx, sy))
 		}
 	}
 	return dst
+}
+
+func resizePixelBytesNearest(
+	dst []uint8,
+	dstStride int,
+	src []uint8,
+	srcOffset func(x, y int) int,
+	srcXs []int,
+	height int,
+	srcY func(int) int,
+) {
+	for y := 0; y < height; y++ {
+		sy := srcY(y)
+		row := dst[y*dstStride:]
+		for x, sx := range srcXs {
+			row[x] = src[srcOffset(sx, sy)]
+		}
+	}
 }
 
 func maxInt(a, b int) int {
