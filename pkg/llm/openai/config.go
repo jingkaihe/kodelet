@@ -79,7 +79,7 @@ func resolveAPIMode(config llmtypes.Config) llmtypes.OpenAIAPIMode {
 		return llmtypes.OpenAIAPIModeResponses
 	}
 
-	if requiresResponsesAPI(config.Model) || requiresResponsesAPI(config.WeakModel) {
+	if openaipreset.RequiresResponsesAPI(config.Model) || openaipreset.RequiresResponsesAPI(config.WeakModel) {
 		return llmtypes.OpenAIAPIModeResponses
 	}
 
@@ -96,13 +96,6 @@ func resolveAPIMode(config llmtypes.Config) llmtypes.OpenAIAPIMode {
 	}
 
 	return llmtypes.OpenAIAPIModeChatCompletions
-}
-
-func requiresResponsesAPI(model string) bool {
-	model = strings.ToLower(strings.TrimSpace(model))
-	return model == "gpt-6.2-astra" || model == "gpt-6.1-terra" || model == "gpt-6.1-sol" ||
-		model == "gpt-6-astra" || model == "gpt-6-sol" || model == "gpt-6-luna" ||
-		model == "gpt-5.6" || strings.HasPrefix(model, "gpt-5.6-")
 }
 
 func openAIReasoningEffortForChatRequest(effort string) string {

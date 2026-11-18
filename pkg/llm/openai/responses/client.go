@@ -68,7 +68,7 @@ func (t *Thread) applyCodexRestrictions(params *responses.ResponseNewParams) {
 }
 
 func applyPromptCacheOptions(params *responses.ResponseNewParams, config llmtypes.Config, model string) {
-	if resolvePlatformName(config) != defaultOpenAIPlatform || !supportsPromptCacheOptions(model) {
+	if resolvePlatformName(config) != defaultOpenAIPlatform || !openaipreset.SupportsPromptCacheOptions(model) {
 		return
 	}
 
@@ -78,19 +78,10 @@ func applyPromptCacheOptions(params *responses.ResponseNewParams, config llmtype
 	}
 }
 
-func supportsPromptCacheOptions(model string) bool {
-	model = strings.ToLower(strings.TrimSpace(model))
-	return model == "gpt-6.2-astra" || model == "gpt-6.1-terra" || model == "gpt-6.1-sol" ||
-		model == "gpt-6-astra" || model == "gpt-6-sol" || model == "gpt-6-luna" ||
-		model == "gpt-5.6" || strings.HasPrefix(model, "gpt-5.6-")
-}
-
 func openAIReasoningEffortForRequest(model string, effort shared.ReasoningEffort) shared.ReasoningEffort {
-	model = strings.ToLower(strings.TrimSpace(model))
 	normalized := shared.ReasoningEffort(strings.ToLower(strings.TrimSpace(string(effort))))
-	rejectsNone := model == "gpt-6.2-astra" || model == "gpt-6.1-terra" ||
-		model == "gpt-6.1-sol" || model == "gpt-6-astra"
-	if rejectsNone && (normalized == shared.ReasoningEffortNone || normalized == shared.ReasoningEffortMinimal) {
+	if openaipreset.RejectsNoneReasoningEffort(model) &&
+		(normalized == shared.ReasoningEffortNone || normalized == shared.ReasoningEffortMinimal) {
 		return shared.ReasoningEffortLow
 	}
 	return normalized
