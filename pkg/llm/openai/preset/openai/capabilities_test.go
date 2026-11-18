@@ -14,6 +14,7 @@ func TestResponsesModelCapabilities(t *testing.T) {
 		rejectsNone bool
 	}{
 		{name: "gpt-6.2 Astra", model: "gpt-6.2-astra", responses: true, rejectsNone: true},
+		{name: "gpt-6.2 Sol normalized", model: " GPT-6.2-SOL ", responses: true, rejectsNone: true},
 		{name: "gpt-6.1 Terra", model: "gpt-6.1-terra", responses: true, rejectsNone: true},
 		{name: "gpt-6.1 Sol", model: "gpt-6.1-sol", responses: true, rejectsNone: true},
 		{name: "gpt-6 Astra", model: "gpt-6-astra", responses: true, rejectsNone: true},

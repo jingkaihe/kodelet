@@ -15,6 +15,7 @@ import (
 var (
 	expectedOpenAIReasoningModels = []string{
 		"gpt-6.2-astra",
+		"gpt-6.2-sol",
 		"gpt-6.1-terra",
 		"gpt-6.1-sol",
 		"gpt-6-astra",
@@ -161,6 +162,7 @@ func TestLoadCodexPlatformDefaults(t *testing.T) {
 
 	expectedReasoning := []string{
 		"gpt-6.2-astra",
+		"gpt-6.2-sol",
 		"gpt-6.1-terra",
 		"gpt-6.1-sol",
 		"gpt-6-astra",
@@ -573,6 +575,16 @@ func TestResolveAPIMode(t *testing.T) {
 		{
 			name:     "gpt-6.2 Astra normalizes casing and whitespace",
 			config:   llmtypes.Config{Model: " GPT-6.2-ASTRA "},
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+		{
+			name:     "gpt-6.2 Sol defaults to responses",
+			config:   llmtypes.Config{Model: "gpt-6.2-sol"},
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+		{
+			name:     "gpt-6.2 Sol normalizes casing and whitespace",
+			config:   llmtypes.Config{Model: " GPT-6.2-SOL "},
 			expected: llmtypes.OpenAIAPIModeResponses,
 		},
 		{

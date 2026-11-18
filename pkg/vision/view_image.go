@@ -25,6 +25,7 @@ import (
 var modelsSupportingOriginalImageDetail = map[string]struct{}{
 	// OpenAI API or Codex platform models with an `original` image detail level.
 	"gpt-6.2-astra": {},
+	"gpt-6.2-sol":   {},
 	"gpt-6.1-terra": {},
 	"gpt-6-astra":   {},
 	"gpt-5.6-sol":   {},

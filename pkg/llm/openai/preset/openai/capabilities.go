@@ -15,6 +15,7 @@ type responsesModel struct {
 // lookupResponsesModel.
 var responsesModels = map[string]responsesModel{
 	"gpt-6.2-astra": {rejectsNoneReasoning: true},
+	"gpt-6.2-sol":   {rejectsNoneReasoning: true},
 	"gpt-6.1-terra": {rejectsNoneReasoning: true},
 	"gpt-6.1-sol":   {rejectsNoneReasoning: true},
 	"gpt-6-astra":   {rejectsNoneReasoning: true},

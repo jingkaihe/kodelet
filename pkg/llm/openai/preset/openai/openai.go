@@ -7,6 +7,7 @@ import "github.com/jingkaihe/kodelet/pkg/types/llm"
 var Models = llm.CustomModels{
 	Reasoning: []string{
 		"gpt-6.2-astra",
+		"gpt-6.2-sol",
 		"gpt-6.1-terra",
 		"gpt-6.1-sol",
 		"gpt-6-astra",
@@ -74,6 +75,19 @@ var Pricing = llm.CustomPricing{
 		LongContextCachedInput:     0.0000008, // $0.80 per million tokens
 		LongContextCacheWriteInput: 0.00002,   // $20.00 per million tokens
 		LongContextOutput:          0.00006,   // $60.00 per million tokens
+		LongContextThreshold:       272_000,
+		ContextWindow:              1_050_000,
+	},
+	// https://developers.openai.com/api/docs/models/gpt-6.2-sol
+	"gpt-6.2-sol": llm.ModelPricing{
+		Input:                      0.000002,  // $2.00 per million tokens
+		CachedInput:                0.0000001, // $0.10 per million tokens
+		CacheWriteInput:            0.0000025, // $2.50 per million tokens
+		Output:                     0.00001,   // $10.00 per million tokens
+		LongContextInput:           0.000004,  // $4.00 per million tokens
+		LongContextCachedInput:     0.0000002, // $0.20 per million tokens
+		LongContextCacheWriteInput: 0.000005,  // $5.00 per million tokens
+		LongContextOutput:          0.000015,  // $15.00 per million tokens
 		LongContextThreshold:       272_000,
 		ContextWindow:              1_050_000,
 	},
@@ -444,6 +458,20 @@ var PriorityPricing = llm.CustomPricing{
 		LongContextCachedInput:     0.0000016, // $1.60 per million tokens
 		LongContextCacheWriteInput: 0.00004,   // $40.00 per million tokens
 		LongContextOutput:          0.00012,   // $120.00 per million tokens
+		LongContextThreshold:       272_000,
+		ContextWindow:              1_050_000,
+	},
+	// GPT-6.2 Sol fast mode (sent as priority) costs 2x standard pricing.
+	// https://developers.openai.com/api/docs/models/gpt-6.2-sol
+	"gpt-6.2-sol": llm.ModelPricing{
+		Input:                      0.000004,  // $4.00 per million tokens
+		CachedInput:                0.0000002, // $0.20 per million tokens
+		CacheWriteInput:            0.000005,  // $5.00 per million tokens
+		Output:                     0.00002,   // $20.00 per million tokens
+		LongContextInput:           0.000008,  // $8.00 per million tokens
+		LongContextCachedInput:     0.0000004, // $0.40 per million tokens
+		LongContextCacheWriteInput: 0.00001,   // $10.00 per million tokens
+		LongContextOutput:          0.00003,   // $30.00 per million tokens
 		LongContextThreshold:       272_000,
 		ContextWindow:              1_050_000,
 	},
