@@ -61,7 +61,14 @@ jobs:
 
       - name: Install macOS audio dependencies
         if: runner.os == 'macOS'
-        run: brew install cmake pkgconf opus gstreamer
+        id: macos-audio-deps
+        shell: bash
+        run: |
+          brew install cmake pkgconf opus gstreamer
+          # Cargo caches link flags containing versioned Homebrew Cellar paths.
+          flags="$(pkg-config --cflags --libs gstreamer-app-1.0 gio-2.0 opus)"
+          digest="$(printf '%s' "$flags" | shasum -a 256)"
+          echo "cache-key=${digest%% *}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Rust toolchain
         run: |
@@ -72,6 +79,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: audio -> target
+          key: ${{ steps.macos-audio-deps.outputs.cache-key }}
 
       - name: Lint audio helper
         run: mise run audio-lint
