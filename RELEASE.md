@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.8.31-beta
+
+Added OpenAI GPT-6.2 Astra and Sol (`gpt-6.2-astra`, `gpt-6.2-sol`) on the OpenAI and Codex platforms, with standard and fast-tier pricing and automatic Responses API routing.
+
+Enabled `original` image detail for `view_image` on GPT-6.2 Astra and Sol, GPT-6.1 Sol, GPT-6 Sol, and GPT-6 Luna.
+
+Update Codex context windows: GPT-6.1 Sol is now 500K tokens and the GPT-5.6 family is now 272K tokens.
+
 ## 0.8.30-beta
 
 Fixed Anthropic requests failing as conversations accumulate images by automatically fitting images from messages and tool results to request-specific dimension and base64 size limits, including during context compaction.
