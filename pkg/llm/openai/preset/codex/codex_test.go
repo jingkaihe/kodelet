@@ -11,6 +11,7 @@ import (
 
 func TestModels(t *testing.T) {
 	assert.Equal(t, "gpt-6-astra", DefaultModel)
+	assert.Contains(t, Models.Reasoning, "gpt-6.2-astra")
 	assert.Contains(t, Models.Reasoning, "gpt-6.1-terra")
 	assert.Contains(t, Models.Reasoning, "gpt-6.1-sol")
 	assert.Contains(t, Models.Reasoning, "gpt-6-astra")
@@ -52,6 +53,14 @@ func TestPricing(t *testing.T) {
 	assert.Zero(t, gpt6Astra.CacheWriteInput)
 	assert.Equal(t, 0.00005, gpt6Astra.Output)
 	assert.Equal(t, 272_000, gpt6Astra.ContextWindow)
+
+	gpt62Astra := Pricing["gpt-6.2-astra"]
+	assert.Equal(t, 0.000008, gpt62Astra.Input)
+	assert.Equal(t, 0.0000004, gpt62Astra.CachedInput)
+	assert.Zero(t, gpt62Astra.CacheWriteInput)
+	assert.Equal(t, 0.00004, gpt62Astra.Output)
+	assert.Zero(t, gpt62Astra.LongContextThreshold)
+	assert.Equal(t, 272_000, gpt62Astra.ContextWindow)
 
 	gpt56Sol := Pricing["gpt-5.6-sol"]
 	assert.Equal(t, 0.000005, gpt56Sol.Input)
@@ -141,6 +150,14 @@ func TestPricingForServiceTier(t *testing.T) {
 	assert.Zero(t, priority["gpt-6-astra"].CacheWriteInput)
 	assert.Equal(t, 0.000125, priority["gpt-6-astra"].Output)
 	assert.Equal(t, 272_000, priority["gpt-6-astra"].ContextWindow)
+
+	require.Equal(t, priority["gpt-6.2-astra"], fast["gpt-6.2-astra"])
+	require.Equal(t, standard["gpt-6.2-astra"], flex["gpt-6.2-astra"])
+	assert.Equal(t, 0.000016, priority["gpt-6.2-astra"].Input)
+	assert.Equal(t, 0.0000008, priority["gpt-6.2-astra"].CachedInput)
+	assert.Zero(t, priority["gpt-6.2-astra"].CacheWriteInput)
+	assert.Equal(t, 0.00008, priority["gpt-6.2-astra"].Output)
+	assert.Equal(t, 272_000, priority["gpt-6.2-astra"].ContextWindow)
 
 	assert.Equal(t, 0.00001, priority["gpt-5.6-sol"].Input)
 	assert.Equal(t, 0.000001, priority["gpt-5.6-sol"].CachedInput)

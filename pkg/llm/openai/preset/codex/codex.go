@@ -9,6 +9,7 @@ import (
 // Models defines the Codex model categorization for reasoning and non-reasoning models.
 var Models = llm.CustomModels{
 	Reasoning: []string{
+		"gpt-6.2-astra",
 		"gpt-6.1-terra",
 		"gpt-6.1-sol",
 		"gpt-6-astra",
@@ -34,6 +35,12 @@ var Models = llm.CustomModels{
 // GPT-6.1 Terra and Sol, GPT-6 Sol, and Luna include long-context rates and no cache-write charges.
 // Older models retain their existing pricing and context bands.
 var Pricing = llm.CustomPricing{
+	"gpt-6.2-astra": llm.ModelPricing{
+		Input:         0.000008,  // $8.00 per million tokens
+		CachedInput:   0.0000004, // $0.40 per million tokens
+		Output:        0.00004,   // $40.00 per million tokens
+		ContextWindow: 272_000,
+	},
 	"gpt-6.1-terra": llm.ModelPricing{
 		Input:                  0.000001,   // $1.00 per million tokens
 		CachedInput:            0.00000005, // $0.05 per million tokens
@@ -160,6 +167,15 @@ var Pricing = llm.CustomPricing{
 // PriorityPricing defines the fast/priority-tier pricing information for Codex
 // models. The `fast` service tier is sent upstream as OpenAI `priority`.
 var PriorityPricing = llm.CustomPricing{
+	// GPT-6.2 Astra Fast costs 2x standard for included usage and credits,
+	// unlike the 2.5x included-usage rate for earlier GPT-6 models.
+	// https://learn.chatgpt.com/docs/pricing
+	"gpt-6.2-astra": llm.ModelPricing{
+		Input:         0.000016,  // $16.00 per million tokens
+		CachedInput:   0.0000008, // $0.80 per million tokens
+		Output:        0.00008,   // $80.00 per million tokens
+		ContextWindow: 272_000,
+	},
 	"gpt-6.1-terra": llm.ModelPricing{
 		Input:                  0.000002,  // $2.00 per million tokens
 		CachedInput:            0.0000001, // $0.10 per million tokens

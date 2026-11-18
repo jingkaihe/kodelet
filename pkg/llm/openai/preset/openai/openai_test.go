@@ -14,6 +14,7 @@ func TestModels(t *testing.T) {
 	require.NotNil(t, Models)
 
 	// Test reasoning models
+	assert.Contains(t, Models.Reasoning, "gpt-6.2-astra")
 	assert.Contains(t, Models.Reasoning, "gpt-6.1-terra")
 	assert.Contains(t, Models.Reasoning, "gpt-6.1-sol")
 	assert.Contains(t, Models.Reasoning, "gpt-6-astra")
@@ -260,6 +261,7 @@ func TestPricingForServiceTier(t *testing.T) {
 }
 
 func TestGPT6Pricing(t *testing.T) {
+	assert.NotContains(t, FlexPricing, "gpt-6.2-astra")
 	assert.NotContains(t, FlexPricing, "gpt-6.1-terra")
 	tests := []struct {
 		model    string
@@ -267,6 +269,33 @@ func TestGPT6Pricing(t *testing.T) {
 		priority llmtypes.ModelPricing
 		flex     llmtypes.ModelPricing
 	}{
+		{
+			model: "gpt-6.2-astra",
+			standard: llmtypes.ModelPricing{
+				Input:                      0.000008,
+				CachedInput:                0.0000004,
+				CacheWriteInput:            0.00001,
+				Output:                     0.00004,
+				LongContextInput:           0.000016,
+				LongContextCachedInput:     0.0000008,
+				LongContextCacheWriteInput: 0.00002,
+				LongContextOutput:          0.00006,
+				LongContextThreshold:       272_000,
+				ContextWindow:              1_050_000,
+			},
+			priority: llmtypes.ModelPricing{
+				Input:                      0.000016,
+				CachedInput:                0.0000008,
+				CacheWriteInput:            0.00002,
+				Output:                     0.00008,
+				LongContextInput:           0.000032,
+				LongContextCachedInput:     0.0000016,
+				LongContextCacheWriteInput: 0.00004,
+				LongContextOutput:          0.00012,
+				LongContextThreshold:       272_000,
+				ContextWindow:              1_050_000,
+			},
+		},
 		{
 			model: "gpt-6.1-terra",
 			standard: llmtypes.ModelPricing{

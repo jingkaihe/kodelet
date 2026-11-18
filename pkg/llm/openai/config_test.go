@@ -14,6 +14,7 @@ import (
 // Define expected OpenAI platform defaults once to avoid duplication
 var (
 	expectedOpenAIReasoningModels = []string{
+		"gpt-6.2-astra",
 		"gpt-6.1-terra",
 		"gpt-6.1-sol",
 		"gpt-6-astra",
@@ -159,6 +160,7 @@ func TestLoadCodexPlatformDefaults(t *testing.T) {
 	require.NotNil(t, pricing)
 
 	expectedReasoning := []string{
+		"gpt-6.2-astra",
 		"gpt-6.1-terra",
 		"gpt-6.1-sol",
 		"gpt-6-astra",
@@ -562,6 +564,16 @@ func TestResolveAPIMode(t *testing.T) {
 			name:     "default is chat completions",
 			config:   llmtypes.Config{},
 			expected: llmtypes.OpenAIAPIModeChatCompletions,
+		},
+		{
+			name:     "gpt-6.2 Astra defaults to responses",
+			config:   llmtypes.Config{Model: "gpt-6.2-astra"},
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+		{
+			name:     "gpt-6.2 Astra normalizes casing and whitespace",
+			config:   llmtypes.Config{Model: " GPT-6.2-ASTRA "},
+			expected: llmtypes.OpenAIAPIModeResponses,
 		},
 		{
 			name:     "gpt-6.1 Terra defaults to responses",

@@ -6,6 +6,7 @@ import "github.com/jingkaihe/kodelet/pkg/types/llm"
 // Models defines the OpenAI model categorization for reasoning and non-reasoning models
 var Models = llm.CustomModels{
 	Reasoning: []string{
+		"gpt-6.2-astra",
 		"gpt-6.1-terra",
 		"gpt-6.1-sol",
 		"gpt-6-astra",
@@ -63,6 +64,19 @@ var Models = llm.CustomModels{
 
 // Pricing defines the pricing information for all OpenAI models
 var Pricing = llm.CustomPricing{
+	// https://developers.openai.com/api/docs/models/gpt-6.2-astra
+	"gpt-6.2-astra": llm.ModelPricing{
+		Input:                      0.000008,  // $8.00 per million tokens
+		CachedInput:                0.0000004, // $0.40 per million tokens
+		CacheWriteInput:            0.00001,   // $10.00 per million tokens
+		Output:                     0.00004,   // $40.00 per million tokens
+		LongContextInput:           0.000016,  // $16.00 per million tokens
+		LongContextCachedInput:     0.0000008, // $0.80 per million tokens
+		LongContextCacheWriteInput: 0.00002,   // $20.00 per million tokens
+		LongContextOutput:          0.00006,   // $60.00 per million tokens
+		LongContextThreshold:       272_000,
+		ContextWindow:              1_050_000,
+	},
 	"gpt-6.1-terra": llm.ModelPricing{
 		Input:                      0.000001,   // $1.00 per million tokens
 		CachedInput:                0.00000005, // $0.05 per million tokens
@@ -419,6 +433,20 @@ var Pricing = llm.CustomPricing{
 // OpenAI's pricing table publishes a separate priority rate. Models absent from
 // this map use their standard pricing.
 var PriorityPricing = llm.CustomPricing{
+	// GPT-6.2 Astra fast mode (sent as priority) costs 2x standard pricing.
+	// https://developers.openai.com/api/docs/models/gpt-6.2-astra
+	"gpt-6.2-astra": llm.ModelPricing{
+		Input:                      0.000016,  // $16.00 per million tokens
+		CachedInput:                0.0000008, // $0.80 per million tokens
+		CacheWriteInput:            0.00002,   // $20.00 per million tokens
+		Output:                     0.00008,   // $80.00 per million tokens
+		LongContextInput:           0.000032,  // $32.00 per million tokens
+		LongContextCachedInput:     0.0000016, // $1.60 per million tokens
+		LongContextCacheWriteInput: 0.00004,   // $40.00 per million tokens
+		LongContextOutput:          0.00012,   // $120.00 per million tokens
+		LongContextThreshold:       272_000,
+		ContextWindow:              1_050_000,
+	},
 	// GPT-6.1 Terra fast mode (sent as priority) costs 2x standard pricing.
 	// https://developers.openai.com/api/docs/models/gpt-6.1-terra
 	"gpt-6.1-terra": llm.ModelPricing{

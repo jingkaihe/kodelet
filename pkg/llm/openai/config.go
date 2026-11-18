@@ -100,8 +100,8 @@ func resolveAPIMode(config llmtypes.Config) llmtypes.OpenAIAPIMode {
 
 func requiresResponsesAPI(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
-	return model == "gpt-6.1-terra" || model == "gpt-6.1-sol" || model == "gpt-6-astra" ||
-		model == "gpt-6-sol" || model == "gpt-6-luna" ||
+	return model == "gpt-6.2-astra" || model == "gpt-6.1-terra" || model == "gpt-6.1-sol" ||
+		model == "gpt-6-astra" || model == "gpt-6-sol" || model == "gpt-6-luna" ||
 		model == "gpt-5.6" || strings.HasPrefix(model, "gpt-5.6-")
 }
 

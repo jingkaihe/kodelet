@@ -1188,9 +1188,10 @@ Fable 5.2 and Mythos 5.2 use always-on adaptive thinking with `reasoning_effort:
 ### OpenAI
 
 Kodelet supports OpenAI models including:
+- `gpt-6.2-astra` (GPT-6.2 Astra, most capable model for complex coding and professional work)
 - `gpt-6.1-terra` (GPT-6.1 Terra, available on OpenAI and Codex)
 - `gpt-6.1-sol` (GPT-6.1 Sol, coding and agentic workflows)
-- `gpt-6-astra` (GPT-6 Astra, most capable model for complex agentic work)
+- `gpt-6-astra` (GPT-6 Astra, previous-generation Astra and the default model)
 - `gpt-6-sol` (GPT-6 Sol, coding and agentic workflows)
 - `gpt-6-luna` (GPT-6 Luna, efficient high-volume tasks)
 - `gpt-5.6-sol` (GPT-5.6 Sol)
