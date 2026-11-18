@@ -198,7 +198,7 @@ func TestLoadCodexPlatformDefaults(t *testing.T) {
 	assert.Equal(t, 0.0000005, gpt56SolPricing.CachedInput)
 	assert.Equal(t, 0.00000625, gpt56SolPricing.CacheWriteInput)
 	assert.Equal(t, 0.00003, gpt56SolPricing.Output)
-	assert.Equal(t, 372_000, gpt56SolPricing.ContextWindow)
+	assert.Equal(t, 272_000, gpt56SolPricing.ContextWindow)
 
 	gpt55Pricing, exists := pricing["gpt-5.5"]
 	require.True(t, exists)
@@ -274,7 +274,7 @@ func TestLoadCodexPlatformDefaultsFastTier(t *testing.T) {
 	assert.Equal(t, 0.000001, gpt56SolPricing.CachedInput)
 	assert.Equal(t, 0.0000125, gpt56SolPricing.CacheWriteInput)
 	assert.Equal(t, 0.00006, gpt56SolPricing.Output)
-	assert.Equal(t, 372_000, gpt56SolPricing.ContextWindow)
+	assert.Equal(t, 272_000, gpt56SolPricing.ContextWindow)
 }
 
 func TestBuildCopilotPlatformDefaults(t *testing.T) {

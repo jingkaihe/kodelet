@@ -70,7 +70,7 @@ var Pricing = llm.CustomPricing{
 		LongContextCachedInput: 0.0000002, // $0.20 per million tokens
 		LongContextOutput:      0.000015,  // $15.00 per million tokens
 		LongContextThreshold:   272_000,
-		ContextWindow:          272_000,
+		ContextWindow:          500_000,
 	},
 	"gpt-6-sol": llm.ModelPricing{
 		Input:                  0.000002,  // $2.00 per million tokens
@@ -103,21 +103,21 @@ var Pricing = llm.CustomPricing{
 		CachedInput:     0.0000005,  // $0.50 per million tokens
 		CacheWriteInput: 0.00000625, // $6.25 per million tokens
 		Output:          0.00003,    // $30.00 per million tokens
-		ContextWindow:   372_000,
+		ContextWindow:   272_000,
 	},
 	"gpt-5.6-terra": llm.ModelPricing{
 		Input:           0.0000025,   // $2.50 per million tokens
 		CachedInput:     0.00000025,  // $0.25 per million tokens
 		CacheWriteInput: 0.000003125, // $3.125 per million tokens
 		Output:          0.000015,    // $15.00 per million tokens
-		ContextWindow:   372_000,
+		ContextWindow:   272_000,
 	},
 	"gpt-5.6-luna": llm.ModelPricing{
 		Input:           0.000001,   // $1.00 per million tokens
 		CachedInput:     0.0000001,  // $0.10 per million tokens
 		CacheWriteInput: 0.00000125, // $1.25 per million tokens
 		Output:          0.000006,   // $6.00 per million tokens
-		ContextWindow:   372_000,
+		ContextWindow:   272_000,
 	},
 	"gpt-5.5": llm.ModelPricing{
 		Input:         0.000005,  // $5.00 per million tokens
@@ -215,7 +215,7 @@ var PriorityPricing = llm.CustomPricing{
 		LongContextCachedInput: 0.0000004, // $0.40 per million tokens
 		LongContextOutput:      0.00003,   // $30.00 per million tokens
 		LongContextThreshold:   272_000,
-		ContextWindow:          272_000,
+		ContextWindow:          500_000,
 	},
 	"gpt-6-sol": llm.ModelPricing{
 		Input:                  0.000005,  // $5.00 per million tokens
@@ -248,21 +248,21 @@ var PriorityPricing = llm.CustomPricing{
 		CachedInput:     0.000001,  // $1.00 per million tokens
 		CacheWriteInput: 0.0000125, // $12.50 per million tokens
 		Output:          0.00006,   // $60.00 per million tokens
-		ContextWindow:   372_000,
+		ContextWindow:   272_000,
 	},
 	"gpt-5.6-terra": llm.ModelPricing{
 		Input:           0.000005,   // $5.00 per million tokens
 		CachedInput:     0.0000005,  // $0.50 per million tokens
 		CacheWriteInput: 0.00000625, // $6.25 per million tokens
 		Output:          0.00003,    // $30.00 per million tokens
-		ContextWindow:   372_000,
+		ContextWindow:   272_000,
 	},
 	"gpt-5.6-luna": llm.ModelPricing{
 		Input:           0.000002,  // $2.00 per million tokens
 		CachedInput:     0.0000002, // $0.20 per million tokens
 		CacheWriteInput: 0.0000025, // $2.50 per million tokens
 		Output:          0.000012,  // $12.00 per million tokens
-		ContextWindow:   372_000,
+		ContextWindow:   272_000,
 	},
 	"gpt-5.5": llm.ModelPricing{
 		Input:         0.0000125,  // $12.50 per million tokens
