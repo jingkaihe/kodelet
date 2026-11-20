@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.8.32-beta
+
+Improved GPT-6.2 prompt caching on the OpenAI and Codex platforms by sending the system prompt as the leading developer message instead of top-level `instructions`, which the Responses API now appends after the input, outside the cached prefix, billing the system prompt as uncached input on every request. Other Responses API platforms still use `instructions`.
+
+Fixed Responses API remote compaction to use the same processed system prompt as the next turn, including extension `agent.init` changes, so compaction requests share its cached prefix. Compaction also no longer counts the system prompt twice when trimming input to the context window.
+
 ## 0.8.31-beta
 
 Added OpenAI GPT-6.2 Astra and Sol (`gpt-6.2-astra`, `gpt-6.2-sol`) on the OpenAI and Codex platforms, with standard and fast-tier pricing and automatic Responses API routing.
