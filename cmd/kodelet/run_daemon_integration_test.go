@@ -1716,9 +1716,9 @@ func daemonSearchResponses(
 ) {
 	t.Helper()
 	var request struct {
-		Model        string `json:"model"`
-		Stream       bool   `json:"stream"`
-		Instructions string `json:"instructions"`
+		Model        string          `json:"model"`
+		Stream       bool            `json:"stream"`
+		Instructions json.RawMessage `json:"instructions"`
 		Reasoning    struct {
 			Effort string `json:"effort"`
 		} `json:"reasoning"`
@@ -1727,6 +1727,7 @@ func daemonSearchResponses(
 		} `json:"tools"`
 		Input []struct {
 			Type    string          `json:"type"`
+			Role    string          `json:"role"`
 			Content json.RawMessage `json:"content"`
 			CallID  string          `json:"call_id"`
 			Output  json.RawMessage `json:"output"`
@@ -1739,7 +1740,12 @@ func daemonSearchResponses(
 	assert.Equal(t, "gpt-5.6-luna", request.Model)
 	assert.Equal(t, "none", request.Reasoning.Effort)
 	assert.True(t, request.Stream)
-	assert.Contains(t, request.Instructions, daemonACPSearchPrompt)
+	assert.Empty(t, request.Instructions, "OpenAI Responses must omit top-level instructions")
+	if assert.NotEmpty(t, request.Input, "the system prompt must be the first input message") {
+		prompt := request.Input[0]
+		assert.Equal(t, "developer", prompt.Role)
+		assert.Contains(t, string(prompt.Content), daemonACPSearchPrompt)
+	}
 	var names []string
 	for _, tool := range request.Tools {
 		names = append(names, tool.Name)
