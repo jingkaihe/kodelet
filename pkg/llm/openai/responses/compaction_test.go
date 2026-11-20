@@ -952,6 +952,66 @@ func TestApproximateResponseInputItemTokensDiscountsInlineImagePayload(t *testin
 	}
 }
 
+func TestBuildRemoteCompactionV2ParamsCountsSystemPromptOnce(t *testing.T) {
+	systemPrompt := strings.Repeat("system prompt ", 400)
+	history := []openairesponses.ResponseInputItemUnionParam{
+		openairesponses.ResponseInputItemParamOfMessage("run it", openairesponses.EasyInputMessageRoleUser),
+		responseFunctionCallItem("call-1", "shell"),
+		responseFunctionCallOutputItem("call-1", strings.Repeat("output ", 400)),
+	}
+	functionOutput := func(params openairesponses.ResponseNewParams) string {
+		for _, item := range params.Input.OfInputItemList {
+			if item.OfFunctionCallOutput != nil {
+				return item.OfFunctionCallOutput.Output.OfString.Value
+			}
+		}
+		t.Fatal("compaction request has no function output")
+		return ""
+	}
+
+	for _, platform := range []string{"openai", "copilot"} {
+		t.Run(platform, func(t *testing.T) {
+			build := func(contextWindow int) openairesponses.ResponseNewParams {
+				t.Helper()
+				config := llmtypes.Config{
+					Provider: "openai",
+					Model:    "test-model",
+					OpenAI: &llmtypes.OpenAIConfig{
+						Platform: platform,
+						Pricing:  map[string]llmtypes.ModelPricing{"test-model": {ContextWindow: contextWindow}},
+					},
+				}
+				thread := &Thread{Thread: base.NewThread(config, "conv-test")}
+				thread.SetState(tools.NewBasicState(t.Context()))
+				params, err := thread.buildRemoteCompactionV2Params(history, systemPrompt, codexResponsesRequestMetadata{})
+				require.NoError(t, err)
+				return params
+			}
+
+			// The prompt is a leading input item on OpenAI and top-level
+			// instructions on Copilot; either way it is counted exactly once.
+			promptTokens := approximateResponseInputItemTokens(developerInputMessage(systemPrompt))
+			if platform == "copilot" {
+				promptTokens = approximateTextTokens(systemPrompt)
+			}
+			singleCount := promptTokens
+			for _, item := range history {
+				singleCount += approximateResponseInputItemTokens(item)
+			}
+
+			atLimit := build(singleCount)
+			if platform == "copilot" {
+				assert.Equal(t, systemPrompt, atLimit.Instructions.Value)
+			} else {
+				sentPrompt, _ := splitRequestSystemPrompt(t, atLimit)
+				assert.Equal(t, systemPrompt, sentPrompt)
+			}
+			assert.Equal(t, strings.Repeat("output ", 400), functionOutput(atLimit), "a request that fits must not be trimmed")
+			assert.Equal(t, remoteCompactionV2TruncatedOutputMessage, functionOutput(build(singleCount-1)))
+		})
+	}
+}
+
 func TestTrimRemoteCompactionV2InputDoesNotRewriteForInlineImageEncodingSize(t *testing.T) {
 	input := []openairesponses.ResponseInputItemUnionParam{{
 		OfFunctionCallOutput: &openairesponses.ResponseInputItemFunctionCallOutputParam{

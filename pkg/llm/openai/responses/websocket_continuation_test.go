@@ -203,10 +203,70 @@ func TestProcessMessageExchangeUsesIncrementalWebSocketContinuation(t *testing.T
 
 	require.Len(t, requests, 2)
 	assert.False(t, requests[0].PreviousResponseID.Valid())
+	systemPrompt, firstHistory := splitRequestSystemPrompt(t, requests[0])
+	assert.Equal(t, "system", systemPrompt)
+	require.Len(t, firstHistory, 1)
 	require.True(t, requests[1].PreviousResponseID.Valid())
 	assert.Equal(t, "resp_1", requests[1].PreviousResponseID.Value)
 	require.Len(t, requests[1].Input.OfInputItemList, 1)
 	assert.True(t, responsesInputItemEqual(functionOutput, requests[1].Input.OfInputItemList[0]))
+}
+
+func TestProcessMessageExchangeResendsFullInputWhenSystemPromptChanges(t *testing.T) {
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-6.2-sol",
+		Retry:    llmtypes.RetryConfig{Attempts: 1},
+		OpenAI:   &llmtypes.OpenAIConfig{Platform: "openai"},
+	}
+	thread := &Thread{
+		Thread:       base.NewThread(config, "conv-test"),
+		useWebSocket: true,
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			responseMessageItem(openairesponses.EasyInputMessageRoleUser, "hello"),
+		},
+		storedItems: []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}},
+	}
+	thread.SetState(tools.NewBasicState(context.Background()))
+
+	var requests []openairesponses.ResponseNewParams
+	thread.webSocket = &fakeResponsesWebSocketStreamer{
+		generation: 9,
+		streamFunc: func(_ context.Context, params openairesponses.ResponseNewParams, _ []string, _ auth.HTTPAuthorizer) (*ssestream.Stream[openairesponses.ResponseStreamEventUnion], error) {
+			requests = append(requests, params)
+			return ssestream.NewStream[openairesponses.ResponseStreamEventUnion](emptyResponsesStreamDecoder{}, nil), nil
+		},
+	}
+	assistant := responseMessageItem(openairesponses.EasyInputMessageRoleAssistant, "hi")
+	thread.processStreamFunc = func(context.Context, *ssestream.Stream[openairesponses.ResponseStreamEventUnion], llmtypes.MessageHandler, string, llmtypes.MessageOpt) (processStreamResult, error) {
+		if len(requests) == 1 {
+			thread.inputItems = append(thread.inputItems, assistant)
+			return processStreamResult{
+				responseCompleted: true,
+				responseID:        "resp_1",
+				serverKnownItems:  []openairesponses.ResponseInputItemUnionParam{assistant},
+			}, nil
+		}
+		return processStreamResult{responseCompleted: true, responseID: "resp_2"}, nil
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-6.2-sol", 256, "old system", llmtypes.MessageOpt{NoToolUse: true})
+	require.NoError(t, err)
+	thread.AddUserMessage(context.Background(), "again")
+	_, _, _, err = thread.processMessageExchange(context.Background(), handler, "gpt-6.2-sol", 256, "new system", llmtypes.MessageOpt{NoToolUse: true})
+	require.NoError(t, err)
+
+	require.Len(t, requests, 2)
+	firstPrompt, _ := splitRequestSystemPrompt(t, requests[0])
+	assert.Equal(t, "old system", firstPrompt)
+	assert.False(t, requests[1].PreviousResponseID.Valid(), "a changed system prompt must not continue the previous response")
+	secondPrompt, history := splitRequestSystemPrompt(t, requests[1])
+	assert.Equal(t, "new system", secondPrompt)
+	require.Len(t, history, 3)
+	assert.Equal(t, "hello", extractInputItemText(history[0]))
+	assert.Equal(t, "hi", extractInputItemText(history[1]))
+	assert.Equal(t, "again", extractInputItemText(history[2]))
 }
 
 func TestProcessMessageExchangeRetriesMissingContinuationWithFullInput(t *testing.T) {
