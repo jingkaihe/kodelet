@@ -617,7 +617,7 @@ OUTER:
 			previousMarkerID := t.CompactionMarkerID()
 			beforeCurrentUser := !incomingUserAppended
 			t.TryAutoCompact(ctx, t.CompactRatioOrDefault(opt.CompactRatio), func(ctx context.Context) error {
-				return t.compactContext(ctx, autoCompactionMetadata)
+				return t.compactContext(ctx, systemPrompt, autoCompactionMetadata)
 			})
 			if !incomingUserAppended {
 				t.AddUserMessage(llmtypes.WithUserMessageSource(ctx, opt.UserMessageSource), message, opt.Images...)

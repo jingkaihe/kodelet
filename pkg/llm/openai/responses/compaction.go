@@ -117,10 +117,34 @@ func (t *Thread) compactContextWithSummary(ctx context.Context) error {
 func (t *Thread) CompactContext(ctx context.Context) error {
 	t.operationMu.Lock()
 	defer t.operationMu.Unlock()
-	return t.compactContext(withCodexTurnID(ctx), remoteCompactionV2ManualMetadata)
+	if len(t.inputItemsSnapshot()) == 0 {
+		return nil
+	}
+	systemPrompt, err := t.standaloneCompactionSystemPrompt(ctx)
+	if err != nil {
+		return err
+	}
+	return t.compactContext(withCodexTurnID(ctx), systemPrompt, remoteCompactionV2ManualMetadata)
 }
 
-func (t *Thread) compactContext(ctx context.Context, compactionMetadata codexCompactionMetadata) error {
+// standaloneCompactionSystemPrompt renders the system prompt for compaction
+// outside a turn. agent.init belongs to an active run: between runs, dispatching
+// it would run extension handlers and reset the last run's allowed-tool state.
+func (t *Thread) standaloneCompactionSystemPrompt(ctx context.Context) (string, error) {
+	systemPrompt := sysprompt.SystemPrompt(t.Config.Model, t.Config, base.EnvironmentContexts(t))
+	if !base.EnvironmentIsOpen(t) {
+		return systemPrompt, nil
+	}
+	systemPrompt, err := base.ProcessSystemPrompt(ctx, t, systemPrompt)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to process agent initialization")
+	}
+	return systemPrompt, nil
+}
+
+// compactContext compacts with the system prompt the next turn sends, so the
+// compaction request shares its cached prefix.
+func (t *Thread) compactContext(ctx context.Context, systemPrompt string, compactionMetadata codexCompactionMetadata) error {
 	if len(t.inputItemsSnapshot()) == 0 {
 		return nil
 	}
@@ -130,7 +154,7 @@ func (t *Thread) compactContext(ctx context.Context, compactionMetadata codexCom
 		compactWithSummary = t.compactContextWithSummary
 	}
 	if supportsRemoteCompactionV2(t.Config) {
-		if err := t.compactContextRemoteV2(ctx, compactionMetadata); err != nil {
+		if err := t.compactContextRemoteV2(ctx, systemPrompt, compactionMetadata); err != nil {
 			if errors.Is(err, errRemoteCompactionHistoryChanged) {
 				return err
 			}
@@ -198,7 +222,11 @@ type remoteCompactionV2StreamFactory func(
 	responses.ResponseNewParams,
 ) (*ssestream.Stream[responses.ResponseStreamEventUnion], error)
 
-func (t *Thread) compactContextRemoteV2(ctx context.Context, compactionMetadata ...codexCompactionMetadata) error {
+func (t *Thread) compactContextRemoteV2(
+	ctx context.Context,
+	systemPrompt string,
+	compactionMetadata ...codexCompactionMetadata,
+) error {
 	metadata := remoteCompactionV2ManualMetadata
 	if len(compactionMetadata) > 0 {
 		metadata = compactionMetadata[0]
@@ -213,7 +241,6 @@ func (t *Thread) compactContextRemoteV2(ctx context.Context, compactionMetadata 
 	if err != nil {
 		return err
 	}
-	systemPrompt := sysprompt.SystemPrompt(t.Config.Model, t.Config, base.EnvironmentContexts(t))
 	params, err := t.buildRemoteCompactionV2Params(snapshot.inputItems, systemPrompt, requestMetadata)
 	if err != nil {
 		return err

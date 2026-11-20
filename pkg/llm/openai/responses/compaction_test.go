@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/avast/retry-go/v4"
+	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -244,6 +245,73 @@ func remoteCompactionV2TerminalEvent(
 		"type":     eventType,
 		"response": response,
 	}
+}
+
+// agentInitPromptEnvironment rewrites the system prompt in agent.init, as an
+// extension handler can.
+type agentInitPromptEnvironment struct {
+	reloadCheckpointEnvironment
+}
+
+func (*agentInitPromptEnvironment) ProcessAgentInit(
+	_ context.Context,
+	prompt string,
+	_ []string,
+) (agentenv.AgentInitDecision, error) {
+	return agentenv.AgentInitDecision{SystemPrompt: prompt + "\n\nExtension instructions."}, nil
+}
+
+func TestAutoCompactionReusesTurnSystemPrompt(t *testing.T) {
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-6.2-sol",
+		Retry:    llmtypes.RetryConfig{Attempts: 1},
+		OpenAI:   &llmtypes.OpenAIConfig{Platform: "openai"},
+	}
+	thread := &Thread{
+		Thread: base.NewThread(config, "conv-auto-prompt"),
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			openairesponses.ResponseInputItemParamOfMessage("existing user", openairesponses.EasyInputMessageRoleUser),
+		},
+		storedItems: []StoredInputItem{{Type: "message", Role: "user", Content: "existing user"}},
+	}
+	thread.SetState(tools.NewBasicState(t.Context()))
+	thread.SetEnvironment(&agentInitPromptEnvironment{reloadCheckpointEnvironment{manifest: agentenv.Manifest{
+		Config: &agentenv.EnvironmentConfig{SystemPromptContent: "base prompt"},
+	}}})
+	thread.Usage.CurrentContextWindow = 90
+	thread.Usage.MaxContextWindow = 100
+
+	var compactParams openairesponses.ResponseNewParams
+	thread.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+		compactParams = params
+		return remoteCompactionV2Stream(t, "auto-encrypted")
+	}
+	var turnSystemPrompt string
+	thread.processMessageExchangeFunc = func(
+		_ context.Context,
+		_ llmtypes.MessageHandler,
+		_ string,
+		_ int,
+		systemPrompt string,
+		_ llmtypes.MessageOpt,
+	) (string, bool, bool, error) {
+		turnSystemPrompt = systemPrompt
+		return "done", false, true, nil
+	}
+
+	_, err := thread.SendMessage(
+		t.Context(),
+		"incoming user",
+		&llmtypes.StringCollectorHandler{Silent: true},
+		llmtypes.MessageOpt{NoToolUse: true, MaxTurns: 1},
+	)
+	require.NoError(t, err)
+
+	require.NotEmpty(t, compactParams.Input.OfInputItemList, "auto-compaction must run")
+	compactionPrompt, _ := splitRequestSystemPrompt(t, compactParams)
+	assert.Contains(t, turnSystemPrompt, "Extension instructions.")
+	assert.Equal(t, turnSystemPrompt, compactionPrompt, "compaction must share the turn's cached system prompt prefix")
 }
 
 func TestCompactContextUsesRemoteCompactionV2(t *testing.T) {
@@ -781,7 +849,7 @@ func TestCompactContextRemoteV2AccumulatesIncompleteRetryUsage(t *testing.T) {
 		})
 	}
 
-	err := thread.compactContextRemoteV2(context.Background())
+	err := thread.compactContextRemoteV2(context.Background(), "system")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "response incomplete")
 	assert.Equal(t, 2, attempts)
@@ -1230,7 +1298,7 @@ func TestCompactContextRemoteV2PreservesWebSocketUsageAcrossHTTPSFallback(t *tes
 				return responseStreamFromMaps(t, events)
 			}
 
-			err := thread.compactContextRemoteV2(context.Background())
+			err := thread.compactContextRemoteV2(context.Background(), "system")
 			if httpsSucceeds {
 				require.NoError(t, err)
 			} else {
@@ -1294,7 +1362,7 @@ func TestCompactContextRemoteV2NonRetryableWebSocketErrorDoesNotDisableWebSocket
 		return nil
 	}
 
-	err := thread.compactContextRemoteV2(context.Background())
+	err := thread.compactContextRemoteV2(context.Background(), "system")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "expected exactly one compaction output item")
 	assert.Equal(t, 1, webSocketAttempts)
@@ -1425,7 +1493,7 @@ func TestCompactContextRemoteV2HTTPRetryOwnership(t *testing.T) {
 			}
 			thread.newStreamingFunc = client.Responses.NewStreaming
 
-			require.Error(t, thread.compactContextRemoteV2(t.Context()))
+			require.Error(t, thread.compactContextRemoteV2(t.Context(), "system"))
 			assert.Equal(t, tt.wantRequests, requests.Load())
 		})
 	}
@@ -1460,7 +1528,7 @@ func TestCompactContextRemoteV2RejectsStaleHistorySnapshot(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- thread.compactContextRemoteV2(context.Background())
+		errCh <- thread.compactContextRemoteV2(context.Background(), "system")
 	}()
 	<-requestStarted
 	thread.AddUserMessage(context.Background(), "arrived while compacting")
