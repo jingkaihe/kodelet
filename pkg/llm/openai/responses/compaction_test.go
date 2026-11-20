@@ -145,7 +145,7 @@ func TestRepeatedCompactionArchivesOnlyNewChat(t *testing.T) {
 				assert.Empty(t, history.Segments[0].Marker.Summary)
 				assert.Empty(t, history.Segments[1].Marker.Summary)
 				require.Len(t, requests, 2)
-				secondInput := requests[1].Input.OfInputItemList
+				_, secondInput := splitRequestSystemPrompt(t, requests[1])
 				require.Len(t, secondInput, len(inputBeforeSecond)+1)
 				assert.JSONEq(t, string(mustJSON(t, inputBeforeSecond)), string(mustJSON(t, secondInput[:len(inputBeforeSecond)])))
 				require.Len(t, thread.storedItems, 3)
@@ -274,10 +274,10 @@ func TestCompactContextUsesRemoteCompactionV2(t *testing.T) {
 
 	require.NoError(t, thread.CompactContext(context.Background()))
 
-	require.True(t, captured.Instructions.Valid())
-	assert.NotEmpty(t, captured.Instructions.Value)
-	require.Len(t, captured.Input.OfInputItemList, 2)
-	assert.NotNil(t, captured.Input.OfInputItemList[1].OfCompactionTrigger)
+	systemPrompt, history := splitRequestSystemPrompt(t, captured)
+	assert.NotEmpty(t, systemPrompt)
+	require.Len(t, history, 2)
+	assert.NotNil(t, history[1].OfCompactionTrigger)
 	require.True(t, captured.ParallelToolCalls.Valid())
 	assert.Equal(t, len(captured.Tools) > 0, captured.ParallelToolCalls.Value)
 	require.True(t, captured.PromptCacheKey.Valid())
@@ -497,8 +497,9 @@ func TestCompactContextAccountsCacheWriteUsage(t *testing.T) {
 	assert.InDelta(t, 20*0.0000005, thread.Usage.CacheReadCost, 1e-12)
 	assert.InDelta(t, 30*0.00000625, thread.Usage.CacheCreationCost, 1e-12)
 	assert.InDelta(t, 10*0.00003, thread.Usage.OutputCost, 1e-12)
+	systemPrompt, _ := splitRequestSystemPrompt(t, captured)
 	assert.Equal(t,
-		estimateRemoteCompactionV2ContextTokens(captured.Instructions.Value, thread.inputItemsSnapshot()),
+		estimateRemoteCompactionV2ContextTokens(systemPrompt, thread.inputItemsSnapshot()),
 		thread.Usage.CurrentContextWindow,
 	)
 	assert.Equal(t, 1_050_000, thread.Usage.MaxContextWindow)
@@ -1035,8 +1036,9 @@ func TestCompactContextRemoteV2UpdatesContextWindowEstimate(t *testing.T) {
 	}
 
 	require.NoError(t, thread.CompactContext(context.Background()))
+	systemPrompt, _ := splitRequestSystemPrompt(t, captured)
 	assert.Equal(t,
-		estimateRemoteCompactionV2ContextTokens(captured.Instructions.Value, thread.inputItemsSnapshot()),
+		estimateRemoteCompactionV2ContextTokens(systemPrompt, thread.inputItemsSnapshot()),
 		thread.Usage.CurrentContextWindow,
 	)
 	assert.Equal(t, 1047576, thread.Usage.MaxContextWindow)

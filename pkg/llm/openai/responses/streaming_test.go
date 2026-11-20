@@ -535,7 +535,7 @@ func TestResponsesToolFailureTakesPrecedenceOverStreamFailure(t *testing.T) {
 			}
 			ctx := t.Context()
 			_, _, _, err := thread.processMessageExchangeWithStreamRetries(
-				ctx, &captureStreamHandler{}, "model", responses.ResponseNewParams{Model: "model"}, nil,
+				ctx, &captureStreamHandler{}, "model", responses.ResponseNewParams{Model: "model"}, "system", nil,
 				newStream,
 				func(ctx context.Context, stream *ssestream.Stream[responses.ResponseStreamEventUnion], handler llmtypes.MessageHandler, model string, opt llmtypes.MessageOpt) (processStreamResult, error) {
 					return thread.readStream(ctx, stream, handler, model, opt, new(false))
@@ -1935,8 +1935,9 @@ func TestWebSearchTextSurvivesRetryButDoesNotAffectNextExchange(t *testing.T) {
 			})
 		}
 		if requests == 2 {
-			require.Len(t, params.Input.OfInputItemList, 1)
-			require.NotNil(t, params.Input.OfInputItemList[0].OfWebSearchCall)
+			_, history := splitRequestSystemPrompt(t, params)
+			require.Len(t, history, 1)
+			require.NotNil(t, history[0].OfWebSearchCall)
 		}
 		return responseStreamFromMaps(t, []map[string]any{
 			{"type": "response.output_text.delta", "delta": "Answer"},

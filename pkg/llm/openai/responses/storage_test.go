@@ -814,11 +814,12 @@ func TestRemoteCompactionV2PersistsLoadsAndReplaysFollowUp(t *testing.T) {
 		llmtypes.MessageOpt{NoToolUse: true},
 	)
 	require.NoError(t, err)
-	assert.JSONEq(t, string(mustJSON(t, expectedInferenceInput)), string(mustJSON(t, captured.Input.OfInputItemList)))
-	require.Len(t, captured.Input.OfInputItemList, 3)
-	require.NotNil(t, captured.Input.OfInputItemList[1].OfCompaction)
-	assert.Equal(t, "persisted-encrypted-summary", captured.Input.OfInputItemList[1].OfCompaction.EncryptedContent)
-	assert.Equal(t, "follow up", extractInputItemText(captured.Input.OfInputItemList[2]))
+	_, capturedHistory := splitRequestSystemPrompt(t, captured)
+	assert.JSONEq(t, string(mustJSON(t, expectedInferenceInput)), string(mustJSON(t, capturedHistory)))
+	require.Len(t, capturedHistory, 3)
+	require.NotNil(t, capturedHistory[1].OfCompaction)
+	assert.Equal(t, "persisted-encrypted-summary", capturedHistory[1].OfCompaction.EncryptedContent)
+	assert.Equal(t, "follow up", extractInputItemText(capturedHistory[2]))
 	assert.Equal(t, 50, *restored.GetUsage().ContextBreakdown.ThinkingTokens)
 
 	// A compaction after resume must archive only the follow-up, not its seed.

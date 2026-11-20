@@ -56,14 +56,46 @@ func (t *Thread) applyCodexRestrictions(params *responses.ResponseNewParams) {
 		// prepend dev messages to params' input
 		for i := len(devMessages) - 1; i >= 0; i-- {
 			params.Input.OfInputItemList = append([]responses.ResponseInputItemUnionParam{
-				{
-					OfMessage: &responses.EasyInputMessageParam{
-						Role:    responses.EasyInputMessageRoleDeveloper,
-						Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(devMessages[i])},
-					},
-				},
+				developerInputMessage(devMessages[i]),
 			}, params.Input.OfInputItemList...)
 		}
+	}
+}
+
+// applyRequestInstructions places the system prompt and applies Codex
+// restrictions. On OpenAI and Codex, the system prompt is the leading developer
+// message rather than top-level instructions: from GPT-6.2, the Responses API
+// appends instructions after input, outside the cached prefix, so they would be
+// billed as uncached input on every request. Other platforms keep instructions.
+func (t *Thread) applyRequestInstructions(params *responses.ResponseNewParams, systemPrompt string) {
+	t.applyCodexRestrictions(params)
+	if !usesDeveloperSystemPrompt(t.Config) {
+		params.Instructions = param.NewOpt(systemPrompt)
+		return
+	}
+
+	params.Instructions = param.Opt[string]{}
+	if systemPrompt == "" {
+		return
+	}
+	params.Input.OfInputItemList = append([]responses.ResponseInputItemUnionParam{
+		developerInputMessage(systemPrompt),
+	}, params.Input.OfInputItemList...)
+}
+
+// usesDeveloperSystemPrompt reports whether the system prompt is sent as the
+// leading developer input message instead of top-level instructions.
+func usesDeveloperSystemPrompt(config llmtypes.Config) bool {
+	platform := resolvePlatformName(config)
+	return platform == "openai" || platform == "codex"
+}
+
+func developerInputMessage(text string) responses.ResponseInputItemUnionParam {
+	return responses.ResponseInputItemUnionParam{
+		OfMessage: &responses.EasyInputMessageParam{
+			Role:    responses.EasyInputMessageRoleDeveloper,
+			Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(text)},
+		},
 	}
 }
 

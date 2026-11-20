@@ -164,7 +164,8 @@ func TestResponsesDeferredReloadCheckpoint(t *testing.T) {
 			require.NoError(t, err)
 			assert.True(t, handler.done)
 			require.Len(t, requests, test.maxTurns)
-			assert.Equal(t, "old prompt", requests[0].Instructions.Value)
+			firstPrompt, _ := splitRequestSystemPrompt(t, requests[0])
+			assert.Equal(t, "old prompt", firstPrompt)
 			if test.maxTurns == 2 {
 				wantPrompt, wantTool, feedback := "new prompt", "file_read", "Workspace resources reloaded"
 				wantKind, wantDisplay := "resources-reloaded", "Resources reloaded"
@@ -172,7 +173,8 @@ func TestResponsesDeferredReloadCheckpoint(t *testing.T) {
 					wantPrompt, wantTool, feedback = "old prompt", "bash", "Reload refused: background workers retained"
 					wantKind, wantDisplay = "resource-reload-refused", "Resource reload refused: workers retained"
 				}
-				assert.Equal(t, wantPrompt, requests[1].Instructions.Value)
+				secondPrompt, _ := splitRequestSystemPrompt(t, requests[1])
+				assert.Equal(t, wantPrompt, secondPrompt)
 				require.Len(t, requests[1].Tools, 1)
 				assert.Equal(t, wantTool, requests[1].Tools[0].OfFunction.Name)
 				modelFeedback := extractInputItemText(requests[1].Input.OfInputItemList[len(requests[1].Input.OfInputItemList)-1])

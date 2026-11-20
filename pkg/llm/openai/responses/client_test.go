@@ -480,15 +480,98 @@ func TestProcessMessageExchangeMirrorsCodexPromptCachingRequestShape(t *testing.
 	_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.NoError(t, err)
 
-	require.Len(t, capturedParams.Input.OfInputItemList, len(thread.inputItems), "full input history should be replayed")
-	assert.Equal(t, "hello 1", extractInputItemText(capturedParams.Input.OfInputItemList[0]))
-	assert.Equal(t, "hi", extractInputItemText(capturedParams.Input.OfInputItemList[1]))
-	assert.Equal(t, "hello 2", extractInputItemText(capturedParams.Input.OfInputItemList[2]))
+	systemPrompt, history := splitRequestSystemPrompt(t, capturedParams)
+	assert.Equal(t, "system", systemPrompt)
+	require.Len(t, history, len(thread.inputItems), "full input history should be replayed")
+	assert.Equal(t, "hello 1", extractInputItemText(history[0]))
+	assert.Equal(t, "hi", extractInputItemText(history[1]))
+	assert.Equal(t, "hello 2", extractInputItemText(history[2]))
 	assert.True(t, capturedParams.PromptCacheKey.Valid())
 	assert.Equal(t, "conv-test", capturedParams.PromptCacheKey.Value)
 	assert.False(t, capturedParams.PreviousResponseID.Valid(), "should not use previous_response_id")
 	assert.True(t, capturedParams.Store.Valid())
 	assert.False(t, capturedParams.Store.Value, "should mirror Codex by disabling stored conversation state")
+	for _, item := range thread.inputItemsSnapshot() {
+		if item.OfMessage != nil {
+			assert.NotEqual(t, openairesponses.EasyInputMessageRoleDeveloper, item.OfMessage.Role, "request-only system prompt must not enter history")
+		}
+	}
+	require.Len(t, thread.storedItems, 3)
+}
+
+func TestApplyRequestInstructions(t *testing.T) {
+	user := responseMessageItem(openairesponses.EasyInputMessageRoleUser, "hello")
+	newParams := func() openairesponses.ResponseNewParams {
+		return openairesponses.ResponseNewParams{
+			Model: "gpt-6.2-sol",
+			Input: openairesponses.ResponseNewParamsInputUnion{
+				OfInputItemList: []openairesponses.ResponseInputItemUnionParam{user},
+			},
+		}
+	}
+
+	t.Run("openai sends the system prompt as the leading developer message", func(t *testing.T) {
+		thread := &Thread{Thread: base.NewThread(llmtypes.Config{
+			Provider: "openai", Model: "gpt-6.2-sol", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"},
+		}, "conv-test")}
+		params := newParams()
+		thread.applyRequestInstructions(&params, "system prompt")
+
+		systemPrompt, history := splitRequestSystemPrompt(t, params)
+		assert.Equal(t, "system prompt", systemPrompt)
+		require.Len(t, history, 1)
+		assert.True(t, responsesInputItemEqual(user, history[0]))
+		assert.NotContains(t, responseParamsBody(t, params), "instructions")
+	})
+
+	t.Run("codex places the system prompt before runtime sections", func(t *testing.T) {
+		thread := &Thread{
+			Thread: base.NewThread(llmtypes.Config{
+				Provider: "openai", Model: "gpt-6.2-sol", OpenAI: &llmtypes.OpenAIConfig{Platform: "codex"},
+			}, "conv-test"),
+			isCodex: true,
+		}
+		thread.SetState(tools.NewBasicState(t.Context()))
+		params := newParams()
+		thread.applyRequestInstructions(&params, "system prompt")
+
+		systemPrompt, rest := splitRequestSystemPrompt(t, params)
+		assert.Equal(t, "system prompt", systemPrompt)
+		require.Greater(t, len(rest), 1, "runtime sections follow the system prompt")
+		for _, item := range rest[:len(rest)-1] {
+			require.NotNil(t, item.OfMessage)
+			assert.Equal(t, openairesponses.EasyInputMessageRoleDeveloper, item.OfMessage.Role)
+		}
+		assert.True(t, responsesInputItemEqual(user, rest[len(rest)-1]))
+		assert.Contains(t, extractInputItemText(rest[0]), "# System Information")
+		assert.False(t, params.Store.Value)
+		assert.NotContains(t, responseParamsBody(t, params), "instructions")
+	})
+
+	t.Run("copilot keeps top-level instructions", func(t *testing.T) {
+		thread := &Thread{Thread: base.NewThread(llmtypes.Config{
+			Provider: "openai", Model: "gpt-6.2-sol", OpenAI: &llmtypes.OpenAIConfig{Platform: "copilot"},
+		}, "conv-test")}
+		params := newParams()
+		thread.applyRequestInstructions(&params, "system prompt")
+
+		require.True(t, params.Instructions.Valid())
+		assert.Equal(t, "system prompt", params.Instructions.Value)
+		require.Len(t, params.Input.OfInputItemList, 1)
+		assert.True(t, responsesInputItemEqual(user, params.Input.OfInputItemList[0]))
+	})
+
+	t.Run("empty system prompt adds no developer message", func(t *testing.T) {
+		thread := &Thread{Thread: base.NewThread(llmtypes.Config{
+			Provider: "openai", Model: "gpt-6.2-sol", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"},
+		}, "conv-test")}
+		params := newParams()
+		thread.applyRequestInstructions(&params, "")
+
+		assert.False(t, params.Instructions.Valid())
+		require.Len(t, params.Input.OfInputItemList, 1)
+		assert.True(t, responsesInputItemEqual(user, params.Input.OfInputItemList[0]))
+	})
 }
 
 func TestApplyPromptCacheOptions(t *testing.T) {

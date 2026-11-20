@@ -124,6 +124,34 @@ func TestResponsesWebSocketContinuationFallsBackToFullInput(t *testing.T) {
 	})
 }
 
+func TestResponsesWebSocketContinuationResendsChangedSystemPrompt(t *testing.T) {
+	oldSystem := responseMessageItem(openairesponses.EasyInputMessageRoleDeveloper, "old system")
+	newSystem := responseMessageItem(openairesponses.EasyInputMessageRoleDeveloper, "new system")
+	user := responseMessageItem(openairesponses.EasyInputMessageRoleUser, "hello")
+	nextUser := responseMessageItem(openairesponses.EasyInputMessageRoleUser, "again")
+	initialParams := responseContinuationTestParams([]openairesponses.ResponseInputItemUnionParam{oldSystem, user})
+	initialParams.Instructions = param.Opt[string]{}
+
+	continuation := responsesWebSocketContinuation{}
+	continuation.commit(3, initialParams, processStreamResult{
+		responseCompleted: true,
+		responseID:        "resp_1",
+	})
+
+	unchanged := responseContinuationTestParams([]openairesponses.ResponseInputItemUnionParam{oldSystem, user, nextUser})
+	unchanged.Instructions = param.Opt[string]{}
+	prepared := continuation.prepare(unchanged, 3)
+	require.True(t, prepared.PreviousResponseID.Valid())
+	require.Len(t, prepared.Input.OfInputItemList, 1)
+	assert.True(t, responsesInputItemEqual(nextUser, prepared.Input.OfInputItemList[0]))
+
+	changed := responseContinuationTestParams([]openairesponses.ResponseInputItemUnionParam{newSystem, user, nextUser})
+	changed.Instructions = param.Opt[string]{}
+	prepared = continuation.prepare(changed, 3)
+	assert.False(t, prepared.PreviousResponseID.Valid())
+	assert.Equal(t, changed.Input.OfInputItemList, prepared.Input.OfInputItemList)
+}
+
 func TestProcessMessageExchangeUsesIncrementalWebSocketContinuation(t *testing.T) {
 	config := llmtypes.Config{
 		Provider: "openai",
@@ -246,7 +274,8 @@ func TestProcessMessageExchangeRetriesMissingContinuationWithFullInput(t *testin
 	require.Len(t, requests[1].Input.OfInputItemList, 1)
 	assert.Equal(t, "again", extractInputItemText(requests[1].Input.OfInputItemList[0]))
 	assert.False(t, requests[2].PreviousResponseID.Valid())
-	require.Len(t, requests[2].Input.OfInputItemList, 3)
+	_, fullHistory := splitRequestSystemPrompt(t, requests[2])
+	require.Len(t, fullHistory, 3)
 }
 
 func responseContinuationTestParams(input []openairesponses.ResponseInputItemUnionParam) openairesponses.ResponseNewParams {

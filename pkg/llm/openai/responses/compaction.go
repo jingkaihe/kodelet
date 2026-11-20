@@ -213,7 +213,8 @@ func (t *Thread) compactContextRemoteV2(ctx context.Context, compactionMetadata 
 	if err != nil {
 		return err
 	}
-	params, err := t.buildRemoteCompactionV2Params(snapshot.inputItems, requestMetadata)
+	systemPrompt := sysprompt.SystemPrompt(t.Config.Model, t.Config, base.EnvironmentContexts(t))
+	params, err := t.buildRemoteCompactionV2Params(snapshot.inputItems, systemPrompt, requestMetadata)
 	if err != nil {
 		return err
 	}
@@ -256,7 +257,7 @@ func (t *Thread) compactContextRemoteV2(ctx context.Context, compactionMetadata 
 		return errors.New("remote compaction v2 output could not be converted to conversation input")
 	}
 
-	estimatedContextTokens := estimateRemoteCompactionV2ContextTokens(params.Instructions.Value, newInputItems)
+	estimatedContextTokens := estimateRemoteCompactionV2ContextTokens(systemPrompt, newInputItems)
 	if err := t.replaceCompactedHistory(snapshot.revision, newInputItems, newStoredItems, estimatedContextTokens); err != nil {
 		return err
 	}
@@ -269,6 +270,7 @@ func (t *Thread) compactContextRemoteV2(ctx context.Context, compactionMetadata 
 
 func (t *Thread) buildRemoteCompactionV2Params(
 	input []responses.ResponseInputItemUnionParam,
+	systemPrompt string,
 	requestMetadata codexResponsesRequestMetadata,
 ) (responses.ResponseNewParams, error) {
 	textVerbosity, sendTextVerbosity, err := llmtypes.ConfiguredOpenAITextVerbosity(t.Config)
@@ -276,13 +278,10 @@ func (t *Thread) buildRemoteCompactionV2Params(
 		return responses.ResponseNewParams{}, err
 	}
 
-	contexts := base.EnvironmentContexts(t)
-	systemPrompt := sysprompt.SystemPrompt(t.Config.Model, t.Config, contexts)
 	tools := buildToolsForThread(t, nil, false)
 	params := responses.ResponseNewParams{
 		Model:             t.Config.Model,
 		Input:             responses.ResponseNewParamsInputUnion{OfInputItemList: input},
-		Instructions:      param.NewOpt(systemPrompt),
 		Tools:             tools,
 		Store:             param.NewOpt(false),
 		PromptCacheKey:    param.NewOpt(t.ConversationID),
@@ -308,11 +307,13 @@ func (t *Thread) buildRemoteCompactionV2Params(
 		}
 	}
 
-	t.applyCodexRestrictions(&params)
+	t.applyRequestInstructions(&params, systemPrompt)
 	pricing := t.getPricingForServiceTier(t.Config.Model, normalizeServiceTier(t.Config))
+	// When the system prompt is a leading developer message, the input already
+	// counts it and instructions are empty.
 	trimmedInput, rewrittenOutputs := trimRemoteCompactionV2InputToContextWindow(
 		params.Input.OfInputItemList,
-		systemPrompt,
+		params.Instructions.Value,
 		pricing.ContextWindow,
 	)
 	if rewrittenOutputs > 0 {

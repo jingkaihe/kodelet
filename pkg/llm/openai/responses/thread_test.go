@@ -98,6 +98,21 @@ func extractInputItemText(item openairesponses.ResponseInputItemUnionParam) stri
 	return text
 }
 
+// splitRequestSystemPrompt returns the system prompt sent as the leading
+// developer message and the input items that follow it.
+func splitRequestSystemPrompt(
+	t *testing.T,
+	params openairesponses.ResponseNewParams,
+) (string, []openairesponses.ResponseInputItemUnionParam) {
+	t.Helper()
+	assert.False(t, params.Instructions.Valid(), "system prompt must not be sent as top-level instructions")
+	input := params.Input.OfInputItemList
+	require.NotEmpty(t, input)
+	require.NotNil(t, input[0].OfMessage)
+	require.Equal(t, openairesponses.EasyInputMessageRoleDeveloper, input[0].OfMessage.Role)
+	return extractInputItemText(input[0]), input[1:]
+}
+
 func extractInputItemImageURLs(item openairesponses.ResponseInputItemUnionParam) []string {
 	if item.OfMessage == nil {
 		return nil
@@ -661,13 +676,12 @@ func TestResponsesContextBreakdownUsesCodexRequestPrefixAndLiveHistory(t *testin
 	// Display-only reasoning must never enter the inference estimate.
 	thread.storedItems = append(thread.storedItems, StoredInputItem{Type: "reasoning", Content: "display-only reasoning"})
 	params := openairesponses.ResponseNewParams{
-		Instructions: param.NewOpt("system!!"),
-		Input:        openairesponses.ResponseNewParamsInputUnion{OfInputItemList: thread.inputItemsSnapshot()},
+		Input: openairesponses.ResponseNewParamsInputUnion{OfInputItemList: thread.inputItemsSnapshot()},
 	}
-	thread.applyCodexRestrictions(&params)
+	thread.applyRequestInstructions(&params, "system!!")
 	prefixCount := len(params.Input.OfInputItemList) - len(thread.inputItems)
-	require.Positive(t, prefixCount)
-	expected := base.EstimateContextBreakdown(params.Instructions.Value, params.Tools, params.Input.OfInputItemList, "")
+	require.Greater(t, prefixCount, 1, "system prompt and runtime sections lead the request")
+	expected := base.EstimateContextBreakdown("system!!", params.Tools, params.Input.OfInputItemList[1:], "")
 	thread.AddAssistantMessage(t.Context(), "last")
 	thread.refreshContextBreakdown(params, prefixCount, thread.codexWindowGeneration, nil)
 	breakdown := thread.GetUsage().ContextBreakdown
@@ -860,9 +874,10 @@ func TestProcessMessageExchangeInjectsPendingSteer(t *testing.T) {
 	_, _, _, err = thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.NoError(t, err)
 
-	require.Len(t, capturedParams.Input.OfInputItemList, 2)
-	assert.Equal(t, "hello", extractInputItemText(capturedParams.Input.OfInputItemList[0]))
-	assert.Equal(t, "Please focus on error handling", extractInputItemText(capturedParams.Input.OfInputItemList[1]))
+	_, history := splitRequestSystemPrompt(t, capturedParams)
+	require.Len(t, history, 2)
+	assert.Equal(t, "hello", extractInputItemText(history[0]))
+	assert.Equal(t, "Please focus on error handling", extractInputItemText(history[1]))
 	assert.Contains(t, handler.CollectedText(), "🗣️ User steering: Please focus on error handling")
 
 	require.Len(t, thread.inputItems, 2)
@@ -897,9 +912,10 @@ func TestProcessMessageExchangeInjectsPendingSteerWithImages(t *testing.T) {
 	_, _, _, err = thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.NoError(t, err)
 
-	require.Len(t, capturedParams.Input.OfInputItemList, 1)
-	assert.Equal(t, "Use this image", extractInputItemText(capturedParams.Input.OfInputItemList[0]))
-	assert.Equal(t, []string{"data:image/png;base64,aGVsbG8="}, extractInputItemImageURLs(capturedParams.Input.OfInputItemList[0]))
+	_, history := splitRequestSystemPrompt(t, capturedParams)
+	require.Len(t, history, 1)
+	assert.Equal(t, "Use this image", extractInputItemText(history[0]))
+	assert.Equal(t, []string{"data:image/png;base64,aGVsbG8="}, extractInputItemImageURLs(history[0]))
 	assert.Contains(t, handler.CollectedText(), "🗣️ User steering: Use this image (1 image)")
 	hasPending, err := steerStore.HasPending(context.Background(), "conv-test")
 	require.NoError(t, err)
@@ -1303,7 +1319,8 @@ func TestProcessMessageExchangeKeepsDurableStateBeforeHTTPSStreamRetry(t *testin
 	var inputLengths []int
 	thread.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
 		attempts++
-		inputLengths = append(inputLengths, len(params.Input.OfInputItemList))
+		_, history := splitRequestSystemPrompt(t, params)
+		inputLengths = append(inputLengths, len(history))
 		return nil
 	}
 	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (processStreamResult, error) {
@@ -1375,7 +1392,8 @@ func TestProcessMessageExchangeRetriesFromToolResultAfterLocalToolExecution(t *t
 	var inputLengths []int
 	thread.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
 		attempts++
-		inputLengths = append(inputLengths, len(params.Input.OfInputItemList))
+		_, history := splitRequestSystemPrompt(t, params)
+		inputLengths = append(inputLengths, len(history))
 		if attempts == 1 {
 			return responseStreamFromMaps(t, []map[string]any{
 				{

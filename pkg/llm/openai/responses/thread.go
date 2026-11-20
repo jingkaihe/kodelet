@@ -749,7 +749,6 @@ func (t *Thread) processMessageExchange(
 	params := responses.ResponseNewParams{
 		Model:          model,
 		Input:          responses.ResponseNewParamsInputUnion{OfInputItemList: inputItems},
-		Instructions:   param.NewOpt(systemPrompt),
 		Tools:          tools,
 		Store:          param.NewOpt(false),
 		PromptCacheKey: param.NewOpt(t.ConversationID),
@@ -786,8 +785,8 @@ func (t *Thread) processMessageExchange(
 		}
 	}
 
-	// Apply Codex-specific restrictions (overrides unsupported params)
-	t.applyCodexRestrictions(&params)
+	// Place the system prompt and apply Codex-specific restrictions.
+	t.applyRequestInstructions(&params, systemPrompt)
 	requestMetadata, err := t.buildCodexResponsesRequestMetadata(
 		codexTurnIDFromContext(ctx),
 		windowGeneration,
@@ -865,7 +864,7 @@ func (t *Thread) processMessageExchange(
 		}
 	}
 
-	return t.processMessageExchangeWithStreamRetries(ctx, handler, model, params, tools, newResponsesStream, processStream, opt, saveConversation, transportName)
+	return t.processMessageExchangeWithStreamRetries(ctx, handler, model, params, systemPrompt, tools, newResponsesStream, processStream, opt, saveConversation, transportName)
 }
 
 type responsesStreamAttempt struct {
@@ -881,6 +880,7 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 	handler llmtypes.MessageHandler,
 	model string,
 	params responses.ResponseNewParams,
+	systemPrompt string,
 	tools []responses.ToolUnionParam,
 	newResponsesStream responsesStreamFactory,
 	processStream func(context.Context, *ssestream.Stream[responses.ResponseStreamEventUnion], llmtypes.MessageHandler, string, llmtypes.MessageOpt) (processStreamResult, error),
@@ -920,7 +920,7 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 			attemptParams.Input = responses.ResponseNewParamsInputUnion{
 				OfInputItemList: inputItems,
 			}
-			t.applyCodexRestrictions(&attemptParams)
+			t.applyRequestInstructions(&attemptParams, systemPrompt)
 			prefixCount := len(attemptParams.Input.OfInputItemList) - len(inputItems)
 			var response *responses.Response
 			t.refreshContextBreakdown(attemptParams, prefixCount, windowGeneration, nil)
