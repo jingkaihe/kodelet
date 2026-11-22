@@ -18,6 +18,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -172,6 +173,31 @@ func (*nativeCompactionTestEnvironment) ProcessAgentInit(
 	ctx context.Context, _ string, _ []string,
 ) (agentenv.AgentInitDecision, error) {
 	return agentenv.AgentInitDecision{SystemPrompt: "Keep this system instruction."}, ctx.Err()
+}
+
+func TestBetaCompactionParamsKeepsToolBytes(t *testing.T) {
+	params := anthropic.MessageNewParams{
+		Model:     "claude-sonnet-4-6",
+		MaxTokens: 4096,
+		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("hi"))},
+		Tools:     toAnthropicTools([]tooltypes.Tool{testTool{name: "raw", rawSchema: stabilityTestSchema()}}, false),
+	}
+	cacheAnthropicToolDefinitions(params.Tools)
+	want, err := json.Marshal(params.Tools)
+	require.NoError(t, err)
+
+	assertStableJSON(t, func() any {
+		betaParams, err := betaCompactionParams(params)
+		require.NoError(t, err)
+		return betaParams
+	})
+	betaParams, err := betaCompactionParams(params)
+	require.NoError(t, err)
+	payload, err := json.Marshal(betaParams)
+	require.NoError(t, err)
+	var request map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(payload, &request))
+	assert.Equal(t, string(want), string(request["tools"]), "compaction must reuse the main request's tool bytes")
 }
 
 func TestNativeCompactionTracing(t *testing.T) {

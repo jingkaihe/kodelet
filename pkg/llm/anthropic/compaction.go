@@ -164,16 +164,10 @@ func (t *Thread) compactContextNative(ctx context.Context, params anthropic.Mess
 	}
 	model := params.Model
 	params.MaxTokens = max(params.MaxTokens, 4096)
-	raw, err := json.Marshal(params)
+	betaParams, err := betaCompactionParams(params)
 	if err != nil {
-		return errors.Wrap(err, "failed to encode compaction request")
+		return err
 	}
-	var betaParams anthropic.BetaMessageNewParams
-	if err := json.Unmarshal(raw, &betaParams); err != nil {
-		return errors.Wrap(err, "failed to prepare beta compaction request")
-	}
-	// Signed blocks must round-trip without the SDK adding or dropping fields.
-	betaParams.SetExtraFields(map[string]any{"messages": params.Messages})
 	betaParams.Betas = []anthropic.AnthropicBeta{anthropic.AnthropicBetaCompact2026_09_04}
 	betaParams.Compaction = anthropic.BetaCompactionConfigUnionParam{
 		OfSummarize: &anthropic.BetaSummarizeCompactionParam{},
@@ -267,6 +261,29 @@ func (t *Thread) compactContextNative(ctx context.Context, params anthropic.Mess
 	}
 	t.FinalizeSwapContextLocked(block.Content)
 	return nil
+}
+
+// betaCompactionParams converts a Messages request for the beta API. Messages and
+// tools are sent exactly as the original request serializes them: signed blocks
+// must round-trip without the SDK adding or dropping fields, and decoded tool
+// schemas would put their extra keys in ExtraFields, which the SDK writes in map
+// order, so the cached prefix would differ between requests. Both keys are
+// already in the encoded request, so the overrides replace them in place.
+func betaCompactionParams(params anthropic.MessageNewParams) (anthropic.BetaMessageNewParams, error) {
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return anthropic.BetaMessageNewParams{}, errors.Wrap(err, "failed to encode compaction request")
+	}
+	var betaParams anthropic.BetaMessageNewParams
+	if err := json.Unmarshal(raw, &betaParams); err != nil {
+		return anthropic.BetaMessageNewParams{}, errors.Wrap(err, "failed to prepare beta compaction request")
+	}
+	overrides := map[string]any{"messages": params.Messages}
+	if len(params.Tools) > 0 {
+		overrides["tools"] = params.Tools
+	}
+	betaParams.SetExtraFields(overrides)
+	return betaParams, nil
 }
 
 // Top-level usage excludes compaction iterations. Count those in addition to the

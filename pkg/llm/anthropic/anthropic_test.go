@@ -2917,6 +2917,61 @@ func TestToAnthropicTools(t *testing.T) {
 		require.NoError(t, json.Unmarshal(payload, &schema))
 		assert.Equal(t, rawSchema, schema)
 	})
+
+	t.Run("schema without type is an object", func(t *testing.T) {
+		rawSchema := map[string]any{
+			"properties": map[string]any{"target": map[string]any{"type": "string"}},
+			"required":   []any{"target", 1},
+		}
+		tools := toAnthropicTools([]tooltypes.Tool{testTool{name: "raw", rawSchema: rawSchema}}, false)
+		payload, err := json.Marshal(tools[0].OfTool.InputSchema)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{
+			"type": "object",
+			"properties": {"target": {"type": "string"}},
+			"required": ["target"]
+		}`, string(payload))
+		assert.NotContains(t, rawSchema, "type", "the tool's own schema must not change")
+	})
+
+	t.Run("serializes identically on every request", func(t *testing.T) {
+		toolList := []tooltypes.Tool{
+			&tools.BashTool{},
+			&tools.CodeExecuteTool{},
+			testTool{name: "raw", rawSchema: stabilityTestSchema()},
+		}
+		assertStableJSON(t, func() any { return toAnthropicTools(toolList, false) })
+	})
+}
+
+// stabilityTestSchema has enough keys outside type, properties and required that
+// writing them in map order would almost surely vary within a few encodings.
+func stabilityTestSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"properties":           map[string]any{"target": map[string]any{"type": "string"}},
+		"required":             []any{"target"},
+		"$schema":              "https://json-schema.org/draft/2020-12/schema",
+		"$id":                  "https://example.com/raw",
+		"additionalProperties": false,
+		"title":                "Raw",
+		"description":          "Raw schema",
+		"x-first":              1,
+		"x-second":             2,
+	}
+}
+
+// assertStableJSON encodes a fresh value repeatedly and requires identical bytes,
+// since prompt caching compares the request prefix.
+func assertStableJSON(t *testing.T, value func() any) {
+	t.Helper()
+	first, err := json.Marshal(value())
+	require.NoError(t, err)
+	for range 50 {
+		payload, err := json.Marshal(value())
+		require.NoError(t, err)
+		require.Equal(t, string(first), string(payload))
+	}
 }
 
 type testTool struct {
