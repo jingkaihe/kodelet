@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.8.33-beta
+
+Fixed avoidable Anthropic prompt cache misses by keeping tool schemas identical across requests, including during native context compaction.
+
+Changed GitHub release automation to run GoReleaser jobs one at a time.
+
 ## 0.8.32-beta
 
 Improved GPT-6.2 prompt caching on the OpenAI and Codex platforms by sending the system prompt as the leading developer message instead of top-level `instructions`, which the Responses API now appends after the input, outside the cached prefix, billing the system prompt as uncached input on every request. Other Responses API platforms still use `instructions`.
