@@ -263,12 +263,9 @@ func (t *Thread) compactContextNative(ctx context.Context, params anthropic.Mess
 	return nil
 }
 
-// betaCompactionParams converts a Messages request for the beta API. Messages and
-// tools are sent exactly as the original request serializes them: signed blocks
-// must round-trip without the SDK adding or dropping fields, and decoded tool
-// schemas would put their extra keys in ExtraFields, which the SDK writes in map
-// order, so the cached prefix would differ between requests. Both keys are
-// already in the encoded request, so the overrides replace them in place.
+// betaCompactionParams converts a request for the beta API, sending messages and
+// tools as originally encoded: signed blocks must round-trip unchanged, and
+// decoded tool schemas would re-encode in map order.
 func betaCompactionParams(params anthropic.MessageNewParams) (anthropic.BetaMessageNewParams, error) {
 	raw, err := json.Marshal(params)
 	if err != nil {

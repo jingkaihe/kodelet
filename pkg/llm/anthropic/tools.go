@@ -49,12 +49,10 @@ func toAnthropicTools(tools []tooltypes.Tool, useSubscription bool) []anthropic.
 	return anthropicTools
 }
 
-// anthropicInputSchema sends the whole schema as one map so that every request
-// serializes it identically. Keys such as $schema and additionalProperties must
-// not go through the SDK's ExtraFields, which it writes in map iteration order:
-// the tool definitions would differ between requests and miss the prompt cache.
+// anthropicInputSchema overrides the whole schema so it encodes with sorted keys;
+// the SDK writes ExtraFields in map iteration order.
 func anthropicInputSchema(tool tooltypes.Tool) anthropic.ToolInputSchemaParam {
-	// Clone the top level only: the raw schema may be the tool's own map.
+	// The raw schema may be the tool's own map.
 	schema := maps.Clone(tooltypes.JSONSchemaForTool(tool))
 	if schema == nil {
 		schema = map[string]any{}
@@ -68,7 +66,6 @@ func anthropicInputSchema(tool tooltypes.Tool) anthropic.ToolInputSchemaParam {
 	} else {
 		delete(schema, "required")
 	}
-	// The override is marshaled like encoding/json, with map keys sorted.
 	return param.Override[anthropic.ToolInputSchemaParam](schema)
 }
 

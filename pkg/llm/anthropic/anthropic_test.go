@@ -2944,8 +2944,7 @@ func TestToAnthropicTools(t *testing.T) {
 	})
 }
 
-// stabilityTestSchema has enough keys outside type, properties and required that
-// writing them in map order would almost surely vary within a few encodings.
+// stabilityTestSchema has enough extra keys that map-order encoding would vary.
 func stabilityTestSchema() map[string]any {
 	return map[string]any{
 		"type":                 "object",
@@ -2961,8 +2960,7 @@ func stabilityTestSchema() map[string]any {
 	}
 }
 
-// assertStableJSON encodes a fresh value repeatedly and requires identical bytes,
-// since prompt caching compares the request prefix.
+// assertStableJSON requires repeated encodings of fresh values to be identical.
 func assertStableJSON(t *testing.T, value func() any) {
 	t.Helper()
 	first, err := json.Marshal(value())
