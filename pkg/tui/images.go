@@ -18,14 +18,11 @@ const (
 	imagePreviewMaxCols = 64
 	imagePreviewMaxRows = 30
 	imageFetchTimeout   = 30 * time.Second
-	// maxKittyUploads bounds the images kept in Kitty's memory. Images evicted
-	// while off screen are uploaded again when scrolled back into view.
+	// maxKittyUploads bounds Kitty's memory; evicted images upload again when visible.
 	maxKittyUploads = 32
-	// imageCacheBytes bounds the downloaded and resized images kept for
-	// images away from the viewport.
+	// imageCacheBytes bounds the downloads and renditions kept away from the viewport.
 	imageCacheBytes = 64 << 20
-	// Downloads run a few at a time. Decoding allocates a full-resolution
-	// bitmap, so decodes run one at a time.
+	// Decoding allocates a full-resolution bitmap, so decodes run one at a time.
 	maxImageFetches = 4
 	maxImageRenders = 1
 )
@@ -54,9 +51,7 @@ type tuiImages struct {
 	byID    map[uint32]*imageRendition
 	frame   uint64
 
-	// placed records where the latest transcript render put each image, so
-	// only images near the viewport are loaded. placing collects the render
-	// in progress.
+	// placed is where the latest render put each image; placing collects the next.
 	placed, placing []imagePlacement
 	// near counts loadNear calls; the cache keeps what the latest one used.
 	near       uint64
@@ -69,8 +64,7 @@ type imageSource struct {
 	shortCode string
 	loading   bool
 	err       error
-	// data is nil until downloaded and again once evicted. The size is kept,
-	// so the image's rows stay reserved.
+	// data is nil until downloaded and once evicted; the kept size reserves rows.
 	data          []byte
 	width, height int
 	renditions    []*imageRendition
@@ -208,18 +202,16 @@ func (s *tuiImages) available() bool {
 	return s.enabled()
 }
 
-// lines returns the transcript rows for an image attachment placed at a
-// transcript line, or nil when it cannot be previewed and only its link should
-// be shown. ok is false when the rows explain why loading the image failed.
-// Images are loaded by loadNear once the viewport is known.
-func (s *tuiImages) lines(attachment tooltypes.ToolAttachment, maxCols, maxRows, line int) (rows []string, ok bool) {
+// lines returns an attachment's rows at a transcript line, or nil to show only
+// its link.
+func (s *tuiImages) lines(attachment tooltypes.ToolAttachment, maxCols, maxRows, line int) []string {
 	if s == nil || attachment.Type != "image" || attachment.Error != "" || !validImageShortCode(attachment.ShortCode) {
-		return nil, false
+		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.enabled() || maxCols <= 0 || maxRows <= 0 {
-		return nil, false
+		return nil
 	}
 
 	source := s.sources[attachment.ShortCode]
@@ -228,14 +220,14 @@ func (s *tuiImages) lines(attachment tooltypes.ToolAttachment, maxCols, maxRows,
 		s.sources[attachment.ShortCode] = source
 	}
 	if source.err != nil {
-		return []string{mutedStyle.Render(imageUnavailableText(source.err, maxCols))}, false
+		return []string{mutedStyle.Render(imageUnavailableText(source.err, maxCols))}
 	}
 	cols, height := termimage.Fit(source.width, source.height, maxCols, maxRows, s.cell)
-	rows, ok = imageLoadingLines(height), true
+	rows := imageLoadingLines(height)
 	if rendition := findRendition(source, cols, height); rendition != nil {
 		switch {
 		case rendition.err != nil:
-			rows, ok = []string{mutedStyle.Render(imageUnavailableText(rendition.err, maxCols))}, false
+			rows = []string{mutedStyle.Render(imageUnavailableText(rendition.err, maxCols))}
 		case rendition.rendition != nil:
 			if rendition.lines == nil {
 				rendition.lines = make([]string, rendition.rows)
@@ -247,7 +239,7 @@ func (s *tuiImages) lines(attachment tooltypes.ToolAttachment, maxCols, maxRows,
 		}
 	}
 	s.placing = append(s.placing, imagePlacement{source: source, cols: cols, rows: height, line: line, height: len(rows)})
-	return rows, ok
+	return rows
 }
 
 func findRendition(source *imageSource, cols, rows int) *imageRendition {
@@ -509,7 +501,7 @@ func (m *model) renderTranscriptImages(b *strings.Builder, line *int, attachment
 	}
 	maxCols, maxRows := m.imagePreviewLimits(len(indent) + 2)
 	for _, attachment := range attachments {
-		rows, _ := m.images.lines(attachment, maxCols, maxRows, *line+1)
+		rows := m.images.lines(attachment, maxCols, maxRows, *line+1)
 		if len(rows) == 0 {
 			continue
 		}
@@ -542,7 +534,7 @@ func (m *model) renderAssistantText(b *strings.Builder, line *int, text string) 
 	for i, row := range rows {
 		if shortCode, ok := markers[i]; ok {
 			attachment := tooltypes.ToolAttachment{Type: "image", ShortCode: shortCode}
-			preview, _ := m.images.lines(attachment, maxCols, maxRows, *line)
+			preview := m.images.lines(attachment, maxCols, maxRows, *line)
 			for _, previewRow := range preview {
 				b.WriteString(previewRow + "\n")
 				*line++

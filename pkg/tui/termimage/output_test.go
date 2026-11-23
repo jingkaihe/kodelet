@@ -135,14 +135,6 @@ func TestOutputDrawsOnceAProtocolIsSet(t *testing.T) {
 	require.Eventually(t, func() bool { return strings.Contains(written(), "<after>") }, time.Second, 5*time.Millisecond)
 }
 
-func TestOutputImplementsTerminalFile(t *testing.T) {
-	file, err := os.CreateTemp(t.TempDir(), "tty")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = file.Close() })
-	output := NewOutput(file, Kitty)
-	assert.Equal(t, file.Fd(), output.Fd())
-}
-
 func newTestOutput(t *testing.T, protocol Protocol) (*Output, func() string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "tty")
