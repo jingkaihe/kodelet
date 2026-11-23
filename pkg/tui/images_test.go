@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -31,6 +32,11 @@ import (
 type imageTestRunner struct {
 	images  map[string][]byte
 	fetches atomic.Int32
+	// gate, when set, holds each fetch until it is closed.
+	gate        chan struct{}
+	mu          sync.Mutex
+	fetched     map[string]int
+	active, max int
 }
 
 func (*imageTestRunner) Run(context.Context, chat.ChatRequest, chat.ChatEventSink) (string, error) {
@@ -39,10 +45,30 @@ func (*imageTestRunner) Run(context.Context, chat.ChatRequest, chat.ChatEventSin
 
 func (r *imageTestRunner) FetchImage(_ context.Context, shortCode string) ([]byte, error) {
 	r.fetches.Add(1)
+	r.mu.Lock()
+	if r.fetched == nil {
+		r.fetched = map[string]int{}
+	}
+	r.fetched[shortCode]++
+	r.active++
+	r.max = max(r.max, r.active)
+	r.mu.Unlock()
+	if r.gate != nil {
+		<-r.gate
+	}
+	r.mu.Lock()
+	r.active--
+	r.mu.Unlock()
 	if data, ok := r.images[shortCode]; ok {
 		return data, nil
 	}
 	return nil, errors.New("server returned HTTP 404")
+}
+
+func (r *imageTestRunner) fetchCount(shortCode string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.fetched[shortCode]
 }
 
 func TestTranscriptPreviewsKittyImages(t *testing.T) {
@@ -423,10 +449,11 @@ func TestImageSizesRequestedInOnePassAreKept(t *testing.T) {
 	// Indentation gives the same image three widths on a narrow terminal.
 	renderPass := func() {
 		m.images.beginPass()
-		for _, cols := range []int{20, 18, 16} {
-			m.images.lines(attachment, cols, 30)
+		for i, cols := range []int{20, 18, 16} {
+			m.images.lines(attachment, cols, 30, i*20)
 		}
 		m.images.endPass()
+		m.images.loadNear(0, 60)
 	}
 	ready := func() bool {
 		m.images.mu.Lock()
@@ -467,9 +494,113 @@ func TestImageSizesRequestedInOnePassAreKept(t *testing.T) {
 		t.Fatalf("unexpected image update %T", msg)
 	case <-time.After(100 * time.Millisecond):
 	}
+}
 
+func TestImagesLoadNearTheViewport(t *testing.T) {
+	runner := &imageTestRunner{images: map[string][]byte{}}
+	var tools []toolCall
+	for i := range 8 {
+		code := fmt.Sprintf("image%d", i)
+		runner.images[code] = imageTestPNG(t)
+		tools = append(tools, toolCall{
+			name: "draw_chart",
+			done: true,
+			structured: &tooltypes.StructuredToolResult{
+				ToolName: "draw_chart",
+				Success:  true,
+				Attachments: []tooltypes.ToolAttachment{{
+					Type: "image", ArtifactID: code, ShortCode: code, ViewURL: "/i/" + code, Width: 300, Height: 200,
+				}},
+			},
+		})
+	}
+	m, _, _ := newImageTestModel(t, runner, termimage.Kitty)
+	m.entries = []chatEntry{{kind: entryAssistant, blocks: []assistantBlock{{kind: blockTools, tools: tools}}}}
+
+	m.refreshViewport(true)
+	waitForImages(t, &m, func() bool { return m.images.sources["image7"].data != nil })
+	assert.Zero(t, runner.fetchCount("image0"), "images far above the viewport are not loaded")
+	assert.Equal(t, 1, runner.fetchCount("image7"))
+	lines := m.viewport.TotalLineCount()
+
+	m.viewport.GotoTop()
+	m.loadVisibleImages()
+	waitForImages(t, &m, func() bool { return m.images.sources["image0"].data != nil })
+	assert.Equal(t, 1, runner.fetchCount("image0"))
+	assert.Equal(t, lines, m.viewport.TotalLineCount(), "rows are reserved before images load")
+}
+
+func TestImageFetchesAreBounded(t *testing.T) {
+	runner := &imageTestRunner{images: map[string][]byte{}, gate: make(chan struct{})}
+	m, _, _ := newImageTestModel(t, runner, termimage.Kitty)
 	m.images.beginPass()
-	m.images.lines(attachment, 20, 30)
+	for i := range 6 {
+		code := fmt.Sprintf("image%d", i)
+		runner.images[code] = imageTestPNG(t)
+		m.images.lines(tooltypes.ToolAttachment{Type: "image", ShortCode: code}, 30, 10, i)
+	}
 	m.images.endPass()
-	assert.Len(t, ids(), 1, "sizes the latest pass did not request are dropped")
+	m.images.loadNear(0, 10)
+
+	require.Eventually(t, func() bool { return runner.fetches.Load() == maxImageFetches }, time.Second, 5*time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
+	assert.Equal(t, int32(maxImageFetches), runner.fetches.Load(), "later downloads wait for a slot")
+	close(runner.gate)
+	for loaded := 0; loaded < 6; loaded++ {
+		select {
+		case <-m.runCh:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for downloads")
+		}
+	}
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	assert.Equal(t, maxImageFetches, runner.max)
+}
+
+func TestImageCacheEvictsImagesAwayFromTheViewport(t *testing.T) {
+	runner := &imageTestRunner{images: map[string][]byte{"near": imageTestPNG(t), "far": imageTestPNG(t)}}
+	m, _, _ := newImageTestModel(t, runner, termimage.Kitty)
+	m.images.cacheBytes = 1
+	attachment := func(code string) tooltypes.ToolAttachment {
+		return tooltypes.ToolAttachment{Type: "image", ShortCode: code, Width: 300, Height: 200}
+	}
+	renderPass := func(top int) {
+		m.images.beginPass()
+		m.images.lines(attachment("near"), 30, 10, 0)
+		m.images.lines(attachment("far"), 30, 10, 100)
+		m.images.endPass()
+		m.images.loadNear(top, 10)
+	}
+	rendered := func(code string) bool {
+		m.images.mu.Lock()
+		defer m.images.mu.Unlock()
+		source := m.images.sources[code]
+		return source != nil && len(source.renditions) == 1 && source.renditions[0].rendition != nil
+	}
+	waitUntil := func(top int, ready func() bool) {
+		t.Helper()
+		deadline := time.After(5 * time.Second)
+		for renderPass(top); !ready(); renderPass(top) {
+			select {
+			case <-m.runCh:
+			case <-deadline:
+				t.Fatal("timed out waiting for images")
+			}
+		}
+	}
+
+	waitUntil(0, func() bool { return rendered("near") })
+	waitUntil(100, func() bool { return rendered("far") })
+	m.images.mu.Lock()
+	assert.Nil(t, m.images.sources["near"].data, "the download away from the viewport is freed")
+	assert.Empty(t, m.images.sources["near"].renditions, "the rendition away from the viewport is freed")
+	assert.NotNil(t, m.images.sources["far"].data, "images near the viewport stay cached")
+	m.images.mu.Unlock()
+
+	rows, ok := m.images.lines(attachment("near"), 30, 10, 0)
+	assert.True(t, ok)
+	assert.Len(t, rows, 10, "an evicted image keeps its rows reserved")
+	waitUntil(0, func() bool { return rendered("near") })
+	assert.Equal(t, 2, runner.fetchCount("near"), "scrolling back downloads it again")
 }

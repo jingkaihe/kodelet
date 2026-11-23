@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"net/url"
 	"regexp"
@@ -22,6 +23,13 @@ const (
 	// maxKittyUploads bounds the images kept in Kitty's memory. Images evicted
 	// while off screen are uploaded again when scrolled back into view.
 	maxKittyUploads = 32
+	// imageCacheBytes bounds the downloaded and resized images kept for
+	// images away from the viewport.
+	imageCacheBytes = 64 << 20
+	// Downloads run a few at a time. Decoding allocates a full-resolution
+	// bitmap, so decodes run one at a time.
+	maxImageFetches = 4
+	maxImageRenders = 1
 )
 
 // imageFetcher is implemented by daemon clients that serve image artifacts.
@@ -47,17 +55,28 @@ type tuiImages struct {
 	sources map[string]*imageSource
 	byID    map[uint32]*imageRendition
 	frame   uint64
-	// pass counts transcript renders; sizes requested in the current pass
-	// are kept, however many there are.
-	pass uint64
+
+	// placed records where the latest transcript render put each image, so
+	// only images near the viewport are loaded. placing collects the render
+	// in progress.
+	placed, placing []imagePlacement
+	// near counts loadNear calls; the cache keeps what the latest one used.
+	near       uint64
+	cacheBytes int
+	fetches    chan struct{}
+	renders    chan struct{}
 }
 
 type imageSource struct {
-	loading       bool
-	err           error
+	shortCode string
+	loading   bool
+	err       error
+	// data is nil until downloaded and again once evicted. The size is kept,
+	// so the image's rows stay reserved.
 	data          []byte
 	width, height int
 	renditions    []*imageRendition
+	near          uint64
 }
 
 type imageRendition struct {
@@ -69,11 +88,25 @@ type imageRendition struct {
 	err        error
 	lines      []string
 	lastSeen   uint64
-	pass       uint64
+	near       uint64
+}
+
+// imagePlacement is an image's size and transcript lines in a render.
+type imagePlacement struct {
+	source     *imageSource
+	cols, rows int
+	line       int
+	height     int
 }
 
 func newTUIImages(ctx context.Context, notify chan<- tea.Msg) *tuiImages {
-	return &tuiImages{ctx: ctx, notify: notify}
+	return &tuiImages{
+		ctx:        ctx,
+		notify:     notify,
+		cacheBytes: imageCacheBytes,
+		fetches:    make(chan struct{}, maxImageFetches),
+		renders:    make(chan struct{}, maxImageRenders),
+	}
 }
 
 // enable turns on previews for a terminal protocol rendered through output.
@@ -166,10 +199,11 @@ func (s *tuiImages) available() bool {
 	return s.enabled()
 }
 
-// lines returns the transcript rows previewing an image attachment, or nil when
-// it cannot be previewed and only its link should be shown. ok is false when
-// the rows explain why loading the image failed.
-func (s *tuiImages) lines(attachment tooltypes.ToolAttachment, maxCols, maxRows int) (rows []string, ok bool) {
+// lines returns the transcript rows for an image attachment placed at a
+// transcript line, or nil when it cannot be previewed and only its link should
+// be shown. ok is false when the rows explain why loading the image failed.
+// Images are loaded by loadNear once the viewport is known.
+func (s *tuiImages) lines(attachment tooltypes.ToolAttachment, maxCols, maxRows, line int) (rows []string, ok bool) {
 	if s == nil || attachment.Type != "image" || attachment.Error != "" || !validImageShortCode(attachment.ShortCode) {
 		return nil, false
 	}
@@ -181,48 +215,39 @@ func (s *tuiImages) lines(attachment tooltypes.ToolAttachment, maxCols, maxRows 
 
 	source := s.sources[attachment.ShortCode]
 	if source == nil {
-		source = &imageSource{loading: true, width: attachment.Width, height: attachment.Height}
+		source = &imageSource{shortCode: attachment.ShortCode, width: attachment.Width, height: attachment.Height}
 		s.sources[attachment.ShortCode] = source
-		go s.load(attachment.ShortCode, source, s.fetcher)
 	}
 	if source.err != nil {
 		return []string{mutedStyle.Render(imageUnavailableText(source.err, maxCols))}, false
 	}
 	cols, height := termimage.Fit(source.width, source.height, maxCols, maxRows, s.cell)
-	if source.loading {
-		return imageLoadingLines(height), true
-	}
-
-	rendition := s.renditionLocked(source, cols, height)
-	switch {
-	case rendition.err != nil:
-		return []string{mutedStyle.Render(imageUnavailableText(rendition.err, maxCols))}, false
-	case rendition.rendering:
-		return imageLoadingLines(height), true
-	}
-	if rendition.lines == nil {
-		rendition.lines = make([]string, rendition.rows)
-		for row := range rendition.rows {
-			rendition.lines[row] = termimage.PlaceholderLine(s.protocol, rendition.id, row, rendition.cols)
+	rows, ok = imageLoadingLines(height), true
+	if rendition := findRendition(source, cols, height); rendition != nil {
+		switch {
+		case rendition.err != nil:
+			rows, ok = []string{mutedStyle.Render(imageUnavailableText(rendition.err, maxCols))}, false
+		case rendition.rendition != nil:
+			if rendition.lines == nil {
+				rendition.lines = make([]string, rendition.rows)
+				for row := range rendition.rows {
+					rendition.lines[row] = termimage.PlaceholderLine(s.protocol, rendition.id, row, rendition.cols)
+				}
+			}
+			rows = rendition.lines
 		}
 	}
-	return rendition.lines, true
+	s.placing = append(s.placing, imagePlacement{source: source, cols: cols, rows: height, line: line, height: len(rows)})
+	return rows, ok
 }
 
-// renditionLocked returns the rendition of source at cols x rows, starting to
-// render it when needed.
-func (s *tuiImages) renditionLocked(source *imageSource, cols, rows int) *imageRendition {
+func findRendition(source *imageSource, cols, rows int) *imageRendition {
 	for _, rendition := range source.renditions {
 		if rendition.cols == cols && rendition.rows == rows {
-			rendition.pass = s.pass
 			return rendition
 		}
 	}
-	rendition := &imageRendition{source: source, id: s.ids.Next(), cols: cols, rows: rows, rendering: true, pass: s.pass}
-	s.byID[rendition.id] = rendition
-	source.renditions = append(source.renditions, rendition)
-	go s.render(source.data, rendition, s.cell)
-	return rendition
+	return nil
 }
 
 // beginPass starts a transcript render.
@@ -232,30 +257,108 @@ func (s *tuiImages) beginPass() {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.pass++
+	s.placing = nil
 }
 
-// endPass drops the sizes the finished transcript render did not request.
+// endPass records where the finished transcript render placed its images.
 func (s *tuiImages) endPass() {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for id, rendition := range s.byID {
-		if rendition.pass == s.pass {
+	s.placed, s.placing = s.placing, nil
+}
+
+// loadNear downloads and resizes the images within a viewport height of the
+// viewport at transcript line top, then evicts cached images away from it.
+func (s *tuiImages) loadNear(top, height int) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.enabled() {
+		return
+	}
+	s.near++
+	low, high := top-height, top+2*height
+	for _, placement := range s.placed {
+		if placement.line+placement.height <= low || placement.line >= high {
 			continue
 		}
-		delete(s.byID, id)
-		rendition.source.renditions = slices.DeleteFunc(rendition.source.renditions, func(r *imageRendition) bool { return r == rendition })
-		s.output.Release(id)
+		source := placement.source
+		source.near = s.near
+		rendition := findRendition(source, placement.cols, placement.rows)
+		switch {
+		case rendition != nil:
+			rendition.near = s.near
+		case source.err != nil || source.loading:
+		case source.data == nil:
+			source.loading = true
+			go s.load(source, s.fetcher)
+		case placement.cols > 0:
+			rendition = &imageRendition{
+				source: source, id: s.ids.Next(), cols: placement.cols, rows: placement.rows,
+				rendering: true, near: s.near,
+			}
+			s.byID[rendition.id] = rendition
+			source.renditions = append(source.renditions, rendition)
+			go s.render(source.data, rendition, s.cell)
+		}
+	}
+	s.evictLocked()
+}
+
+// evictLocked frees the least recently viewed downloads and renditions,
+// keeping those near the viewport, until the cache fits its budget.
+func (s *tuiImages) evictLocked() {
+	type entry struct {
+		near  uint64
+		size  int
+		evict func()
+	}
+	var entries []entry
+	total := 0
+	for _, source := range s.sources {
+		total += len(source.data)
+		if source.data != nil && source.near != s.near {
+			entries = append(entries, entry{source.near, len(source.data), func() { source.data = nil }})
+		}
+		for _, rendition := range source.renditions {
+			if rendition.rendition == nil {
+				continue
+			}
+			total += len(rendition.rendition.PNG)
+			if rendition.near != s.near {
+				entries = append(entries, entry{rendition.near, len(rendition.rendition.PNG), func() { s.dropRenditionLocked(rendition) }})
+			}
+		}
+	}
+	slices.SortFunc(entries, func(a, b entry) int { return cmp.Compare(a.near, b.near) })
+	for _, entry := range entries {
+		if total <= s.cacheBytes {
+			return
+		}
+		entry.evict()
+		total -= entry.size
 	}
 }
 
-func (s *tuiImages) load(shortCode string, source *imageSource, fetcher imageFetcher) {
+func (s *tuiImages) dropRenditionLocked(rendition *imageRendition) {
+	delete(s.byID, rendition.id)
+	rendition.source.renditions = slices.DeleteFunc(rendition.source.renditions, func(r *imageRendition) bool { return r == rendition })
+	s.output.Release(rendition.id)
+}
+
+func (s *tuiImages) load(source *imageSource, fetcher imageFetcher) {
+	if !acquire(s.ctx, s.fetches) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(s.ctx, imageFetchTimeout)
-	data, err := fetcher.FetchImage(ctx, shortCode)
+	data, err := fetcher.FetchImage(ctx, source.shortCode)
 	cancel()
+	<-s.fetches
 	width, height := 0, 0
 	if err == nil {
 		width, height, err = termimage.Size(data)
@@ -269,12 +372,25 @@ func (s *tuiImages) load(shortCode string, source *imageSource, fetcher imageFet
 	s.changed()
 }
 
+func acquire(ctx context.Context, slots chan struct{}) bool {
+	select {
+	case slots <- struct{}{}:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
 func (s *tuiImages) render(data []byte, rendition *imageRendition, cell termimage.CellSize) {
+	if !acquire(s.ctx, s.renders) {
+		return
+	}
 	picture, err := termimage.Decode(data)
 	var rendered *termimage.Rendition
 	if err == nil {
 		rendered, err = termimage.Render(picture, rendition.cols, rendition.rows, cell)
 	}
+	<-s.renders
 	s.mu.Lock()
 	rendition.rendering, rendition.rendition, rendition.err = false, rendered, err
 	s.mu.Unlock()
@@ -384,7 +500,7 @@ func (m *model) renderTranscriptImages(b *strings.Builder, line *int, attachment
 	}
 	maxCols, maxRows := m.imagePreviewLimits(len(indent) + 2)
 	for _, attachment := range attachments {
-		rows, _ := m.images.lines(attachment, maxCols, maxRows)
+		rows, _ := m.images.lines(attachment, maxCols, maxRows, *line+1)
 		if len(rows) == 0 {
 			continue
 		}
@@ -413,8 +529,12 @@ func (m *model) renderAssistantText(b *strings.Builder, line *int, text string) 
 	for _, segment := range segments {
 		var rows []string
 		if segment.shortCode != "" {
+			start := *line
+			if wrote {
+				start++
+			}
 			attachment := tooltypes.ToolAttachment{Type: "image", ShortCode: segment.shortCode}
-			if preview, ok := m.images.lines(attachment, maxCols, maxRows); ok {
+			if preview, ok := m.images.lines(attachment, maxCols, maxRows, start); ok {
 				rows = preview
 			}
 		}

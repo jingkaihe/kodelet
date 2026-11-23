@@ -1376,6 +1376,9 @@ func (m *model) updateViewport(msg tea.Msg, cmd *tea.Cmd) {
 	if cmd != nil {
 		*cmd = vpCmd
 	}
+	if before != m.viewport.YOffset() {
+		m.loadVisibleImages()
+	}
 	if before != m.viewport.YOffset() && isVerticalViewportNavigation(msg) {
 		m.autoFollow = m.viewport.AtBottom()
 	}

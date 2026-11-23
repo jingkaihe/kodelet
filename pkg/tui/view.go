@@ -67,6 +67,12 @@ func (m *model) refreshViewport(scrollBottom bool) {
 	if m.welcomeLogoVisible() {
 		m.viewport.GotoTop() // Keep the fixed canvas visible even in a short terminal.
 	}
+	m.loadVisibleImages()
+}
+
+// loadVisibleImages loads the images near the transcript's scroll position.
+func (m *model) loadVisibleImages() {
+	m.images.loadNear(m.viewport.YOffset(), m.viewport.Height())
 }
 
 func (m *model) transcriptElapsedPlaceholder(render func(time.Time) string) string {

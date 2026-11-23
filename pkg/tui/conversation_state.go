@@ -137,6 +137,7 @@ func (m *model) activateConversation(key string) (bool, tea.Cmd) {
 	} else {
 		m.viewport.SetYOffset(state.viewportOffset)
 	}
+	m.loadVisibleImages()
 	return true, tea.Sequence(cmds...)
 }
 
