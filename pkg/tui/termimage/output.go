@@ -11,11 +11,12 @@ import (
 
 const (
 	// iTerm2 images are drawn once frames stop changing for settleDelay, and
-	// about every maxSettleDelay while they keep changing. minDrawDelay spans a
-	// couple of Bubble Tea frames, so the presented frame is on screen first.
+	// at most maxSettleDelay after the first change while they keep changing.
 	settleDelay    = 60 * time.Millisecond
 	maxSettleDelay = 250 * time.Millisecond
-	minDrawDelay   = 35 * time.Millisecond
+	// minDrawDelay spans a couple of Bubble Tea frames, so a frame presented
+	// this recently may not be on screen yet.
+	minDrawDelay = 35 * time.Millisecond
 )
 
 var (
@@ -39,11 +40,12 @@ type Output struct {
 	uploaded map[uint32]struct{}
 
 	// iTerm2 draws for the latest frame.
-	signature  uint64
-	draw       func() string
-	dirty      bool
-	dirtySince time.Time
-	timer      *time.Timer
+	signature   uint64
+	draw        func() string
+	presentedAt time.Time
+	dirty       bool
+	dirtySince  time.Time
+	timer       *time.Timer
 }
 
 // NewOutput wraps file for protocol.
@@ -177,7 +179,7 @@ func (o *Output) Present(signature uint64, draw func() string) {
 	if signature == o.signature && o.draw != nil {
 		return
 	}
-	o.signature, o.draw = signature, draw
+	o.signature, o.draw, o.presentedAt = signature, draw, time.Now()
 	o.scheduleLocked()
 }
 
@@ -189,7 +191,7 @@ func (o *Output) scheduleLocked() {
 	if !o.dirty {
 		o.dirty, o.dirtySince = true, now
 	}
-	delay := min(settleDelay, max(minDrawDelay, maxSettleDelay-now.Sub(o.dirtySince)))
+	delay := min(settleDelay, max(0, maxSettleDelay-now.Sub(o.dirtySince)))
 	if o.timer == nil {
 		o.timer = time.AfterFunc(delay, o.drawSettled)
 		return
@@ -223,4 +225,9 @@ func (o *Output) drawSettled() {
 		commands +
 		ansi.RestoreCursor +
 		ansi.ResetModeSynchronizedOutput)
+	if time.Since(o.presentedAt) < minDrawDelay {
+		// Draw again once the frame is surely on screen.
+		o.dirty, o.dirtySince = true, time.Now()
+		o.timer.Reset(minDrawDelay)
+	}
 }

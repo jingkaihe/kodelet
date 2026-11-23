@@ -84,6 +84,29 @@ func TestOutputDrawsITerm2ImagesAfterFramesSettle(t *testing.T) {
 	assert.NotContains(t, written(), "<closed>")
 }
 
+func TestOutputDrawsWhileFramesKeepChanging(t *testing.T) {
+	output, _ := newTestOutput(t, ITerm2)
+	write(t, output, enter)
+	var draws atomic.Int32
+	start := time.Now()
+	for signature := uint64(1); time.Since(start) < 4*maxSettleDelay; signature++ {
+		output.Present(signature, func() string {
+			draws.Add(1)
+			return "<image>"
+		})
+		time.Sleep(10 * time.Millisecond)
+	}
+	assert.GreaterOrEqual(t, draws.Load(), int32(2), "scrolling does not postpone drawing past maxSettleDelay")
+}
+
+func TestOutputRedrawsAFrameDrawnTooSoon(t *testing.T) {
+	output, written := newTestOutput(t, ITerm2)
+	write(t, output, enter)
+	output.Present(1, func() string { return "<image>" })
+	output.drawSettled() // as the deadline would, before the frame may show
+	require.Eventually(t, func() bool { return strings.Count(written(), "<image>") == 2 }, time.Second, 5*time.Millisecond)
+}
+
 func TestOutputDropsSupersededITerm2Draws(t *testing.T) {
 	output, written := newTestOutput(t, ITerm2)
 	write(t, output, enter)
