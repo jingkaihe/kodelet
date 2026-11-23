@@ -47,6 +47,9 @@ type tuiImages struct {
 	sources map[string]*imageSource
 	byID    map[uint32]*imageRendition
 	frame   uint64
+	// pass counts transcript renders; sizes requested in the current pass
+	// are kept, however many there are.
+	pass uint64
 }
 
 type imageSource struct {
@@ -54,11 +57,11 @@ type imageSource struct {
 	err           error
 	data          []byte
 	width, height int
-	// renditions holds the most recently requested sizes, newest first.
-	renditions []*imageRendition
+	renditions    []*imageRendition
 }
 
 type imageRendition struct {
+	source     *imageSource
 	id         uint32
 	cols, rows int
 	rendering  bool
@@ -66,6 +69,7 @@ type imageRendition struct {
 	err        error
 	lines      []string
 	lastSeen   uint64
+	pass       uint64
 }
 
 func newTUIImages(ctx context.Context, notify chan<- tea.Msg) *tuiImages {
@@ -206,28 +210,46 @@ func (s *tuiImages) lines(attachment tooltypes.ToolAttachment, maxCols, maxRows 
 }
 
 // renditionLocked returns the rendition of source at cols x rows, starting to
-// render it when needed. Only the two most recent sizes are kept.
+// render it when needed.
 func (s *tuiImages) renditionLocked(source *imageSource, cols, rows int) *imageRendition {
-	for i, rendition := range source.renditions {
+	for _, rendition := range source.renditions {
 		if rendition.cols == cols && rendition.rows == rows {
-			if i > 0 {
-				source.renditions = slices.Insert(slices.Delete(source.renditions, i, i+1), 0, rendition)
-			}
+			rendition.pass = s.pass
 			return rendition
 		}
 	}
-	rendition := &imageRendition{id: s.ids.Next(), cols: cols, rows: rows, rendering: true}
+	rendition := &imageRendition{source: source, id: s.ids.Next(), cols: cols, rows: rows, rendering: true, pass: s.pass}
 	s.byID[rendition.id] = rendition
-	source.renditions = slices.Insert(source.renditions, 0, rendition)
-	if len(source.renditions) > 2 {
-		for _, stale := range source.renditions[2:] {
-			delete(s.byID, stale.id)
-			s.output.Release(stale.id)
-		}
-		source.renditions = source.renditions[:2]
-	}
+	source.renditions = append(source.renditions, rendition)
 	go s.render(source.data, rendition, s.cell)
 	return rendition
+}
+
+// beginPass starts a transcript render.
+func (s *tuiImages) beginPass() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pass++
+}
+
+// endPass drops the sizes the finished transcript render did not request.
+func (s *tuiImages) endPass() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, rendition := range s.byID {
+		if rendition.pass == s.pass {
+			continue
+		}
+		delete(s.byID, id)
+		rendition.source.renditions = slices.DeleteFunc(rendition.source.renditions, func(r *imageRendition) bool { return r == rendition })
+		s.output.Release(id)
+	}
 }
 
 func (s *tuiImages) load(shortCode string, source *imageSource, fetcher imageFetcher) {

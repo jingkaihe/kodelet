@@ -9,6 +9,8 @@ import (
 )
 
 func (m *model) renderTranscript() (string, []detailRegion) {
+	m.images.beginPass()
+	defer m.images.endPass()
 	var b strings.Builder
 	regions := []detailRegion{}
 	line := 0

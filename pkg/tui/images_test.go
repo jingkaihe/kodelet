@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -413,4 +414,62 @@ func TestTranscriptShowsFullImageLinksInReplies(t *testing.T) {
 
 	content, _ := m.renderTranscript()
 	assert.Contains(t, ansi.Strip(content), "https://connected.example/i/bFMUeAa9fd0DT7VVvGwxpg")
+}
+
+func TestImageSizesRequestedInOnePassAreKept(t *testing.T) {
+	runner := &imageTestRunner{images: map[string][]byte{"chart": imageTestPNG(t)}}
+	m, _, _ := newImageTestModel(t, runner, termimage.Kitty)
+	attachment := tooltypes.ToolAttachment{Type: "image", ShortCode: "chart", Width: 300, Height: 200}
+	// Indentation gives the same image three widths on a narrow terminal.
+	renderPass := func() {
+		m.images.beginPass()
+		for _, cols := range []int{20, 18, 16} {
+			m.images.lines(attachment, cols, 30)
+		}
+		m.images.endPass()
+	}
+	ready := func() bool {
+		m.images.mu.Lock()
+		defer m.images.mu.Unlock()
+		if len(m.images.byID) != 3 {
+			return false
+		}
+		for _, rendition := range m.images.byID {
+			if rendition.rendition == nil {
+				return false
+			}
+		}
+		return true
+	}
+	ids := func() []uint32 {
+		m.images.mu.Lock()
+		defer m.images.mu.Unlock()
+		ids := slices.Collect(maps.Keys(m.images.byID))
+		slices.Sort(ids)
+		return ids
+	}
+
+	deadline := time.After(5 * time.Second)
+	for renderPass(); !ready(); renderPass() {
+		select {
+		case <-m.runCh:
+		case <-deadline:
+			t.Fatal("timed out waiting for image renditions")
+		}
+	}
+	rendered := ids()
+	for range 3 {
+		renderPass()
+	}
+	assert.Equal(t, rendered, ids(), "no size is evicted and rendered again")
+	select {
+	case msg := <-m.runCh:
+		t.Fatalf("unexpected image update %T", msg)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	m.images.beginPass()
+	m.images.lines(attachment, 20, 30)
+	m.images.endPass()
+	assert.Len(t, ids(), 1, "sizes the latest pass did not request are dropped")
 }
