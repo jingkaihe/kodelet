@@ -1240,3 +1240,33 @@ func TestControlPlaneChatURLRequiresTLSOffLoopback(t *testing.T) {
 	_, err := NewClient("http://example.com", "", "runner-1")
 	require.ErrorContains(t, err, "require https")
 }
+
+func TestClientFetchImage(t *testing.T) {
+	var oversized bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "Bearer client-token", r.Header.Get("Authorization"))
+		switch {
+		case oversized:
+			_, _ = w.Write(make([]byte, maxControlPlaneImageSize+1))
+		case r.URL.Path == "/kodelet/i/abc_-1":
+			_, _ = w.Write([]byte("png bytes"))
+		default:
+			http.Error(w, "{\"error\":\"image not found\"}", http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	client, err := NewClient(server.URL+"/kodelet", "client-token", "")
+	require.NoError(t, err)
+
+	data, err := client.FetchImage(t.Context(), "abc_-1")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("png bytes"), data)
+
+	_, err = client.FetchImage(t.Context(), "missing")
+	assert.ErrorContains(t, err, "server returned HTTP 404: image not found")
+
+	oversized = true
+	_, err = client.FetchImage(t.Context(), "abc_-1")
+	assert.ErrorContains(t, err, "image is too large to load")
+}

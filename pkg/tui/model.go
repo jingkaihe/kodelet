@@ -13,6 +13,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
@@ -20,6 +21,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
+	"github.com/jingkaihe/kodelet/pkg/tui/termimage"
 	"github.com/pkg/errors"
 	"golang.org/x/term"
 )
@@ -32,6 +34,10 @@ func Run(ctx context.Context, config Config) error {
 		return err
 	}
 	if _, err := ParseWelcomeEffect(config.WelcomeEffect); err != nil {
+		return err
+	}
+	imageSetting, err := termimage.ParseSetting(config.ImageProtocol)
+	if err != nil {
 		return err
 	}
 	// Bubble Tea otherwise opens the controlling TTY when stdin is redirected,
@@ -54,8 +60,21 @@ func Run(ctx context.Context, config Config) error {
 		}()
 	}
 
-	program := tea.NewProgram(initialModel)
+	var options []tea.ProgramOption
+	imageOutput := enableImages(initialModel.images, imageSetting)
+	if imageOutput != nil {
+		options = append(options, tea.WithOutput(imageOutput))
+	}
+	if initialModel.images.protocolEnabled() {
+		// Placeholder cells identify images by 24-bit color, which every
+		// supported terminal renders.
+		options = append(options, tea.WithColorProfile(colorprofile.TrueColor))
+	}
+	program := tea.NewProgram(initialModel, options...)
 	finalModel, err := program.Run()
+	if imageOutput != nil {
+		_ = imageOutput.Close()
+	}
 	initialModel.cancel()
 	final, isModel := finalModel.(model)
 	if isModel && final.audio != nil {
@@ -81,6 +100,28 @@ func Run(ctx context.Context, config Config) error {
 		}
 	}
 	return err
+}
+
+// enableImages turns on inline images when the terminal supports them. When
+// the environment does not identify the terminal, as over SSH, auto asks the
+// terminal once the program runs. Colors are required, so NO_COLOR disables
+// images.
+func enableImages(images *tuiImages, setting string) *termimage.Output {
+	if colorprofile.Detect(os.Stdout, os.Environ()) < colorprofile.ANSI {
+		return nil
+	}
+	protocol := termimage.Resolve(setting, os.Getenv)
+	if protocol == termimage.None && setting != termimage.SettingAuto {
+		return nil
+	}
+	output := termimage.NewOutput(os.Stdout, protocol)
+	cell, _ := termimage.QueryCellSize(os.Stdout.Fd())
+	if protocol == termimage.None {
+		images.awaitTerminalVersion(output, cell)
+	} else {
+		images.enable(protocol, output, cell)
+	}
+	return output
 }
 
 func newModel(ctx context.Context, config Config) model {
@@ -137,6 +178,7 @@ func newModel(ctx context.Context, config Config) model {
 		runByState:          map[string]int{},
 		shortcutCalls:       map[int]*extensionShortcutCall{},
 		runCh:               runCh,
+		images:              newTUIImages(mctx, runCh),
 		terminalTitleEpoch:  time.Now(),
 	}
 	m.welcome = newWelcomeAnimation(config.WelcomeStyle, config.WelcomeEffect)
@@ -148,6 +190,7 @@ func newModel(ctx context.Context, config Config) model {
 // live program's context, channels, composer, or presentation state.
 func (m *model) configure(config Config) {
 	m.runner = config.Runner
+	m.images.setFetcher(config.Runner)
 	m.conversationSource, _ = config.Runner.(chat.ConversationSource)
 	m.conversationStream, _ = config.Runner.(chat.ConversationStreamer)
 	m.serverURL = strings.TrimSpace(config.ServerURL)
@@ -266,6 +309,9 @@ func (m model) Init() tea.Cmd {
 	}
 	if m.themeSelection == AutoThemeName {
 		cmds = append(cmds, tea.RequestBackgroundColor)
+	}
+	if m.images.awaitingTerminalVersion() {
+		cmds = append(cmds, tea.RequestTerminalVersion)
 	}
 	return tea.Batch(cmds...)
 }

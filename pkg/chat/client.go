@@ -33,6 +33,7 @@ import (
 const (
 	maxControlPlaneChatEventSize           = 16 << 20
 	maxControlPlaneConversationHistorySize = 64 << 20
+	maxControlPlaneImageSize               = 32 << 20
 )
 
 // Client is a daemon HTTP client for chat turns, conversation history, and workspace operations.
@@ -546,6 +547,38 @@ func (r *Client) ForkConversation(ctx context.Context, conversationID string) (s
 		return "", errors.New("server returned an invalid conversation fork response")
 	}
 	return result.ConversationID, nil
+}
+
+// FetchImage downloads an image artifact by the short code in its view link.
+func (r *Client) FetchImage(ctx context.Context, shortCode string) ([]byte, error) {
+	if r == nil || r.client == nil {
+		return nil, errors.New("the chat connection is not initialized")
+	}
+	endpoint, err := controlPlaneEndpointURL(r.baseURL, "i", shortCode)
+	if err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create image request")
+	}
+	r.authorize(request)
+	response, err := r.client.Do(request)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to load image")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, controlPlaneResponseError(response)
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, maxControlPlaneImageSize+1))
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to read image")
+	}
+	if len(data) > maxControlPlaneImageSize {
+		return nil, errors.New("image is too large to load")
+	}
+	return data, nil
 }
 
 func (r *Client) conversationAPIRequest(ctx context.Context, method string, path []string, query url.Values, result any) error {

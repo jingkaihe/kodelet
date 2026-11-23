@@ -20,6 +20,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/jingkaihe/kodelet/pkg/tui"
+	"github.com/jingkaihe/kodelet/pkg/tui/termimage"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/cobra"
@@ -97,12 +98,12 @@ func TestChatWelcomeSettings(t *testing.T) {
 			} {
 				t.Run(test.name, func(t *testing.T) {
 					t.Setenv(env, test.env)
-					setWelcomeConfigForTest(t, key, test.configured)
+					setTUIConfigForTest(t, key, test.configured)
 					var args []string
 					if test.flag != "" {
 						args = append(args, "--"+flagName+"="+test.flag)
 					}
-					value, err := resolveWelcomeSetting(daemonChatCommandForTest(t, args...), flagName, setting.parse)
+					value, err := resolveTUISetting(daemonChatCommandForTest(t, args...), flagName, setting.parse)
 					require.NoError(t, err)
 					assert.Equal(t, test.want, value)
 				})
@@ -114,7 +115,7 @@ func TestChatWelcomeSettings(t *testing.T) {
 func TestChatRejectsInvalidWelcomeSettingsBeforeStartup(t *testing.T) {
 	for _, name := range []string{"effect", "style"} {
 		t.Setenv("KODELET_WELCOME_"+strings.ToUpper(name), "")
-		setWelcomeConfigForTest(t, "welcome_"+name, "")
+		setTUIConfigForTest(t, "welcome_"+name, "")
 	}
 	var calls atomic.Int32
 	daemon := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
@@ -132,7 +133,7 @@ func TestChatRejectsInvalidWelcomeSettingsBeforeStartup(t *testing.T) {
 		} {
 			t.Run(test.source, func(t *testing.T) {
 				t.Setenv(env, test.env)
-				setWelcomeConfigForTest(t, key, test.configured)
+				setTUIConfigForTest(t, key, test.configured)
 				cmd := daemonChatCommandForTest(t, "--server="+daemon.URL, "--"+flagName+"="+test.flag)
 				err := chatCmd.RunE(cmd, nil)
 				require.ErrorContains(t, err, "invalid "+test.source)
@@ -143,7 +144,38 @@ func TestChatRejectsInvalidWelcomeSettingsBeforeStartup(t *testing.T) {
 	assert.Zero(t, calls.Load(), "invalid settings must fail before the TUI starts or contacts the daemon")
 }
 
-func setWelcomeConfigForTest(t *testing.T, key, value string) {
+func TestChatImageProtocolSetting(t *testing.T) {
+	flag := chatCmd.Flags().Lookup("image-protocol")
+	require.NotNil(t, flag)
+	assert.Empty(t, flag.DefValue, "the flag default must not mask the environment or user configuration")
+	for _, test := range []struct {
+		name, flag, env, configured, want string
+	}{
+		{name: "default", want: termimage.SettingAuto},
+		{name: "configuration", configured: "ITERM2", want: termimage.SettingITerm2},
+		{name: "environment overrides configuration", env: "none", configured: "kitty", want: termimage.SettingNone},
+		{name: "flag overrides environment", flag: "kitty", env: "none", want: termimage.SettingKitty},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("KODELET_IMAGE_PROTOCOL", test.env)
+			setTUIConfigForTest(t, "image_protocol", test.configured)
+			var args []string
+			if test.flag != "" {
+				args = append(args, "--image-protocol="+test.flag)
+			}
+			value, err := resolveTUISetting(daemonChatCommandForTest(t, args...), "image-protocol", termimage.ParseSetting)
+			require.NoError(t, err)
+			assert.Equal(t, test.want, value)
+		})
+	}
+
+	t.Setenv("KODELET_IMAGE_PROTOCOL", "sixel")
+	_, err := resolveTUISetting(daemonChatCommandForTest(t), "image-protocol", termimage.ParseSetting)
+	require.ErrorContains(t, err, "invalid KODELET_IMAGE_PROTOCOL")
+	assert.ErrorContains(t, err, `unknown image protocol "sixel"`)
+}
+
+func setTUIConfigForTest(t *testing.T, key, value string) {
 	t.Helper()
 	viper.Set(key, value)
 	t.Cleanup(func() { viper.Set(key, nil) })
@@ -350,6 +382,7 @@ func daemonChatCommandForTest(t *testing.T, args ...string) *cobra.Command {
 	cmd.Flags().String("theme", tui.AutoThemeName, "")
 	cmd.Flags().String("welcome-effect", "", "")
 	cmd.Flags().String("welcome-style", "", "")
+	cmd.Flags().String("image-protocol", "", "")
 	require.NoError(t, cmd.ParseFlags(append([]string{"--auth-token=client"}, args...)))
 	return cmd
 }

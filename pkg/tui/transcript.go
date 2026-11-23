@@ -122,6 +122,7 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 							})
 						}
 						line += lineCount(header)
+						m.renderTranscriptImages(&b, &line, group.headerImages, indent)
 						if group.expanded || (group.active && !group.codeParent && group.codeKey == "") {
 							body := group.body
 							if group.markdownBody {
@@ -150,17 +151,14 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 								b.WriteString("\n")
 								line += lineCount(rendered)
 							}
+							m.renderTranscriptImages(&b, &line, group.bodyImages, indent)
 						}
 					}
 				case blockText:
 					trimmed := strings.TrimSpace(block.text)
 					if trimmed != "" {
 						m.renderAssistantBlockSeparator(&b, &line, &renderedAssistantBlock)
-						renderedMarkdown := m.renderMarkdown(trimmed, m.transcriptTextWidth(), markdownAssistant)
-						rendered := renderPersistentStyle(assistantStyle, renderedMarkdown)
-						b.WriteString(rendered)
-						b.WriteString("\n")
-						line += lineCount(rendered)
+						m.renderAssistantText(&b, &line, trimmed)
 					}
 				}
 			}

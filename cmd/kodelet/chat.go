@@ -16,6 +16,7 @@ import (
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/jingkaihe/kodelet/pkg/tui"
+	"github.com/jingkaihe/kodelet/pkg/tui/termimage"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -51,11 +52,15 @@ var chatCmd = &cobra.Command{
 	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error { return validateRemoteChatFlags(cmd) },
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		theme, _ := cmd.Flags().GetString("theme")
-		welcomeEffect, err := resolveWelcomeSetting(cmd, "welcome-effect", tui.ParseWelcomeEffect)
+		welcomeEffect, err := resolveTUISetting(cmd, "welcome-effect", tui.ParseWelcomeEffect)
 		if err != nil {
 			return err
 		}
-		welcomeStyle, err := resolveWelcomeSetting(cmd, "welcome-style", tui.ParseWelcomeStyle)
+		welcomeStyle, err := resolveTUISetting(cmd, "welcome-style", tui.ParseWelcomeStyle)
+		if err != nil {
+			return err
+		}
+		imageProtocol, err := resolveTUISetting(cmd, "image-protocol", termimage.ParseSetting)
 		if err != nil {
 			return err
 		}
@@ -66,6 +71,7 @@ var chatCmd = &cobra.Command{
 			Theme:         theme,
 			WelcomeEffect: welcomeEffect,
 			WelcomeStyle:  welcomeStyle,
+			ImageProtocol: imageProtocol,
 			Initialize: func(ctx context.Context) (tui.Config, error) {
 				return prepareDaemonChat(ctx, cmd)
 			},
@@ -73,7 +79,7 @@ var chatCmd = &cobra.Command{
 	},
 }
 
-func resolveWelcomeSetting(cmd *cobra.Command, flagName string, parse func(string) (string, error)) (string, error) {
+func resolveTUISetting(cmd *cobra.Command, flagName string, parse func(string) (string, error)) (string, error) {
 	key := strings.ReplaceAll(flagName, "-", "_")
 	env := "KODELET_" + strings.ToUpper(key)
 	value, source := viper.GetString(key), key+" setting"
@@ -512,6 +518,12 @@ func init() {
 		"",
 		"TUI welcome style (available: "+strings.Join(tui.AvailableWelcomeStyles(), ", ")+
 			"; plain disables animation; defaults to KODELET_WELCOME_STYLE, the welcome_style setting, or "+tui.DefaultWelcomeStyle+")",
+	)
+	chatCmd.Flags().String(
+		"image-protocol",
+		"",
+		"Inline image protocol (available: "+strings.Join(termimage.AvailableSettings(), ", ")+
+			"; defaults to KODELET_IMAGE_PROTOCOL, the image_protocol setting, or auto)",
 	)
 	chatCmd.Flags().BoolP("follow", "f", defaults.Follow, "Follow the most recent conversation")
 	chatCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extensions for this conversation")

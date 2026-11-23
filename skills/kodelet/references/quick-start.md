@@ -72,6 +72,7 @@ kodelet chat --profile openai --reasoning-effort high
 kodelet chat --resume CONVERSATION_ID
 kodelet chat --theme catppuccin-latte
 kodelet chat --welcome-effect beams  # or matrix; none (static) is the default
+kodelet chat --image-protocol iterm2  # inline image previews; auto detects Kitty, Ghostty, and iTerm2
 kodelet chat --runner project-runner --cwd ../another-project --server https://kodelet.example
 ```
 

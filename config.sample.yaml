@@ -25,6 +25,13 @@ log_format: "json"
 # KODELET_WELCOME_STYLE overrides this setting; --welcome-style overrides both.
 # welcome_style: "block"
 
+# Inline image previews in `kodelet chat`: auto (default) detects Kitty, Ghostty,
+# and iTerm2, including over SSH; kitty or iterm2 force a protocol; none shows
+# image links only.
+# This is a client display setting.
+# KODELET_IMAGE_PROTOCOL overrides this setting; --image-protocol overrides both.
+# image_protocol: "auto"
+
 # Browser settings for `serve` and `runner start` (trusted config only).
 # Precedence: --browser-* flags > KODELET_BROWSER_* env vars > YAML.
 # browser:

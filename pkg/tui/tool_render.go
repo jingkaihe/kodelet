@@ -31,6 +31,10 @@ type toolRenderGroup struct {
 	plainHeader  bool
 	codeKey      string
 	codeParent   bool
+	// Image previews follow the header, or the body when expanded, wherever
+	// the group shows the images' links.
+	headerImages []tooltypes.ToolAttachment
+	bodyImages   []tooltypes.ToolAttachment
 }
 
 type toolRenderLabelPart struct {
@@ -214,7 +218,9 @@ func (m *model) buildCodeExecutionToolGroups(block assistantBlock, idx int, grou
 	if code := stringField(toolInputFields(tool.input), "code"); code != "" {
 		body = renderers.FencedCodeBlock("javascript", sanitizeExtensionTranscriptText(code))
 	}
+	var images []tooltypes.ToolAttachment
 	if tool.done {
+		images = imageAttachments(tool.structured)
 		output := renderers.CodeExecutionOutput(meta)
 		if tool.structured == nil && !tool.failed {
 			output = tool.result
@@ -232,6 +238,7 @@ func (m *model) buildCodeExecutionToolGroups(block assistantBlock, idx int, grou
 		toolStart: idx, toolEnd: idx, changeIndex: -1, codeKey: "code",
 		indent: 2,
 		label:  "Code", body: body, markdownBody: true, expanded: expanded("code"),
+		bodyImages: images,
 	})
 	// Reuse normal tool bodies and per-file rendering at the nested width. Keep
 	// commands separate so parallel output is only shown for expanded children.
@@ -311,13 +318,15 @@ func (m model) buildBrowserToolGroup(block assistantBlock, idx int) toolRenderGr
 	if errorText != "" {
 		parts = append(parts, renderers.FencedCodeBlock("text", "Error: "+sanitizeExtensionTranscriptText(errorText)))
 	}
+	var images []tooltypes.ToolAttachment
 	if tool.done && tool.structured != nil {
-		images := renderers.ImageAttachmentLines(*tool.structured, m.serverURL)
-		for i, image := range images {
-			images[i] = strings.TrimPrefix(image, "Generated image - ")
+		images = imageAttachments(tool.structured)
+		links := renderers.ImageAttachmentLines(*tool.structured, m.serverURL)
+		for i, link := range links {
+			links[i] = strings.TrimPrefix(link, "Generated image - ")
 		}
-		if len(images) > 0 {
-			parts = append(parts, renderers.FencedCodeBlock("text", sanitizeExtensionTranscriptText(strings.Join(images, "\n"))))
+		if len(links) > 0 {
+			parts = append(parts, renderers.FencedCodeBlock("text", sanitizeExtensionTranscriptText(strings.Join(links, "\n"))))
 		}
 	}
 	return toolRenderGroup{
@@ -328,6 +337,7 @@ func (m model) buildBrowserToolGroup(block assistantBlock, idx int) toolRenderGr
 		expanded:     block.expanded || tool.expanded || tool.failed,
 		active:       !tool.done,
 		failed:       tool.failed,
+		bodyImages:   images,
 	}
 }
 
@@ -354,7 +364,9 @@ func (m model) buildImageToolGroup(block assistantBlock, idx int) toolRenderGrou
 		failed:      tool.failed,
 	}
 	lines := renderers.ImageAttachmentLines(*tool.structured, m.serverURL)
+	images := imageAttachments(tool.structured)
 	if normalizedToolName(tool) == "view_image" {
+		group.bodyImages = images
 		for i, line := range lines {
 			lines[i] = strings.TrimPrefix(line, "Viewed image - ")
 		}
@@ -367,8 +379,22 @@ func (m model) buildImageToolGroup(block assistantBlock, idx int) toolRenderGrou
 		group.label = sanitizeExtensionTranscriptText(strings.Join(lines, "\n"))
 		group.body = joinTools([]toolCall{tool})
 		group.plainHeader = true
+		group.headerImages = images
 	}
 	return group
+}
+
+func imageAttachments(result *tooltypes.StructuredToolResult) []tooltypes.ToolAttachment {
+	if result == nil {
+		return nil
+	}
+	var images []tooltypes.ToolAttachment
+	for _, attachment := range result.Attachments {
+		if attachment.Type == "image" {
+			images = append(images, attachment)
+		}
+	}
+	return images
 }
 
 func (m *model) buildTaskRunToolGroup(block assistantBlock, idx int) toolRenderGroup {

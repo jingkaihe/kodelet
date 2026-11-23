@@ -34,6 +34,7 @@ type Config struct {
 	Theme                   string
 	WelcomeStyle            string
 	WelcomeEffect           string
+	ImageProtocol           string          // Inline image protocol setting; see termimage.ParseSetting.
 	ServerURL               string          // Connected control-plane base URL for relative image links.
 	Runner                  chat.ChatRunner // Required unless Initialize is set; the daemon owns execution.
 	// Initialize optionally prepares the daemon connection after the TUI renders.
@@ -321,6 +322,8 @@ type model struct {
 
 	theme          tuiTheme
 	themeSelection string
+
+	images *tuiImages
 
 	messageHistoryStore *messagehistory.Store
 

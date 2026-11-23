@@ -13,6 +13,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/google/shlex"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
@@ -119,6 +120,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.images.refreshCellSize()
 		m.resize()
 		cmds = append(cmds, m.startWelcomeAnimation())
 		cmds = append(cmds, m.updateExtensionSurfaceLayouts()...)
@@ -133,6 +135,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		return m, m.applyResolvedTheme(theme)
+
+	case imagesChangedMsg:
+		return m, tea.Batch(waitForMsg(m.runCh), m.queueTranscriptRefresh(m.autoFollow))
+
+	case tea.TerminalVersionMsg:
+		if !m.images.terminalVersion(msg.Name) {
+			return m, nil
+		}
+		m.refreshViewport(m.autoFollow)
+		// As in Run, placeholder cells need 24-bit color.
+		return m, func() tea.Msg { return tea.ColorProfileMsg{Profile: colorprofile.TrueColor} }
 
 	case extensionUIFlushMsg:
 		if m.extensionUI == nil {
@@ -1470,6 +1483,8 @@ func (m *model) openComposerInEditor() tea.Cmd {
 		_ = os.Remove(path)
 		return m.notifyEditorError("Failed to launch $EDITOR: " + err.Error())
 	}
+	// The program's output may wrap the terminal, which the editor needs directly.
+	cmd.Stdout = os.Stdout
 	m.reasoningPickerOpen = false
 	m.modelPickerOpen = false
 	m.dismissSlashCommandSuggestions()

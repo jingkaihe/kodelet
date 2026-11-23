@@ -200,6 +200,7 @@ func (m model) View() tea.View {
 		content = lipgloss.JoinVertical(lipgloss.Left, parts...)
 		content = m.renderUIOverlays(content)
 		content = leftMarginBlock(content, tuiLeftMargin)
+		content = m.images.compose(content, m.height)
 	}
 
 	view := tea.NewView(content)
