@@ -604,3 +604,29 @@ func TestImageCacheEvictsImagesAwayFromTheViewport(t *testing.T) {
 	waitUntil(0, func() bool { return rendered("near") })
 	assert.Equal(t, 2, runner.fetchCount("near"), "scrolling back downloads it again")
 }
+
+func TestTranscriptDrawsRepeatedITerm2Images(t *testing.T) {
+	const code = "bFMUeAa9fd0DT7VVvGwxpg"
+	runner := &imageTestRunner{images: map[string][]byte{code: imageTestPNG(t)}}
+	m, output, written := newImageTestModel(t, runner, termimage.ITerm2)
+	image := "![London Bridge at sunset](/i/" + code + ")"
+	m.entries = []chatEntry{{kind: entryAssistant, blocks: []assistantBlock{{
+		kind: blockText,
+		text: "Here it is:\n\n" + image + "\n\nAnd again:\n\n" + image,
+	}}}}
+	m.refreshViewport(true)
+	waitForImages(t, &m, func() bool { return len(m.images.byID) == 1 && m.images.byID[firstImageID(&m)].rendition != nil })
+
+	write(t, output, ansi.SetModeAltScreenSaveCursor)
+	lines := strings.Split(ansi.Strip(m.View().Content), "\n")
+	first := slicesIndexFunc(lines, func(line string) bool { return strings.Contains(line, "Here it is:") })
+	second := slicesIndexFunc(lines, func(line string) bool { return strings.Contains(line, "And again:") })
+	require.GreaterOrEqual(t, first, 0)
+	require.Greater(t, second, first)
+	// Each copy follows its paragraph and a blank line, after the left margin.
+	require.Eventually(t, func() bool {
+		drawn := written()
+		return strings.Contains(drawn, ansi.CursorPosition(2, first+3)+"\x1b]1337;File=") &&
+			strings.Contains(drawn, ansi.CursorPosition(2, second+3)+"\x1b]1337;File=")
+	}, time.Second, 5*time.Millisecond)
+}

@@ -62,6 +62,26 @@ func TestComposeFrameITerm2BlanksAndPlacesVisibleRows(t *testing.T) {
 	assert.NotZero(t, frame.Signature)
 }
 
+func TestComposeFrameITerm2PlacesRepeatedImages(t *testing.T) {
+	lines := []string{
+		// The first copy is scrolled so only its last row shows.
+		" " + PlaceholderLine(ITerm2, 4, 1, 3),
+		"between",
+		"  " + PlaceholderLine(ITerm2, 4, 0, 3),
+		"  " + PlaceholderLine(ITerm2, 4, 1, 3),
+		"and " + PlaceholderLine(ITerm2, 4, 0, 3),
+		"composer",
+	}
+
+	_, frame := ComposeFrame(ITerm2, strings.Join(lines, "\n"), len(lines), func(uint32) int { return 3 })
+
+	assert.Equal(t, []Placement{
+		{ID: 4, X: 1, Y: 0, FirstRow: 1, Rows: 1, Cols: 3},
+		{ID: 4, X: 2, Y: 2, FirstRow: 0, Rows: 2, Cols: 3},
+		{ID: 4, X: 4, Y: 4, FirstRow: 0, Rows: 1, Cols: 3},
+	}, frame.Placements)
+}
+
 func TestComposeFrameITerm2SkipsHorizontallyClippedRows(t *testing.T) {
 	line := xansi.Truncate(PlaceholderLine(ITerm2, 3, 0, 6), 4, "")
 	_, frame := ComposeFrame(ITerm2, line+"\n", 5, func(uint32) int { return 6 })

@@ -67,60 +67,63 @@ func ComposeFrame(protocol Protocol, content string, height int, imageCols func(
 	}
 	content = strings.Join(lines, "\n")
 
+	// A span is one image row as it appears on screen. The same image may
+	// appear more than once, so a span starts at every column 0, and it is
+	// complete when the following columns continue it on the same line.
 	type rowKey struct {
 		id  uint32
 		row int
 	}
 	type rowSpan struct {
+		id         uint32
+		row        int
 		x, y, cols int
 		complete   bool
 	}
-	spans := map[rowKey]*rowSpan{}
-	var keys []rowKey
+	var spans []*rowSpan
+	open := map[rowKey]*rowSpan{}
 	for _, cell := range cells {
 		key := rowKey{cell.id, cell.row}
-		span := spans[key]
-		if span == nil {
-			// A row is complete when its columns appear once, in order, on one line.
-			spans[key] = &rowSpan{x: cell.x, y: cell.y, cols: 1, complete: cell.col == 0}
-			keys = append(keys, key)
+		if span := open[key]; span != nil && cell.col != 0 {
+			if cell.y == span.y && cell.col == span.cols && cell.x == span.x+span.cols {
+				span.cols++
+			} else {
+				span.complete = false
+			}
 			continue
 		}
-		if cell.y != span.y || cell.col != span.cols || cell.x != span.x+span.cols {
-			span.complete = false
-		}
-		span.cols++
+		span := &rowSpan{id: cell.id, row: cell.row, x: cell.x, y: cell.y, cols: 1, complete: cell.col == 0}
+		open[key] = span
+		spans = append(spans, span)
 	}
 
-	slices.SortFunc(keys, func(a, b rowKey) int {
-		if a.id != b.id {
-			return slices.Index(frame.Visible, a.id) - slices.Index(frame.Visible, b.id)
-		}
-		return a.row - b.row
-	})
+	// Join consecutive rows of an image at the same column into placements.
+	type nextRow struct {
+		id   uint32
+		x, y int
+		row  int
+	}
+	runs := map[nextRow]int{}
 	hash := fnv.New64a()
-	var current *Placement
-	for _, key := range keys {
-		span := spans[key]
-		cols := imageCols(key.id)
+	for _, span := range spans {
+		cols := imageCols(span.id)
 		// The cursor may advance below an image, which would scroll the screen
 		// if the image touched its last row.
 		if !span.complete || span.cols != cols || span.y >= height-1 {
-			current = nil
 			continue
 		}
-		if current != nil &&
-			current.ID == key.id &&
-			current.FirstRow+current.Rows == key.row &&
-			current.Y+current.Rows == span.y &&
-			current.X == span.x {
-			current.Rows++
+		key := nextRow{id: span.id, x: span.x, y: span.y, row: span.row}
+		index, ok := runs[key]
+		if ok {
+			delete(runs, key)
+			frame.Placements[index].Rows++
 		} else {
 			frame.Placements = append(frame.Placements, Placement{
-				ID: key.id, X: span.x, Y: span.y, FirstRow: key.row, Rows: 1, Cols: cols,
+				ID: span.id, X: span.x, Y: span.y, FirstRow: span.row, Rows: 1, Cols: cols,
 			})
-			current = &frame.Placements[len(frame.Placements)-1]
+			index = len(frame.Placements) - 1
 		}
+		runs[nextRow{id: span.id, x: span.x, y: span.y + 1, row: span.row + 1}] = index
 		_, _ = hash.Write([]byte(original[span.y]))
 	}
 	for _, placement := range frame.Placements {
