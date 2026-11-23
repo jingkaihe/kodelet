@@ -277,40 +277,86 @@ func imageTestPNG(t *testing.T) []byte {
 	return buf.Bytes()
 }
 
-func TestSplitMarkdownImages(t *testing.T) {
+func TestMarkdownPreviewsReplaceOnlyTopLevelImageParagraphs(t *testing.T) {
 	const code = "bFMUeAa9fd0DT7VVvGwxpg"
 	fence := strings.Repeat("~", 3)
-	fenced := fence + "\n![x](/i/" + code + ")\n" + fence
+	md := newMarkdownRenderer(80, assistantMarkdownStyle)
+	all := func(string) bool { return true }
 	for _, test := range []struct {
-		name string
-		text string
-		want []markdownSegment
+		name, text, want string
+		previews         []string
 	}{
-		{name: "no images", text: "plain text", want: []markdownSegment{{text: "plain text"}}},
 		{
-			name: "standalone image",
-			text: "Here it is:\n\n![London Bridge](/i/" + code + ")\n\nAI-generated.",
-			want: []markdownSegment{
-				{text: "Here it is:\n"},
-				{text: "![London Bridge](/i/" + code + ")", shortCode: code},
-				{text: "\nAI-generated."},
-			},
+			name:     "image paragraph",
+			text:     "Here it is:\n\n![bridge](/i/" + code + ")\n\nAI-generated.",
+			want:     "Here it is:\n\nKODELETIMAGEPREVIEW0\n\nAI-generated.",
+			previews: []string{code},
 		},
 		{
-			name: "absolute link with title",
-			text: "![chart](https://kodelet.example/base/i/" + code + " \"Chart\")",
-			want: []markdownSegment{{text: "![chart](https://kodelet.example/base/i/" + code + " \"Chart\")", shortCode: code}},
+			name:     "absolute link",
+			text:     "![chart](https://kodelet.example/base/i/" + code + " \"Chart\")",
+			want:     "KODELETIMAGEPREVIEW0",
+			previews: []string{code},
 		},
-		{name: "inline image", text: "See ![x](/i/" + code + ") here", want: []markdownSegment{{text: "See ![x](/i/" + code + ") here"}}},
-		{name: "code fence", text: fenced, want: []markdownSegment{{text: fenced}}},
-		{name: "other image", text: "![x](https://example.com/cat.png)", want: []markdownSegment{{text: "![x](https://example.com/cat.png)"}}},
-		{name: "absolute link needs a server short code", text: "![x](https://example.com/i/cat)", want: []markdownSegment{{text: "![x](https://example.com/i/cat)"}}},
-		{name: "query string", text: "![x](/i/" + code + "?download=1)", want: []markdownSegment{{text: "![x](/i/" + code + "?download=1)"}}},
+		{name: "inline image", text: "See ![x](/i/" + code + ") here"},
+		{name: "list item", text: "- ![x](/i/" + code + ")"},
+		{name: "code fence", text: fence + "\n![x](/i/" + code + ")\n" + fence},
+		{name: "other image", text: "![x](https://example.com/cat.png)"},
+		{name: "query string", text: "![x](/i/" + code + "?download=1)"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.want, splitMarkdownImages(test.text))
+			source, previews := markdownPreviews(md, []byte(test.text), all)
+			want := test.want
+			if want == "" {
+				want = test.text
+			}
+			assert.Equal(t, want, string(source))
+			assert.Equal(t, test.previews, previews)
 		})
 	}
+
+	source, previews := markdownPreviews(md, []byte("![x](/i/"+code+")"), func(string) bool { return false })
+	assert.Equal(t, "![x](/i/"+code+")", string(source), "images that cannot be previewed keep their markdown")
+	assert.Nil(t, previews)
+}
+
+func TestMarkdownResolvesOnlyImageLinkNodes(t *testing.T) {
+	m := newModel(t.Context(), Config{Runner: &imageTestRunner{}, Remote: true, ServerURL: "https://connected.example/base/"})
+	t.Cleanup(m.cancel)
+	fence := strings.Repeat("~", 3)
+	render := func(text string) string { return ansi.Strip(m.renderMarkdown(text, 120, markdownAssistant)) }
+
+	assert.Contains(t, render("Open [the image](/i/abc)."), "https://connected.example/base/i/abc")
+	assert.Contains(t, render("![chart](/i/abc)"), "https://connected.example/base/i/abc")
+	assert.Contains(t, render("See [the chart][chart].\n\n[chart]: /i/abc"), "https://connected.example/base/i/abc")
+	for _, text := range []string{
+		"Use \x60[x](/i/abc)\x60 in docs.",
+		fence + "\n[x](/i/abc)\n" + fence,
+		"See [images.go](pkg/tui/images.go).",
+		"[x](https://other.example/i/abc)",
+	} {
+		assert.NotContains(t, render(text), "connected.example", text)
+	}
+
+	m.serverURL = ""
+	assert.NotContains(t, render("[x](/i/abc)"), "https://")
+}
+
+func TestTranscriptPreviewsKeepReferenceLinks(t *testing.T) {
+	const code = "bFMUeAa9fd0DT7VVvGwxpg"
+	runner := &imageTestRunner{images: map[string][]byte{code: imageTestPNG(t)}}
+	m, _, _ := newImageTestModel(t, runner, termimage.Kitty)
+	m.entries = []chatEntry{{kind: entryAssistant, blocks: []assistantBlock{{
+		kind: blockText,
+		text: "See [the chart][chart].\n\n![bridge](/i/" + code + ")\n\n[chart]: /i/otherImageCode",
+	}}}}
+
+	m.refreshViewport(true)
+	waitForImages(t, &m, func() bool { return len(m.images.byID) == 1 && m.images.byID[firstImageID(&m)].rendition != nil })
+	plain := ansi.Strip(m.viewport.GetContent())
+	assert.Contains(t, plain, "https://connected.example/i/otherImageCode", "the definition still applies across the image")
+	assert.NotContains(t, plain, "KODELETIMAGEPREVIEW")
+	assert.Contains(t, m.viewport.GetContent(), termimage.PlaceholderLine(termimage.Kitty, firstImageID(&m), 0, 30))
 }
 
 func TestTranscriptPreviewsMarkdownImages(t *testing.T) {
@@ -336,12 +382,12 @@ func TestTranscriptPreviewsMarkdownImages(t *testing.T) {
 	assert.NotContains(t, ansi.Strip(m.viewport.GetContent()), "London Bridge at sunset", "the preview replaces the link")
 	lines := strings.Split(m.viewport.GetContent(), "\n")
 	assert.Equal(t, "Here's London Bridge.", strings.TrimSpace(ansi.Strip(lines[0])))
-	assert.Empty(t, lines[1])
+	assert.Empty(t, strings.TrimSpace(ansi.Strip(lines[1])))
 	id := firstImageID(&m)
 	for row := range 10 {
 		assert.Equal(t, termimage.PlaceholderLine(termimage.Kitty, id, row, 30), lines[2+row])
 	}
-	assert.Empty(t, lines[12])
+	assert.Empty(t, strings.TrimSpace(ansi.Strip(lines[12])))
 	assert.Equal(t, "The image is AI-generated.", strings.TrimSpace(ansi.Strip(lines[13])))
 }
 
@@ -401,31 +447,6 @@ func TestTerminalVersionIgnoresUnsupportedTerminals(t *testing.T) {
 	updated, cmd = m.Update(tea.TerminalVersionMsg{Name: "ghostty 1.4.0"})
 	assert.Nil(t, cmd, "only the first reply is used")
 	assert.False(t, updated.(model).images.protocolEnabled())
-}
-
-func TestAbsoluteImageLinks(t *testing.T) {
-	const code = "bFMUeAa9fd0DT7VVvGwxpg"
-	fence := strings.Repeat("~", 3)
-	for _, test := range []struct {
-		name, text, server, want string
-	}{
-		{
-			name:   "image and link",
-			text:   "![bridge](/i/" + code + ")\nOpen [it](/i/" + code + " \"Bridge\") or <" + code + ">.",
-			server: "http://localhost:8080/",
-			want:   "![bridge](http://localhost:8080/i/" + code + ")\nOpen [it](http://localhost:8080/i/" + code + " \"Bridge\") or <" + code + ">.",
-		},
-		{name: "server base path", text: "[x](/i/abc)", server: "https://kodelet.example/base", want: "[x](https://kodelet.example/base/i/abc)"},
-		{name: "angle brackets", text: "[x](</i/abc>)", server: "https://kodelet.example", want: "[x](<https://kodelet.example/i/abc>)"},
-		{name: "absolute links stay", text: "[x](https://other.example/i/abc)", server: "https://kodelet.example", want: "[x](https://other.example/i/abc)"},
-		{name: "other paths stay", text: "[x](/c/abc)", server: "https://kodelet.example", want: "[x](/c/abc)"},
-		{name: "code fences stay", text: fence + "\n[x](/i/abc)\n" + fence, server: "https://kodelet.example", want: fence + "\n[x](/i/abc)\n" + fence},
-		{name: "no server", text: "[x](/i/abc)", want: "[x](/i/abc)"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.want, absoluteImageLinks(test.text, test.server))
-		})
-	}
 }
 
 func TestTranscriptShowsFullImageLinksInReplies(t *testing.T) {

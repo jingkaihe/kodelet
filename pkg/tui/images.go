@@ -3,8 +3,6 @@ package tui
 import (
 	"cmp"
 	"context"
-	"net/url"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -188,6 +186,17 @@ func (s *tuiImages) protocolEnabled() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.protocol != termimage.None && s.output != nil
+}
+
+// previewable reports whether an image can be previewed and has not failed.
+func (s *tuiImages) previewable(shortCode string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	source := s.sources[shortCode]
+	return s.enabled() && validImageShortCode(shortCode) && (source == nil || source.err == nil)
 }
 
 func (s *tuiImages) available() bool {
@@ -517,159 +526,48 @@ func (m *model) imagePreviewLimits(indent int) (maxCols, maxRows int) {
 	return min(imagePreviewMaxCols, m.transcriptTextWidth()-indent), min(imagePreviewMaxRows, max(4, m.height*3/5))
 }
 
-// renderAssistantText renders assistant markdown, replacing Kodelet images on
-// their own line with previews. An image that cannot be loaded keeps its link.
+// renderAssistantText renders assistant markdown, previewing image-only paragraphs.
 func (m *model) renderAssistantText(b *strings.Builder, line *int, text string) {
-	segments := []markdownSegment{{text: text}}
+	var previewable func(string) bool
 	if m.images.available() {
-		segments = splitMarkdownImages(text)
+		previewable = m.images.previewable
 	}
+	rows, markers := m.assistantTextRows(text, previewable)
+	if previewable != nil && markers == nil {
+		// A marker was not on its own row, so show links instead.
+		rows, _ = m.assistantTextRows(text, nil)
+	}
+
 	maxCols, maxRows := m.imagePreviewLimits(0)
-	wrote := false
-	for _, segment := range segments {
-		var rows []string
-		if segment.shortCode != "" {
-			start := *line
-			if wrote {
-				start++
+	for i, row := range rows {
+		if shortCode, ok := markers[i]; ok {
+			attachment := tooltypes.ToolAttachment{Type: "image", ShortCode: shortCode}
+			preview, _ := m.images.lines(attachment, maxCols, maxRows, *line)
+			for _, previewRow := range preview {
+				b.WriteString(previewRow + "\n")
+				*line++
 			}
-			attachment := tooltypes.ToolAttachment{Type: "image", ShortCode: segment.shortCode}
-			if preview, ok := m.images.lines(attachment, maxCols, maxRows, start); ok {
-				rows = preview
-			}
-		}
-		if rows == nil {
-			text := absoluteImageLinks(segment.text, m.serverURL)
-			rendered := m.renderMarkdown(text, m.transcriptTextWidth(), markdownAssistant)
-			if rendered == "" {
-				continue
-			}
-			rows = strings.Split(renderPersistentStyle(assistantStyle, rendered), "\n")
-		}
-		// Separate paragraphs and images with a blank line, as markdown does.
-		if wrote {
-			b.WriteString("\n")
-			*line++
-		}
-		for _, row := range rows {
-			b.WriteString(row + "\n")
-			*line++
-		}
-		wrote = true
-	}
-}
-
-// markdownSegment is markdown text, or an image line previewing shortCode.
-type markdownSegment struct {
-	text      string
-	shortCode string
-}
-
-var markdownImageLine = regexp.MustCompile(`^ {0,3}!\[[^\]]*\]\(\s*<?([^\s<>()]+)>?(?:\s+"[^"]*")?\s*\)\s*$`)
-
-// splitMarkdownImages separates lines that are only an image linking to a
-// Kodelet image, outside code fences, from the surrounding markdown.
-func splitMarkdownImages(text string) []markdownSegment {
-	if !strings.Contains(text, "![") {
-		return []markdownSegment{{text: text}}
-	}
-	lines := strings.Split(text, "\n")
-	images := map[int]string{}
-	eachProseLine(lines, func(i int) {
-		if match := markdownImageLine.FindStringSubmatch(lines[i]); match != nil {
-			if shortCode, ok := imageLinkShortCode(match[1]); ok {
-				images[i] = shortCode
-			}
-		}
-	})
-	if len(images) == 0 {
-		return []markdownSegment{{text: text}}
-	}
-
-	var (
-		segments []markdownSegment
-		chunk    []string
-	)
-	flush := func() {
-		if text := strings.Join(chunk, "\n"); strings.TrimSpace(text) != "" {
-			segments = append(segments, markdownSegment{text: text})
-		}
-		chunk = nil
-	}
-	for i, line := range lines {
-		if shortCode, ok := images[i]; ok {
-			flush()
-			segments = append(segments, markdownSegment{text: line, shortCode: shortCode})
 			continue
 		}
-		chunk = append(chunk, line)
+		b.WriteString(row + "\n")
+		*line++
 	}
-	flush()
-	return segments
 }
 
-var relativeImageLink = regexp.MustCompile(`(\]\(\s*<?)(/i/[A-Za-z0-9_-]+)`)
-
-// absoluteImageLinks resolves relative Kodelet image links in markdown against
-// the connected server, as tool image links are, so the terminal can open them.
-func absoluteImageLinks(text, serverURL string) string {
-	base, err := url.Parse(strings.TrimSpace(serverURL))
-	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || !strings.Contains(text, "/i/") {
-		return text
-	}
-	prefix := (&url.URL{Scheme: base.Scheme, Host: base.Host, Path: strings.TrimRight(base.Path, "/")}).String()
-	lines := strings.Split(text, "\n")
-	eachProseLine(lines, func(i int) {
-		lines[i] = relativeImageLink.ReplaceAllStringFunc(lines[i], func(link string) string {
-			match := relativeImageLink.FindStringSubmatch(link)
-			return match[1] + prefix + match[2]
-		})
-	})
-	return strings.Join(lines, "\n")
-}
-
-// eachProseLine calls visit with the index of each line outside code fences.
-func eachProseLine(lines []string, visit func(int)) {
-	fence := ""
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		switch {
-		case fence != "":
-			if strings.HasPrefix(trimmed, fence) {
-				fence = ""
-			}
-		case strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~"):
-			fence = trimmed[:3]
-		default:
-			visit(i)
+// assistantTextRows maps marker rows to images; markers is nil if one is missing.
+func (m *model) assistantTextRows(text string, previewable func(string) bool) (rows []string, markers map[int]string) {
+	rendered, previews := m.renderMarkdownPreviews(text, m.transcriptTextWidth(), markdownAssistant, previewable)
+	rows = strings.Split(renderPersistentStyle(assistantStyle, rendered), "\n")
+	markers = map[int]string{}
+	for index, shortCode := range previews {
+		marker := previewMarker(index)
+		row := slices.IndexFunc(rows, func(row string) bool { return strings.TrimSpace(ansi.Strip(row)) == marker })
+		if row < 0 {
+			return rows, nil
 		}
+		markers[row] = shortCode
 	}
-}
-
-// kodeletShortCode matches the short codes the server issues for image links.
-var kodeletShortCode = regexp.MustCompile(`^[A-Za-z0-9_-]{22}$`)
-
-// imageLinkShortCode recognizes relative /i/<code> links and absolute ones
-// whose host may be the server's public address. Previews are always fetched
-// from the connected server, never from the link's host.
-func imageLinkShortCode(link string) (string, bool) {
-	parsed, err := url.Parse(link)
-	if err != nil || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", false
-	}
-	if !parsed.IsAbs() {
-		shortCode, ok := strings.CutPrefix(parsed.Path, "/i/")
-		return shortCode, ok && parsed.Host == "" && validImageShortCode(shortCode)
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", false
-	}
-	index := strings.LastIndex(parsed.Path, "/i/")
-	if index < 0 {
-		return "", false
-	}
-	shortCode := parsed.Path[index+len("/i/"):]
-	return shortCode, kodeletShortCode.MatchString(shortCode)
+	return rows, markers
 }
 
 func imageLoadingLines(rows int) []string {

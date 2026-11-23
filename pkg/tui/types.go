@@ -8,13 +8,13 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/glamour"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/yuin/goldmark"
 )
 
 // Config configures the native chat TUI.
@@ -341,9 +341,9 @@ type model struct {
 	captureTranscriptElapsed bool
 	transcriptElapsedClocks  []transcriptElapsedClock
 
-	assistantMarkdownRenderer      *glamour.TermRenderer
+	assistantMarkdownRenderer      goldmark.Markdown
 	assistantMarkdownRendererWidth int
-	thoughtMarkdownRenderer        *glamour.TermRenderer
+	thoughtMarkdownRenderer        goldmark.Markdown
 	thoughtMarkdownRendererWidth   int
 
 	quitAfterRun  bool

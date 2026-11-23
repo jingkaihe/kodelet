@@ -1,14 +1,20 @@
 package tui
 
 import (
+	"bytes"
 	"strings"
 	"sync"
 
 	"github.com/alecthomas/chroma/v2"
 	chromastyles "github.com/alecthomas/chroma/v2/styles"
-	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/ansi"
 	glamourstyles "github.com/charmbracelet/glamour/styles"
+	"github.com/muesli/termenv"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/renderer"
+	"github.com/yuin/goldmark/util"
 )
 
 const codeBlockThemePrefix = "kodelet-"
@@ -16,23 +22,36 @@ const codeBlockThemePrefix = "kodelet-"
 var codeBlockThemeRegistryMu sync.RWMutex
 
 func (m *model) renderMarkdown(text string, width int, kind markdownKind) string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return ""
-	}
-
-	renderer, err := m.markdownRenderer(max(10, width), kind)
-	if err != nil {
-		return wrapText(text, width)
-	}
-	rendered, ok := renderMarkdownWithRenderer(renderer, text)
-	if !ok {
-		return wrapText(text, width)
-	}
-	return strings.TrimSpace(rendered)
+	rendered, _ := m.renderMarkdownPreviews(text, width, kind, nil)
+	return rendered
 }
 
-func renderMarkdownWithRenderer(renderer *glamour.TermRenderer, text string) (rendered string, ok bool) {
+// renderMarkdownPreviews renders markdown with Kodelet image links resolved. With
+// previewable set, image-only paragraphs become markers for the returned images.
+func (m *model) renderMarkdownPreviews(
+	text string,
+	width int,
+	kind markdownKind,
+	previewable func(shortCode string) bool,
+) (string, []string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", nil
+	}
+
+	md := m.markdownRenderer(max(10, width), kind)
+	source, previews := []byte(text), []string(nil)
+	if previewable != nil {
+		source, previews = markdownPreviews(md, source, previewable)
+	}
+	rendered, ok := renderMarkdownWithRenderer(md, source, imageLinkBase(m.serverURL))
+	if !ok {
+		return wrapText(text, width), nil
+	}
+	return strings.TrimSpace(rendered), previews
+}
+
+func renderMarkdownWithRenderer(md goldmark.Markdown, source []byte, imageBase string) (rendered string, ok bool) {
 	codeBlockThemeRegistryMu.RLock()
 	defer codeBlockThemeRegistryMu.RUnlock()
 	defer func() {
@@ -42,42 +61,45 @@ func renderMarkdownWithRenderer(renderer *glamour.TermRenderer, text string) (re
 		}
 	}()
 
-	rendered, err := renderer.Render(text)
-	return rendered, err == nil
+	context := parser.NewContext()
+	context.Set(imageLinkBaseKey, imageBase)
+	var buf bytes.Buffer
+	err := md.Convert(source, &buf, parser.WithContext(context))
+	return buf.String(), err == nil
 }
 
-func (m *model) markdownRenderer(width int, kind markdownKind) (*glamour.TermRenderer, error) {
+func (m *model) markdownRenderer(width int, kind markdownKind) goldmark.Markdown {
 	if kind == markdownThought {
-		if m.thoughtMarkdownRenderer != nil && m.thoughtMarkdownRendererWidth == width {
-			return m.thoughtMarkdownRenderer, nil
+		if m.thoughtMarkdownRenderer == nil || m.thoughtMarkdownRendererWidth != width {
+			m.thoughtMarkdownRenderer = newMarkdownRenderer(width, thoughtMarkdownStyle)
+			m.thoughtMarkdownRendererWidth = width
 		}
-		renderer, err := newMarkdownRenderer(width, thoughtMarkdownStyle)
-		if err != nil {
-			return nil, err
-		}
-		m.thoughtMarkdownRenderer = renderer
-		m.thoughtMarkdownRendererWidth = width
-		return renderer, nil
+		return m.thoughtMarkdownRenderer
 	}
-
-	if m.assistantMarkdownRenderer != nil && m.assistantMarkdownRendererWidth == width {
-		return m.assistantMarkdownRenderer, nil
+	if m.assistantMarkdownRenderer == nil || m.assistantMarkdownRendererWidth != width {
+		m.assistantMarkdownRenderer = newMarkdownRenderer(width, assistantMarkdownStyle)
+		m.assistantMarkdownRendererWidth = width
 	}
-	renderer, err := newMarkdownRenderer(width, assistantMarkdownStyle)
-	if err != nil {
-		return nil, err
-	}
-	m.assistantMarkdownRenderer = renderer
-	m.assistantMarkdownRendererWidth = width
-	return renderer, nil
+	return m.assistantMarkdownRenderer
 }
 
-func newMarkdownRenderer(width int, style ansi.StyleConfig) (*glamour.TermRenderer, error) {
-	return glamour.NewTermRenderer(
-		glamour.WithStyles(style),
-		glamour.WithWordWrap(max(10, width)),
-		glamour.WithPreservedNewLines(),
+// newMarkdownRenderer mirrors glamour.NewTermRenderer, adding imageLinkTransformer.
+func newMarkdownRenderer(width int, style ansi.StyleConfig) goldmark.Markdown {
+	md := goldmark.New(
+		goldmark.WithExtensions(extension.GFM, extension.DefinitionList),
+		goldmark.WithParserOptions(
+			parser.WithAutoHeadingID(),
+			parser.WithASTTransformers(util.Prioritized(imageLinkTransformer{}, 0)),
+		),
 	)
+	terminal := ansi.NewRenderer(ansi.Options{
+		WordWrap:         max(10, width),
+		ColorProfile:     termenv.TrueColor,
+		Styles:           style,
+		PreserveNewLines: true,
+	})
+	md.SetRenderer(renderer.NewRenderer(renderer.WithNodeRenderers(util.Prioritized(terminal, 1000))))
+	return md
 }
 
 func compactMarkdownStyle(themeName string, theme markdownTheme, dark bool) ansi.StyleConfig {
