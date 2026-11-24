@@ -20,6 +20,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/tui/termimage"
@@ -205,12 +206,21 @@ func TestMarkdownResolvesOnlyImageLinkNodes(t *testing.T) {
 	render := func(text string) string { return ansi.Strip(m.renderMarkdown(text, 120, markdownAssistant)) }
 
 	assert.Contains(t, render("Open [the image](/i/abc)."), "https://connected.example/base/i/abc")
-	assert.Regexp(t, "\x1b\\]8;id=\\d+;https://connected\\.example/base/i/abc\x07(\x1b\\[[0-9;]*m)*the image",
-		m.renderMarkdown("Open [the image](/i/abc).", 120, markdownAssistant), "links are terminal hyperlinks")
+
+	// Link text and URL open what the URL shows.
+	for text, want := range map[string]string{
+		"Open [the image](/i/abc).":                                "https://connected.example/base/i/abc",
+		"Wiki [Foo](https://en.wikipedia.org/wiki/Foo_\\(bar\\)).": "https://en.wikipedia.org/wiki/Foo_(bar)",
+	} {
+		links := linkedCells(m.renderMarkdown(text, 120, markdownAssistant))
+		assert.Equal(t, []string{want}, slices.Collect(maps.Keys(links)), text)
+		assert.True(t, strings.HasSuffix(links[want], want), text)
+	}
 	assert.Contains(t, render("![chart](/i/abc)"), "https://connected.example/base/i/abc")
 	assert.Contains(t, render("[Download](/i/abc?download=1)"), "https://connected.example/base/i/abc?download=1")
 	assert.Equal(t, "See https://connected.example/base/i/abc.", strings.TrimSpace(render("See [/i/abc](/i/abc).")))
 	assert.Equal(t, "https://example.com/x", strings.TrimSpace(render("[https://example.com/x](https://example.com/x)")))
+	assert.Contains(t, render("See [#usage](#usage) and [README.md](README.md)."), "See #usage and README.md ", "labels of other links are kept")
 	for _, text := range []string{
 		"Use \x60[x](/i/abc)\x60 in docs.",
 		fence + "\n[x](/i/abc)\n" + fence,
@@ -612,6 +622,23 @@ func renditionsReady(images *tuiImages, count int) bool {
 		}
 	}
 	return true
+}
+
+// linkedCells maps the hyperlink targets of cells in rendered output, as a
+// terminal would draw it, to the text they cover.
+func linkedCells(rendered string) map[string]string {
+	height := strings.Count(rendered, "\n") + 1
+	buffer := uv.NewScreenBuffer(200, height)
+	uv.NewStyledString(rendered).Draw(buffer, buffer.Bounds())
+	links := map[string]string{}
+	for y := range height {
+		for x := range 200 {
+			if cell := buffer.CellAt(x, y); cell != nil && cell.Link.URL != "" {
+				links[cell.Link.URL] += cell.Content
+			}
+		}
+	}
+	return links
 }
 
 func firstImageID(m *model) uint32 {

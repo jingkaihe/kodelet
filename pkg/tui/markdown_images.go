@@ -8,12 +8,14 @@ import (
 
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
 )
 
-// resolveLinks resolves relative Kodelet image links in link and image nodes
-// against base. A link whose text is its own URL becomes an autolink, so the
-// URL is shown once rather than as text and URL. It returns source with those
-// URLs appended.
+// resolveLinks unescapes link and image destinations, as an HTML renderer
+// would, and resolves relative Kodelet image links against base. A link to an
+// absolute web URL whose text is that URL becomes an autolink, so the URL is
+// shown once rather than as text and URL. It returns source with those URLs
+// appended.
 func resolveLinks(doc ast.Node, source []byte, base string) []byte {
 	var links []*ast.Link
 	_ = ast.Walk(doc, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
@@ -22,15 +24,15 @@ func resolveLinks(doc ast.Node, source []byte, base string) []byte {
 			case *ast.Link:
 				links = append(links, node)
 			case *ast.Image:
-				node.Destination = resolveImageLink(node.Destination, base)
+				node.Destination = resolveImageLink(unescapeDestination(node.Destination), base)
 			}
 		}
 		return ast.WalkContinue, nil
 	})
 	for _, link := range links {
-		label, original := linkLabel(link, source), string(link.Destination)
-		link.Destination = resolveImageLink(link.Destination, base)
-		if label == "" || (label != original && label != string(link.Destination)) {
+		label, destination := linkLabel(link, source), unescapeDestination(link.Destination)
+		link.Destination = resolveImageLink(destination, base)
+		if !webURL(link.Destination) || (label != string(destination) && label != string(link.Destination)) {
 			continue
 		}
 		start := len(source)
@@ -39,6 +41,15 @@ func resolveLinks(doc ast.Node, source []byte, base string) []byte {
 		link.Parent().ReplaceChild(link.Parent(), link, autoLink)
 	}
 	return source
+}
+
+func unescapeDestination(destination []byte) []byte {
+	return util.ResolveEntityNames(util.ResolveNumericReferences(util.UnescapePunctuations(destination)))
+}
+
+func webURL(destination []byte) bool {
+	link, err := url.Parse(string(destination))
+	return err == nil && (link.Scheme == "http" || link.Scheme == "https") && link.Host != ""
 }
 
 // resolveImageLink resolves a relative Kodelet image link, keeping its query
