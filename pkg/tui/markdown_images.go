@@ -22,7 +22,12 @@ func (imageLinkTransformer) Transform(doc *ast.Document, _ text.Reader, pc parse
 		return
 	}
 	resolve := func(destination []byte) []byte {
-		shortCode, ok := strings.CutPrefix(string(destination), "/i/")
+		link, err := url.Parse(string(destination))
+		if err != nil || link.Scheme != "" || link.Host != "" || link.User != nil {
+			return destination
+		}
+		// Keep the query and fragment, such as ?download=1.
+		shortCode, ok := strings.CutPrefix(link.Path, "/i/")
 		if !ok || !validImageShortCode(shortCode) {
 			return destination
 		}

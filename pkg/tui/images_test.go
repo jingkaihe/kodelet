@@ -206,6 +206,7 @@ func TestMarkdownResolvesOnlyImageLinkNodes(t *testing.T) {
 
 	assert.Contains(t, render("Open [the image](/i/abc)."), "https://connected.example/base/i/abc")
 	assert.Contains(t, render("![chart](/i/abc)"), "https://connected.example/base/i/abc")
+	assert.Contains(t, render("[Download](/i/abc?download=1)"), "https://connected.example/base/i/abc?download=1")
 	for _, text := range []string{
 		"Use \x60[x](/i/abc)\x60 in docs.",
 		fence + "\n[x](/i/abc)\n" + fence,
