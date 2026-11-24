@@ -221,7 +221,9 @@ func (s *tuiImages) lines(attachment tooltypes.ToolAttachment, maxCols, maxRows,
 		s.sources[attachment.ShortCode] = source
 	}
 	if source.err != nil {
-		return []string{mutedStyle.Render(imageUnavailableText(source.err, maxCols))}
+		rows := []string{mutedStyle.Render(imageUnavailableText(source.err, maxCols))}
+		s.placing = append(s.placing, imagePlacement{source: source, line: line, height: len(rows)})
+		return rows
 	}
 	cols, height := termimage.Fit(source.width, source.height, maxCols, maxRows, s.cell)
 	rows := imageLoadingLines(height)

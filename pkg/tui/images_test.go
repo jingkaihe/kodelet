@@ -324,23 +324,53 @@ func TestImagesLoadNearTheViewport(t *testing.T) {
 }
 
 func TestImagesLoadingAboveTheViewportKeepTheTextInPlace(t *testing.T) {
-	runner := &imageTestRunner{images: map[string][]byte{testShortCode: imageTestPNG(t)}}
-	m, _, _ := newImageTestModel(t, runner, termimage.Kitty)
-	paragraphs := []string{"![bridge](/i/" + testShortCode + ")"}
+	var paragraphs []string
 	for i := range 60 {
 		paragraphs = append(paragraphs, fmt.Sprintf("Paragraph %d.", i))
 	}
-	m.entries = []chatEntry{{kind: entryAssistant, blocks: []assistantBlock{{kind: blockText, text: strings.Join(paragraphs, "\n\n")}}}}
-	m.refreshViewport(true)
-	topLine := func() string { return strings.TrimSpace(ansi.Strip(strings.Split(m.viewport.View(), "\n")[0])) }
+	text := strings.Join(paragraphs, "\n\n")
+	for _, test := range []struct {
+		name  string
+		entry chatEntry
+	}{
+		{
+			name:  "a reply image grows once loaded",
+			entry: chatEntry{kind: entryAssistant, blocks: []assistantBlock{{kind: blockText, text: "![bridge](/i/" + testShortCode + ")\n\n" + text}}},
+		},
+		{
+			name: "a tool image shrinks once it fails",
+			entry: chatEntry{kind: entryAssistant, blocks: []assistantBlock{
+				{kind: blockTools, tools: []toolCall{{name: "draw_chart", done: true, structured: &tooltypes.StructuredToolResult{
+					ToolName:    "draw_chart",
+					Success:     true,
+					Attachments: []tooltypes.ToolAttachment{{Type: "image", ShortCode: "missing", ViewURL: "/i/missing", Width: 300, Height: 200}},
+				}}}},
+				{kind: blockText, text: text},
+			}},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runner := &imageTestRunner{images: map[string][]byte{testShortCode: imageTestPNG(t)}}
+			m, _, _ := newImageTestModel(t, runner, termimage.Kitty)
+			m.entries = []chatEntry{test.entry}
+			m.refreshViewport(true)
+			topLine := func() string { return strings.TrimSpace(ansi.Strip(strings.Split(m.viewport.View(), "\n")[0])) }
 
-	m.autoFollow = false
-	m.viewport.SetYOffset(20)
-	reading := topLine()
-	require.Contains(t, reading, "Paragraph")
-	m.loadVisibleImages()
-	waitForImages(t, &m, func() bool { return renditionsReady(m.images, 1) })
-	assert.Equal(t, reading, topLine())
+			m.autoFollow = false
+			m.viewport.SetYOffset(20)
+			for !strings.Contains(topLine(), "Paragraph") {
+				m.viewport.ScrollDown(1)
+			}
+			reading := topLine()
+			m.loadVisibleImages()
+			waitForImages(t, &m, func() bool {
+				source := m.images.sources["missing"]
+				return renditionsReady(m.images, 1) || (source != nil && source.err != nil)
+			})
+			m.refreshViewport(false) // as the pending refresh would
+			assert.Equal(t, reading, topLine())
+		})
+	}
 }
 
 func TestImageFetchesAreBounded(t *testing.T) {
