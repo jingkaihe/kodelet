@@ -305,7 +305,7 @@ func (s *tuiImages) loadNear(top, height int) {
 			}
 			s.byID[rendition.id] = rendition
 			source.renditions = append(source.renditions, rendition)
-			go s.render(source.data, rendition, s.cell)
+			go s.render(rendition)
 		}
 	}
 	s.evictLocked()
@@ -352,10 +352,20 @@ func (s *tuiImages) dropRenditionLocked(rendition *imageRendition) {
 	s.output.Release(rendition.id)
 }
 
+// load downloads an image once a fetch slot is free, unless it has since left
+// the viewport.
 func (s *tuiImages) load(source *imageSource, fetcher imageFetcher) {
 	if !acquire(s.ctx, s.fetches) {
 		return
 	}
+	s.mu.Lock()
+	if source.near != s.near {
+		source.loading = false
+		s.mu.Unlock()
+		<-s.fetches
+		return
+	}
+	s.mu.Unlock()
 	ctx, cancel := context.WithTimeout(s.ctx, imageFetchTimeout)
 	data, err := fetcher.FetchImage(ctx, source.shortCode)
 	cancel()
@@ -382,10 +392,21 @@ func acquire(ctx context.Context, slots chan struct{}) bool {
 	}
 }
 
-func (s *tuiImages) render(data []byte, rendition *imageRendition, cell termimage.CellSize) {
+// render decodes and resizes an image once a render slot is free, unless it
+// has since left the viewport.
+func (s *tuiImages) render(rendition *imageRendition) {
 	if !acquire(s.ctx, s.renders) {
 		return
 	}
+	s.mu.Lock()
+	data, cell := rendition.source.data, s.cell
+	if rendition.near != s.near || data == nil {
+		s.dropRenditionLocked(rendition)
+		s.mu.Unlock()
+		<-s.renders
+		return
+	}
+	s.mu.Unlock()
 	picture, err := termimage.Decode(data)
 	var rendered *termimage.Rendition
 	if err == nil {

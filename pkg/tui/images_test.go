@@ -317,6 +317,86 @@ func TestImageFetchesAreBounded(t *testing.T) {
 	assert.Equal(t, maxImageFetches, runner.maxActive)
 }
 
+func TestQueuedImageFetchesSkipImagesAwayFromTheViewport(t *testing.T) {
+	runner := &imageTestRunner{images: map[string][]byte{}, gate: make(chan struct{})}
+	m, _, _ := newImageTestModel(t, runner, termimage.Kitty)
+	codes := []string{"image0", "image1", "image2", "image3", "image4", "image5", "visible"}
+	for _, code := range codes {
+		runner.images[code] = imageTestPNG(t)
+	}
+	place := func(near func(string) bool) {
+		m.images.beginPass()
+		for i, code := range codes {
+			line := 1000 + i*10
+			if near(code) {
+				line = i
+			}
+			m.images.lines(tooltypes.ToolAttachment{Type: "image", ShortCode: code}, 30, 10, line)
+		}
+		m.images.endPass()
+		m.images.loadNear(0, 10)
+	}
+
+	place(func(code string) bool { return code != "visible" })
+	require.Eventually(t, func() bool {
+		runner.mu.Lock()
+		defer runner.mu.Unlock()
+		return runner.active == maxImageFetches
+	}, 5*time.Second, 5*time.Millisecond)
+	place(func(code string) bool { return code == "visible" })
+	close(runner.gate)
+	require.Eventually(t, func() bool {
+		m.images.mu.Lock()
+		defer m.images.mu.Unlock()
+		for _, source := range m.images.sources {
+			if source.loading {
+				return false
+			}
+		}
+		return m.images.sources["visible"].data != nil
+	}, 5*time.Second, 5*time.Millisecond)
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	assert.Len(t, runner.fetched, maxImageFetches+1, "only downloads in flight and the visible image are fetched")
+}
+
+func TestQueuedImageRendersSkipImagesAwayFromTheViewport(t *testing.T) {
+	m, _, _ := newImageTestModel(t, &imageTestRunner{}, termimage.Kitty)
+	m.images.mu.Lock()
+	for _, code := range []string{"old", "new"} {
+		m.images.sources[code] = &imageSource{shortCode: code, data: imageTestPNG(t), width: 300, height: 200}
+	}
+	m.images.mu.Unlock()
+	place := func(near string) {
+		m.images.beginPass()
+		for _, code := range []string{"old", "new"} {
+			line := 1000
+			if code == near {
+				line = 0
+			}
+			m.images.lines(tooltypes.ToolAttachment{Type: "image", ShortCode: code}, 30, 10, line)
+		}
+		m.images.endPass()
+		m.images.loadNear(0, 10)
+	}
+
+	m.images.renders <- struct{}{} // a decode is running
+	place("old")
+	m.images.cacheBytes = 1
+	place("new")
+	<-m.images.renders
+	require.Eventually(t, func() bool {
+		m.images.mu.Lock()
+		defer m.images.mu.Unlock()
+		renditions := m.images.sources["new"].renditions
+		return len(renditions) == 1 && renditions[0].rendition != nil
+	}, 5*time.Second, 5*time.Millisecond)
+	m.images.mu.Lock()
+	defer m.images.mu.Unlock()
+	assert.Empty(t, m.images.sources["old"].renditions, "a decode queued before scrolling away is skipped")
+	assert.Nil(t, m.images.sources["old"].data)
+}
+
 func TestImageCacheEvictsImagesAwayFromTheViewport(t *testing.T) {
 	runner := &imageTestRunner{images: map[string][]byte{"near": imageTestPNG(t), "far": imageTestPNG(t)}}
 	m, _, _ := newImageTestModel(t, runner, termimage.Kitty)
