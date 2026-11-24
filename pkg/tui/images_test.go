@@ -305,6 +305,7 @@ func TestImagesLoadNearTheViewport(t *testing.T) {
 	lines := m.viewport.TotalLineCount()
 
 	m.viewport.GotoTop()
+	m.autoFollow = false // as scrolling up does
 	m.loadVisibleImages()
 	waitForImages(t, &m, func() bool { return m.images.sources["image0"].data != nil })
 	assert.Equal(t, lines, m.viewport.TotalLineCount(), "rows are reserved before images load")
