@@ -422,9 +422,15 @@ func (s *tuiImages) render(rendition *imageRendition) {
 		return
 	}
 	s.mu.Lock()
-	data, cell := rendition.source.data, s.cell
+	source, cell := rendition.source, s.cell
+	data := source.data
 	if rendition.near != s.near || data == nil {
 		s.dropRenditionLocked(rendition)
+		if rendition.near == s.near && !source.loading && source.err == nil {
+			// The download was evicted while this waited; fetch it again.
+			source.loading = true
+			go s.load(source, s.fetcher)
+		}
 		s.mu.Unlock()
 		<-s.renders
 		return

@@ -446,6 +446,31 @@ func TestQueuedImageRendersSkipImagesAwayFromTheViewport(t *testing.T) {
 	assert.Nil(t, m.images.sources["old"].data)
 }
 
+func TestQueuedImageRenderRefetchesAnEvictedImage(t *testing.T) {
+	runner := &imageTestRunner{images: map[string][]byte{"image": imageTestPNG(t)}}
+	m, _, _ := newImageTestModel(t, runner, termimage.Kitty)
+	m.images.mu.Lock()
+	m.images.sources["image"] = &imageSource{shortCode: "image", data: imageTestPNG(t), width: 300, height: 200}
+	m.images.mu.Unlock()
+	place := func(line int) func() {
+		return func() {
+			m.images.beginPass()
+			m.images.lines(tooltypes.ToolAttachment{Type: "image", ShortCode: "image"}, 30, 10, line)
+			m.images.endPass()
+			m.images.loadNear(0, 10)
+		}
+	}
+
+	m.images.renders <- struct{}{} // a decode is running
+	place(0)()
+	m.images.cacheBytes = 1
+	place(1000)() // scrolls away, evicting the download
+	place(0)()    // and back while the decode is still queued
+	<-m.images.renders
+	drainImageUpdates(t, &m, place(0), func() bool { return renditionsReady(m.images, 1) })
+	assert.Equal(t, 1, runner.fetchCount("image"))
+}
+
 func TestImageCacheEvictsImagesAwayFromTheViewport(t *testing.T) {
 	runner := &imageTestRunner{images: map[string][]byte{"near": imageTestPNG(t), "far": imageTestPNG(t)}}
 	m, _, _ := newImageTestModel(t, runner, termimage.Kitty)
