@@ -7,7 +7,6 @@ import (
 	"image/jpeg"
 	"image/png"
 	"math"
-	"sync"
 
 	"github.com/pkg/errors"
 	"golang.org/x/image/draw"
@@ -107,9 +106,6 @@ type Rendition struct {
 	PNG  []byte
 
 	rowPx int
-
-	mu     sync.Mutex
-	slices map[[2]int][]byte
 }
 
 // Render scales p to fill cols x rows cells, at up to twice the reported cell
@@ -141,19 +137,13 @@ func Render(p *Picture, cols, rows int, cell CellSize) (*Rendition, error) {
 }
 
 // Slice returns rows [first, first+count) encoded for iTerm2, which cannot
-// crop images itself.
+// crop images itself. [Output] keeps the crops on screen, so they are not cached.
 func (r *Rendition) Slice(first, count int) ([]byte, error) {
 	if first < 0 || count <= 0 || first+count > r.Rows {
 		return nil, errors.Errorf("invalid image rows %d+%d of %d", first, count, r.Rows)
 	}
 	if first == 0 && count == r.Rows {
 		return r.PNG, nil
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	key := [2]int{first, count}
-	if data, ok := r.slices[key]; ok {
-		return data, nil
 	}
 	img, err := png.Decode(bytes.NewReader(r.PNG))
 	if err != nil {
@@ -182,13 +172,6 @@ func (r *Rendition) Slice(first, count int) ([]byte, error) {
 			data = jpg.Bytes()
 		}
 	}
-	if len(r.slices) >= 8 {
-		clear(r.slices)
-	}
-	if r.slices == nil {
-		r.slices = map[[2]int][]byte{}
-	}
-	r.slices[key] = data
 	return data, nil
 }
 

@@ -66,9 +66,6 @@ func TestRenderAndSlice(t *testing.T) {
 	slice, err := rendition.Slice(1, 2)
 	require.NoError(t, err)
 	assert.Equal(t, []int{150, 60}, pngSize(t, slice))
-	cached, err := rendition.Slice(1, 2)
-	require.NoError(t, err)
-	assert.Same(t, &slice[0], &cached[0])
 
 	_, err = rendition.Slice(3, 2)
 	assert.ErrorContains(t, err, "invalid image rows 3+2 of 4")

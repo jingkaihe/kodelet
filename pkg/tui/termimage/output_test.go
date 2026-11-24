@@ -107,6 +107,25 @@ func TestOutputDrawsWhileFramesKeepChanging(t *testing.T) {
 	assert.Equal(t, int32(1), maxActive.Load(), "one frame is encoded at a time")
 }
 
+func TestOutputKeepsOnlyCropsOnScreen(t *testing.T) {
+	output, _ := newTestOutput(t, ITerm2)
+	write(t, output, enter)
+	var encodes atomic.Int32
+	encode := func(Placement) string {
+		encodes.Add(1)
+		return "<image>"
+	}
+	image := []Placement{{ID: 1, Rows: 1, Cols: 1}}
+	for signature, placements := range [][]Placement{image, nil, image} {
+		output.Present(uint64(signature+1), placements, encode)
+		output.drawSettled()
+	}
+	require.Eventually(t, func() bool { return encodes.Load() == 2 }, time.Second, 5*time.Millisecond)
+	output.mu.Lock()
+	defer output.mu.Unlock()
+	assert.Len(t, output.encoded, 1, "crops are encoded again rather than kept off screen")
+}
+
 func TestOutputRedrawsAFrameDrawnTooSoon(t *testing.T) {
 	output, written := newTestOutput(t, ITerm2)
 	write(t, output, enter)
