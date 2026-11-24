@@ -1,10 +1,12 @@
 package termimage
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -127,11 +129,39 @@ func TestOutputKeepsOnlyCropsOnScreen(t *testing.T) {
 }
 
 func TestOutputRedrawsAFrameDrawnTooSoon(t *testing.T) {
-	output, written := newTestOutput(t, ITerm2)
+	// The terminal reads slowly, so writing the image outlasts minDrawDelay.
+	reader, writer, err := os.Pipe()
+	require.NoError(t, err)
+	output := NewOutput(writer, ITerm2)
+	t.Cleanup(func() {
+		_ = output.Close()
+		_ = writer.Close()
+		_ = reader.Close()
+	})
+	var mu sync.Mutex
+	var read bytes.Buffer
+	go func() {
+		time.Sleep(2 * minDrawDelay)
+		buf := make([]byte, 64<<10)
+		for {
+			n, err := reader.Read(buf)
+			mu.Lock()
+			read.Write(buf[:n])
+			mu.Unlock()
+			if err != nil {
+				return
+			}
+		}
+	}()
 	write(t, output, enter)
-	output.Present(1, []Placement{{ID: 1, Rows: 1, Cols: 1}}, func(Placement) string { return "<image>" })
+	image := "<image>" + strings.Repeat(".", 256<<10)
+	output.Present(1, []Placement{{ID: 1, Rows: 1, Cols: 1}}, func(Placement) string { return image })
 	output.drawSettled() // as the deadline would, before the frame may show
-	require.Eventually(t, func() bool { return strings.Count(written(), "<image>") == 2 }, time.Second, 5*time.Millisecond)
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return strings.Count(read.String(), "<image>") == 2
+	}, time.Second, 5*time.Millisecond)
 }
 
 func TestOutputDropsSupersededITerm2Draws(t *testing.T) {

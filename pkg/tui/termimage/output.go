@@ -271,6 +271,9 @@ func (o *Output) drawLocked() {
 			delete(o.encoded, key)
 		}
 	}
+	// Judge before writing, which may block: a frame this fresh may not be
+	// on screen yet, so its repaint could erase the image.
+	fresh := time.Since(o.presentedAt) < minDrawDelay
 	if commands.Len() > 0 {
 		_, _ = o.file.WriteString(ansi.SetModeSynchronizedOutput +
 			ansi.SaveCursor +
@@ -284,7 +287,7 @@ func (o *Output) drawLocked() {
 		return
 	}
 	o.dirty = false
-	if commands.Len() > 0 && time.Since(o.presentedAt) < minDrawDelay {
+	if commands.Len() > 0 && fresh {
 		// Draw again once the frame is surely on screen.
 		o.dirty, o.dirtySince = true, time.Now()
 		o.timer.Reset(minDrawDelay)
