@@ -70,6 +70,8 @@ func TestComposeFrameITerm2PlacesRepeatedImages(t *testing.T) {
 		"  " + PlaceholderLine(ITerm2, 4, 0, 3),
 		"  " + PlaceholderLine(ITerm2, 4, 1, 3),
 		"and " + PlaceholderLine(ITerm2, 4, 0, 3),
+		// An overlay covers the first column of a third copy.
+		"[x]" + xansi.TruncateLeft(PlaceholderLine(ITerm2, 4, 0, 3), 1, ""),
 		"composer",
 	}
 

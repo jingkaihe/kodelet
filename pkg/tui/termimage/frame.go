@@ -68,8 +68,8 @@ func ComposeFrame(protocol Protocol, content string, height int, imageCols func(
 	content = strings.Join(lines, "\n")
 
 	// A span is one image row as it appears on screen. The same image may
-	// appear more than once, so a span starts at every column 0, and it is
-	// complete when the following columns continue it on the same line.
+	// appear more than once, so a cell that does not continue a span starts
+	// another, which is complete only if it starts at column 0.
 	type rowKey struct {
 		id  uint32
 		row int
@@ -84,12 +84,8 @@ func ComposeFrame(protocol Protocol, content string, height int, imageCols func(
 	open := map[rowKey]*rowSpan{}
 	for _, cell := range cells {
 		key := rowKey{cell.id, cell.row}
-		if span := open[key]; span != nil && cell.col != 0 {
-			if cell.y == span.y && cell.col == span.cols && cell.x == span.x+span.cols {
-				span.cols++
-			} else {
-				span.complete = false
-			}
+		if span := open[key]; span != nil && cell.y == span.y && cell.col == span.cols && cell.x == span.x+span.cols {
+			span.cols++
 			continue
 		}
 		span := &rowSpan{id: cell.id, row: cell.row, x: cell.x, y: cell.y, cols: 1, complete: cell.col == 0}
