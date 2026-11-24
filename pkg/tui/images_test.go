@@ -205,6 +205,8 @@ func TestMarkdownResolvesOnlyImageLinkNodes(t *testing.T) {
 	render := func(text string) string { return ansi.Strip(m.renderMarkdown(text, 120, markdownAssistant)) }
 
 	assert.Contains(t, render("Open [the image](/i/abc)."), "https://connected.example/base/i/abc")
+	assert.Regexp(t, "\x1b\\]8;id=\\d+;https://connected\\.example/base/i/abc\x07(\x1b\\[[0-9;]*m)*the image",
+		m.renderMarkdown("Open [the image](/i/abc).", 120, markdownAssistant), "links are terminal hyperlinks")
 	assert.Contains(t, render("![chart](/i/abc)"), "https://connected.example/base/i/abc")
 	assert.Contains(t, render("[Download](/i/abc?download=1)"), "https://connected.example/base/i/abc?download=1")
 	assert.Equal(t, "See https://connected.example/base/i/abc.", strings.TrimSpace(render("See [/i/abc](/i/abc).")))

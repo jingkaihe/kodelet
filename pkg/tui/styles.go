@@ -4,8 +4,8 @@ import (
 	"image/color"
 	"strings"
 
+	"charm.land/glamour/v2/ansi"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/glamour/ansi"
 )
 
 const (

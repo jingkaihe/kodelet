@@ -1539,7 +1539,7 @@ func TestRenderTranscriptRestylesAssistantTextAfterInlineCode(t *testing.T) {
 
 	assert.Contains(t, plain, "before styles.go after")
 	assert.NotContains(t, plain, "before  styles.go  after")
-	assert.Contains(t, content, ansiResetSequence+start+" after")
+	assert.Contains(t, content, ansiShortResetSequence+start+" after")
 }
 
 func TestRenderTranscriptRestylesThoughtTextAfterInlineCode(t *testing.T) {
@@ -1562,7 +1562,7 @@ func TestRenderTranscriptRestylesThoughtTextAfterInlineCode(t *testing.T) {
 	start, _ := styleSequences(thoughtBodyStyle)
 
 	assert.Contains(t, plain, "before styles.go after")
-	assert.Contains(t, content, ansiResetSequence+start+" after")
+	assert.Contains(t, content, ansiShortResetSequence+start+" after")
 }
 
 func TestRenderPersistentStyleRestylesAfterForegroundReset(t *testing.T) {

@@ -5,11 +5,10 @@ import (
 	"strings"
 	"sync"
 
+	"charm.land/glamour/v2/ansi"
+	glamourstyles "charm.land/glamour/v2/styles"
 	"github.com/alecthomas/chroma/v2"
 	chromastyles "github.com/alecthomas/chroma/v2/styles"
-	"github.com/charmbracelet/glamour/ansi"
-	glamourstyles "github.com/charmbracelet/glamour/styles"
-	"github.com/muesli/termenv"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
@@ -97,7 +96,6 @@ func newMarkdownRenderer(width int, style ansi.StyleConfig) goldmark.Markdown {
 	)
 	terminal := ansi.NewRenderer(ansi.Options{
 		WordWrap:         max(10, width),
-		ColorProfile:     termenv.TrueColor,
 		Styles:           style,
 		PreserveNewLines: true,
 	})
