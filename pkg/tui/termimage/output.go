@@ -3,6 +3,7 @@ package termimage
 import (
 	"bytes"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,18 +40,32 @@ type Output struct {
 	queued   []byte
 	uploaded map[uint32]struct{}
 
-	// iTerm2 draws for the latest frame.
+	// iTerm2 images of the latest frame. Encoded crops are kept while on
+	// screen, so moving images only need repositioning.
 	signature   uint64
-	draw        func() string
+	placements  []Placement
+	encode      func(Placement) string
+	encoded     map[crop]string
+	encoding    bool
 	presentedAt time.Time
 	dirty       bool
 	dirtySince  time.Time
 	timer       *time.Timer
 }
 
+// crop identifies a placement's image rows regardless of position.
+type crop struct {
+	id                   uint32
+	firstRow, rows, cols int
+}
+
+func (p Placement) crop() crop {
+	return crop{id: p.ID, firstRow: p.FirstRow, rows: p.Rows, cols: p.Cols}
+}
+
 // NewOutput wraps file for protocol.
 func NewOutput(file *os.File, protocol Protocol) *Output {
-	return &Output{file: file, protocol: protocol, uploaded: map[uint32]struct{}{}}
+	return &Output{file: file, protocol: protocol, uploaded: map[uint32]struct{}{}, encoded: map[crop]string{}}
 }
 
 // SetProtocol enables a protocol identified after the program started.
@@ -94,6 +109,7 @@ func (o *Output) Write(p []byte) (int, error) {
 		}
 		out = append(out, p[i:]...)
 		clear(o.uploaded)
+		clear(o.encoded)
 		o.queued = nil
 		o.onScreen, o.dirty = false, false
 		if o.timer != nil {
@@ -171,20 +187,21 @@ func (o *Output) flushQueued() {
 	o.queued = nil
 }
 
-// Present sets the iTerm2 images of the latest frame. draw returns cursor-
-// positioned drawing commands and runs once the frame has settled.
-func (o *Output) Present(signature uint64, draw func() string) {
+// Present sets the iTerm2 images of the latest frame, drawn once it settles.
+// encode returns the command that draws a placement's rows at the cursor; it
+// may be slow, so it runs in the background, one frame at a time.
+func (o *Output) Present(signature uint64, placements []Placement, encode func(Placement) string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if signature == o.signature && o.draw != nil {
+	if signature == o.signature && o.encode != nil {
 		return
 	}
-	o.signature, o.draw, o.presentedAt = signature, draw, time.Now()
+	o.signature, o.placements, o.encode, o.presentedAt = signature, placements, encode, time.Now()
 	o.scheduleLocked()
 }
 
 func (o *Output) scheduleLocked() {
-	if o.protocol != ITerm2 || o.closed || !o.onScreen || o.draw == nil {
+	if o.protocol != ITerm2 || o.closed || !o.onScreen || o.encode == nil {
 		return
 	}
 	now := time.Now()
@@ -201,31 +218,73 @@ func (o *Output) scheduleLocked() {
 
 func (o *Output) drawSettled() {
 	o.mu.Lock()
-	if o.closed || !o.onScreen || !o.dirty || o.draw == nil {
-		o.mu.Unlock()
+	defer o.mu.Unlock()
+	if o.closed || !o.onScreen || !o.dirty || o.encode == nil || o.encoding {
+		// A running encode draws the latest frame when it finishes.
 		return
 	}
-	signature, draw := o.signature, o.draw
-	o.mu.Unlock()
+	missing := map[crop]Placement{}
+	for _, placement := range o.placements {
+		if _, ok := o.encoded[placement.crop()]; !ok {
+			missing[placement.crop()] = placement
+		}
+	}
+	if len(missing) > 0 {
+		encode := o.encode
+		o.encoding = true
+		o.mu.Unlock()
+		commands := make(map[crop]string, len(missing))
+		for key, placement := range missing {
+			commands[key] = encode(placement)
+		}
+		o.mu.Lock()
+		o.encoding = false
+		for key, command := range commands {
+			o.encoded[key] = command
+		}
+		if o.closed || !o.onScreen {
+			return
+		}
+	}
+	o.drawLocked()
+}
 
-	// Encoding may be slow, so it runs unlocked; a newer frame supersedes it.
-	commands := draw()
-
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.closed || !o.onScreen || o.signature != signature {
+// drawLocked draws the latest frame's encoded images where they now are.
+func (o *Output) drawLocked() {
+	var commands strings.Builder
+	used := map[crop]struct{}{}
+	complete := true
+	for _, placement := range o.placements {
+		used[placement.crop()] = struct{}{}
+		command, ok := o.encoded[placement.crop()]
+		if !ok {
+			complete = false
+			continue
+		}
+		if command != "" {
+			commands.WriteString(ansi.CursorPosition(placement.X+1, placement.Y+1))
+			commands.WriteString(command)
+		}
+	}
+	for key := range o.encoded {
+		if _, ok := used[key]; !ok {
+			delete(o.encoded, key)
+		}
+	}
+	if commands.Len() > 0 {
+		_, _ = o.file.WriteString(ansi.SetModeSynchronizedOutput +
+			ansi.SaveCursor +
+			commands.String() +
+			ansi.RestoreCursor +
+			ansi.ResetModeSynchronizedOutput)
+	}
+	if !complete {
+		// The frame changed while encoding; encode its new crops next.
+		o.scheduleLocked()
 		return
 	}
 	o.dirty = false
-	if commands == "" {
-		return
-	}
-	_, _ = o.file.WriteString(ansi.SetModeSynchronizedOutput +
-		ansi.SaveCursor +
-		commands +
-		ansi.RestoreCursor +
-		ansi.ResetModeSynchronizedOutput)
-	if time.Since(o.presentedAt) < minDrawDelay {
+	if commands.Len() > 0 && time.Since(o.presentedAt) < minDrawDelay {
 		// Draw again once the frame is surely on screen.
 		o.dirty, o.dirtySince = true, time.Now()
 		o.timer.Reset(minDrawDelay)

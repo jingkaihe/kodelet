@@ -417,7 +417,7 @@ func (s *tuiImages) compose(content string, height int) string {
 	case termimage.Kitty:
 		s.uploadVisible(frame.Visible)
 	case termimage.ITerm2:
-		s.output.Present(frame.Signature, s.drawer(frame.Placements))
+		s.output.Present(frame.Signature, frame.Placements, s.encodeITerm2)
 	}
 	return content
 }
@@ -466,31 +466,22 @@ func (s *tuiImages) uploadVisible(visible []uint32) {
 	}
 }
 
-// drawer returns a function that draws the placements with iTerm2's protocol.
-func (s *tuiImages) drawer(placements []termimage.Placement) func() string {
+// encodeITerm2 returns the command that draws a placement's rows at the cursor.
+func (s *tuiImages) encodeITerm2(placement termimage.Placement) string {
 	s.mu.Lock()
-	renditions := make([]*termimage.Rendition, len(placements))
-	for i, placement := range placements {
-		if rendition := s.byID[placement.ID]; rendition != nil {
-			renditions[i] = rendition.rendition
-		}
+	var rendition *termimage.Rendition
+	if image := s.byID[placement.ID]; image != nil {
+		rendition = image.rendition
 	}
 	s.mu.Unlock()
-	return func() string {
-		var b strings.Builder
-		for i, placement := range placements {
-			if renditions[i] == nil {
-				continue
-			}
-			data, err := renditions[i].Slice(placement.FirstRow, placement.Rows)
-			if err != nil {
-				continue
-			}
-			b.WriteString(ansi.CursorPosition(placement.X+1, placement.Y+1))
-			b.WriteString(termimage.ITerm2Image(data, placement.Cols, placement.Rows))
-		}
-		return b.String()
+	if rendition == nil {
+		return ""
 	}
+	data, err := rendition.Slice(placement.FirstRow, placement.Rows)
+	if err != nil {
+		return ""
+	}
+	return termimage.ITerm2Image(data, placement.Cols, placement.Rows)
 }
 
 // renderTranscriptImages writes image previews indented like a tool body,
