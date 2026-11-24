@@ -64,9 +64,8 @@ func renderMarkdownWithRenderer(
 		}
 	}()
 
-	context := parser.NewContext()
-	context.Set(imageLinkBaseKey, imageBase)
-	doc := md.Parser().Parse(text.NewReader(source), parser.WithContext(context))
+	doc := md.Parser().Parse(text.NewReader(source))
+	source = resolveLinks(doc, source, imageBase)
 	if previewable != nil {
 		source, previews = splitImagePreviews(doc.(*ast.Document), source, previewable)
 	}
@@ -90,14 +89,11 @@ func (m *model) markdownRenderer(width int, kind markdownKind) goldmark.Markdown
 	return m.assistantMarkdownRenderer
 }
 
-// newMarkdownRenderer mirrors glamour.NewTermRenderer, adding imageLinkTransformer.
+// newMarkdownRenderer mirrors glamour.NewTermRenderer.
 func newMarkdownRenderer(width int, style ansi.StyleConfig) goldmark.Markdown {
 	md := goldmark.New(
 		goldmark.WithExtensions(extension.GFM, extension.DefinitionList),
-		goldmark.WithParserOptions(
-			parser.WithAutoHeadingID(),
-			parser.WithASTTransformers(util.Prioritized(imageLinkTransformer{}, 0)),
-		),
+		goldmark.WithParserOptions(parser.WithAutoHeadingID()),
 	)
 	terminal := ansi.NewRenderer(ansi.Options{
 		WordWrap:         max(10, width),

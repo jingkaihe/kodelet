@@ -7,43 +7,68 @@ import (
 	"strings"
 
 	"github.com/yuin/goldmark/ast"
-	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
 )
 
-var imageLinkBaseKey = parser.NewContextKey()
-
-// imageLinkTransformer resolves relative Kodelet image links in link and image nodes.
-type imageLinkTransformer struct{}
-
-func (imageLinkTransformer) Transform(doc *ast.Document, _ text.Reader, pc parser.Context) {
-	base, _ := pc.Get(imageLinkBaseKey).(string)
-	if base == "" {
-		return
-	}
-	resolve := func(destination []byte) []byte {
-		link, err := url.Parse(string(destination))
-		if err != nil || link.Scheme != "" || link.Host != "" || link.User != nil {
-			return destination
-		}
-		// Keep the query and fragment, such as ?download=1.
-		shortCode, ok := strings.CutPrefix(link.Path, "/i/")
-		if !ok || !validImageShortCode(shortCode) {
-			return destination
-		}
-		return []byte(base + string(destination))
-	}
+// resolveLinks resolves relative Kodelet image links in link and image nodes
+// against base. A link whose text is its own URL becomes an autolink, so the
+// URL is shown once rather than as text and URL. It returns source with those
+// URLs appended.
+func resolveLinks(doc ast.Node, source []byte, base string) []byte {
+	var links []*ast.Link
 	_ = ast.Walk(doc, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
 		if entering {
 			switch node := node.(type) {
 			case *ast.Link:
-				node.Destination = resolve(node.Destination)
+				links = append(links, node)
 			case *ast.Image:
-				node.Destination = resolve(node.Destination)
+				node.Destination = resolveImageLink(node.Destination, base)
 			}
 		}
 		return ast.WalkContinue, nil
 	})
+	for _, link := range links {
+		label, original := linkLabel(link, source), string(link.Destination)
+		link.Destination = resolveImageLink(link.Destination, base)
+		if label == "" || (label != original && label != string(link.Destination)) {
+			continue
+		}
+		start := len(source)
+		source = append(source, link.Destination...)
+		autoLink := ast.NewAutoLink(ast.AutoLinkURL, ast.NewTextSegment(text.NewSegment(start, len(source))))
+		link.Parent().ReplaceChild(link.Parent(), link, autoLink)
+	}
+	return source
+}
+
+// resolveImageLink resolves a relative Kodelet image link, keeping its query
+// and fragment, such as ?download=1.
+func resolveImageLink(destination []byte, base string) []byte {
+	if base == "" {
+		return destination
+	}
+	link, err := url.Parse(string(destination))
+	if err != nil || link.Scheme != "" || link.Host != "" || link.User != nil {
+		return destination
+	}
+	shortCode, ok := strings.CutPrefix(link.Path, "/i/")
+	if !ok || !validImageShortCode(shortCode) {
+		return destination
+	}
+	return []byte(base + string(destination))
+}
+
+// linkLabel returns a link's text if it is plain, or "".
+func linkLabel(link *ast.Link, source []byte) string {
+	var label strings.Builder
+	for child := link.FirstChild(); child != nil; child = child.NextSibling() {
+		text, ok := child.(*ast.Text)
+		if !ok || text.SoftLineBreak() || text.HardLineBreak() {
+			return ""
+		}
+		label.Write(text.Segment.Value(source))
+	}
+	return label.String()
 }
 
 // imageLinkBase returns the base for relative image links, or "" if not HTTP.
