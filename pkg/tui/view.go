@@ -51,6 +51,7 @@ func (m *model) refreshViewport(scrollBottom bool) {
 		placeholderFrames[i] = transcriptSpinnerPlaceholder
 	}
 	m.spinner.Spinner.Frames = placeholderFrames
+	top := m.viewport.YOffset()
 	m.transcriptElapsedClocks = nil
 	m.captureTranscriptElapsed = true
 	content, regions := m.renderTranscript()
@@ -63,6 +64,9 @@ func (m *model) refreshViewport(scrollBottom bool) {
 	if scrollBottom {
 		m.autoFollow = true
 		m.viewport.GotoBottom()
+	} else if !m.autoFollow {
+		// Keep the text being read in place as images above it load.
+		m.viewport.SetYOffset(top + m.images.rowsAddedAbove(top))
 	}
 	if m.welcomeLogoVisible() {
 		m.viewport.GotoTop() // Keep the fixed canvas visible even in a short terminal.

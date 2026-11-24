@@ -51,8 +51,9 @@ type tuiImages struct {
 	byID    map[uint32]*imageRendition
 	frame   uint64
 
-	// placed is where the latest render put each image; placing collects the next.
-	placed, placing []imagePlacement
+	// placed is where the latest render put each image, previous where the one
+	// before did; placing collects the next.
+	placed, previous, placing []imagePlacement
 	// near counts loadNear calls; the cache keeps what the latest one used.
 	near       uint64
 	cacheBytes int
@@ -268,7 +269,29 @@ func (s *tuiImages) endPass() {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.placed, s.placing = s.placing, nil
+	s.previous, s.placed, s.placing = s.placed, s.placing, nil
+}
+
+// rowsAddedAbove returns the rows that images above transcript line top gained,
+// or lost, between the previous render and the latest.
+func (s *tuiImages) rowsAddedAbove(top int) int {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	added := 0
+	for i, before := range s.previous {
+		if i >= len(s.placed) || before.line >= top {
+			break
+		}
+		after := s.placed[i]
+		if after.source != before.source || after.line != before.line+added {
+			break // other content above changed too
+		}
+		added += after.height - before.height
+	}
+	return added
 }
 
 // loadNear downloads and resizes the images within a viewport height of the

@@ -307,6 +307,26 @@ func TestImagesLoadNearTheViewport(t *testing.T) {
 	assert.Equal(t, lines, m.viewport.TotalLineCount(), "rows are reserved before images load")
 }
 
+func TestImagesLoadingAboveTheViewportKeepTheTextInPlace(t *testing.T) {
+	runner := &imageTestRunner{images: map[string][]byte{testShortCode: imageTestPNG(t)}}
+	m, _, _ := newImageTestModel(t, runner, termimage.Kitty)
+	paragraphs := []string{"![bridge](/i/" + testShortCode + ")"}
+	for i := range 60 {
+		paragraphs = append(paragraphs, fmt.Sprintf("Paragraph %d.", i))
+	}
+	m.entries = []chatEntry{{kind: entryAssistant, blocks: []assistantBlock{{kind: blockText, text: strings.Join(paragraphs, "\n\n")}}}}
+	m.refreshViewport(true)
+	topLine := func() string { return strings.TrimSpace(ansi.Strip(strings.Split(m.viewport.View(), "\n")[0])) }
+
+	m.autoFollow = false
+	m.viewport.SetYOffset(20)
+	reading := topLine()
+	require.Contains(t, reading, "Paragraph")
+	m.loadVisibleImages()
+	waitForImages(t, &m, func() bool { return renditionsReady(m.images, 1) })
+	assert.Equal(t, reading, topLine())
+}
+
 func TestImageFetchesAreBounded(t *testing.T) {
 	runner := &imageTestRunner{images: map[string][]byte{}, gate: make(chan struct{})}
 	m, _, _ := newImageTestModel(t, runner, termimage.Kitty)
