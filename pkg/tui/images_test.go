@@ -85,7 +85,7 @@ func TestTranscriptDrawsITerm2Images(t *testing.T) {
 }
 
 func TestTranscriptPreviewsMarkdownImages(t *testing.T) {
-	text := "Here's London Bridge.\n\n![London Bridge at sunset](/i/" + testShortCode + ")\n\n" +
+	text := "Here's London Bridge: ![London Bridge at sunset](/i/" + testShortCode + ")\n\n" +
 		"See [the chart][chart].\n\n[chart]: /i/otherImageCode"
 	entries := []chatEntry{{kind: entryAssistant, blocks: []assistantBlock{{kind: blockText, text: text}}}}
 
@@ -106,7 +106,7 @@ func TestTranscriptPreviewsMarkdownImages(t *testing.T) {
 	assert.NotContains(t, plain, "London Bridge at sunset", "the preview replaces the link")
 	assert.Contains(t, plain, "https://connected.example/i/otherImageCode", "references still resolve across the image")
 	lines := strings.Split(m.viewport.GetContent(), "\n")
-	assert.Equal(t, "Here's London Bridge.", strings.TrimSpace(ansi.Strip(lines[0])))
+	assert.Equal(t, "Here's London Bridge:", strings.TrimSpace(ansi.Strip(lines[0])))
 	assert.Empty(t, strings.TrimSpace(ansi.Strip(lines[1])))
 	for row := range 10 {
 		assert.Equal(t, termimage.PlaceholderLine(termimage.Kitty, firstImageID(&m), row, 30), lines[2+row])
@@ -152,35 +152,48 @@ func TestTranscriptWithoutImagePreviews(t *testing.T) {
 	assert.Zero(t, runner.fetchCount("chart"))
 }
 
-func TestMarkdownPreviewsReplaceOnlyTopLevelImageParagraphs(t *testing.T) {
+func TestMarkdownPreviewsSplitImagesOutOfTopLevelParagraphs(t *testing.T) {
+	m := newModel(t.Context(), Config{Runner: &imageTestRunner{}, Remote: true, ServerURL: "https://connected.example"})
+	t.Cleanup(m.cancel)
 	fence := strings.Repeat("~", 3)
-	md := newMarkdownRenderer(80, assistantMarkdownStyle)
+	image := "![bridge](/i/" + testShortCode + ")"
+	plain := func(rendered string) string {
+		lines := strings.Split(ansi.Strip(rendered), "\n")
+		for i, line := range lines {
+			lines[i] = strings.TrimSpace(line)
+		}
+		return strings.Join(lines, "\n")
+	}
 	for _, test := range []struct {
 		name, text, want string
-		previews         []string
+		previews         int
 	}{
 		{
 			name:     "image paragraph",
-			text:     "Here it is:\n\n![bridge](/i/" + testShortCode + ")\n\nAI-generated.",
+			text:     "Here it is:\n\n" + image + "\n\nAI-generated.",
 			want:     "Here it is:\n\nKODELETIMAGEPREVIEW0\n\nAI-generated.",
-			previews: []string{testShortCode},
+			previews: 1,
 		},
+		{name: "end of a sentence", text: "Here it is: " + image, want: "Here it is:\n\nKODELETIMAGEPREVIEW0", previews: 1},
+		{name: "next line", text: "Here it is:\n" + image + "\nAI-generated.", want: "Here it is:\n\nKODELETIMAGEPREVIEW0\n\nAI-generated.", previews: 1},
+		{name: "consecutive lines", text: image + "\n" + image, want: "KODELETIMAGEPREVIEW0\n\nKODELETIMAGEPREVIEW1", previews: 2},
+		{name: "mid-sentence", text: "See *this* " + image + " here", want: "See this\n\nKODELETIMAGEPREVIEW0\n\nhere", previews: 1},
 		{
 			name:     "absolute link",
 			text:     "![chart](https://kodelet.example/base/i/" + testShortCode + ")",
 			want:     "KODELETIMAGEPREVIEW0",
-			previews: []string{testShortCode},
+			previews: 1,
 		},
-		{name: "inline image", text: "See ![x](/i/" + testShortCode + ") here"},
-		{name: "list item", text: "- ![x](/i/" + testShortCode + ")"},
-		{name: "code fence", text: fence + "\n![x](/i/" + testShortCode + ")\n" + fence},
+		{name: "list item", text: "- " + image},
+		{name: "code fence", text: fence + "\n" + image + "\n" + fence},
+		{name: "image link", text: "[" + image + "](https://example.com)"},
 		{name: "other image", text: "![x](https://example.com/cat.png)"},
 		{name: "query string", text: "![x](/i/" + testShortCode + "?download=1)"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			source, previews := markdownPreviews(md, []byte(test.text), func(string) bool { return true })
-			assert.Equal(t, cmp.Or(test.want, test.text), string(source))
-			assert.Equal(t, test.previews, previews)
+			rendered, previews := m.renderMarkdownPreviews(test.text, 80, markdownAssistant, func(string) bool { return true })
+			assert.Equal(t, cmp.Or(test.want, plain(m.renderMarkdown(test.text, 80, markdownAssistant))), plain(rendered))
+			assert.Len(t, previews, test.previews)
 		})
 	}
 }

@@ -11,9 +11,11 @@ import (
 	glamourstyles "github.com/charmbracelet/glamour/styles"
 	"github.com/muesli/termenv"
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/renderer"
+	"github.com/yuin/goldmark/text"
 	"github.com/yuin/goldmark/util"
 )
 
@@ -27,7 +29,8 @@ func (m *model) renderMarkdown(text string, width int, kind markdownKind) string
 }
 
 // renderMarkdownPreviews renders markdown with Kodelet image links resolved. With
-// previewable set, image-only paragraphs become markers for the returned images.
+// previewable set, images in top-level paragraphs become markers on their own
+// rows for the returned images.
 func (m *model) renderMarkdownPreviews(
 	text string,
 	width int,
@@ -40,32 +43,36 @@ func (m *model) renderMarkdownPreviews(
 	}
 
 	md := m.markdownRenderer(max(10, width), kind)
-	source, previews := []byte(text), []string(nil)
-	if previewable != nil {
-		source, previews = markdownPreviews(md, source, previewable)
-	}
-	rendered, ok := renderMarkdownWithRenderer(md, source, imageLinkBase(m.serverURL))
+	rendered, previews, ok := renderMarkdownWithRenderer(md, []byte(text), imageLinkBase(m.serverURL), previewable)
 	if !ok {
 		return wrapText(text, width), nil
 	}
 	return strings.TrimSpace(rendered), previews
 }
 
-func renderMarkdownWithRenderer(md goldmark.Markdown, source []byte, imageBase string) (rendered string, ok bool) {
+func renderMarkdownWithRenderer(
+	md goldmark.Markdown,
+	source []byte,
+	imageBase string,
+	previewable func(shortCode string) bool,
+) (rendered string, previews []string, ok bool) {
 	codeBlockThemeRegistryMu.RLock()
 	defer codeBlockThemeRegistryMu.RUnlock()
 	defer func() {
 		if recover() != nil {
-			rendered = ""
-			ok = false
+			rendered, previews, ok = "", nil, false
 		}
 	}()
 
 	context := parser.NewContext()
 	context.Set(imageLinkBaseKey, imageBase)
+	doc := md.Parser().Parse(text.NewReader(source), parser.WithContext(context))
+	if previewable != nil {
+		source, previews = splitImagePreviews(doc.(*ast.Document), source, previewable)
+	}
 	var buf bytes.Buffer
-	err := md.Convert(source, &buf, parser.WithContext(context))
-	return buf.String(), err == nil
+	err := md.Renderer().Render(&buf, source, doc)
+	return buf.String(), previews, err == nil
 }
 
 func (m *model) markdownRenderer(width int, kind markdownKind) goldmark.Markdown {

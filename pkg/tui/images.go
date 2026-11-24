@@ -530,7 +530,7 @@ func (m *model) imagePreviewLimits(indent int) (maxCols, maxRows int) {
 	return min(imagePreviewMaxCols, m.transcriptTextWidth()-indent), min(imagePreviewMaxRows, max(4, m.height*3/5))
 }
 
-// renderAssistantText renders assistant markdown, previewing image-only paragraphs.
+// renderAssistantText renders assistant markdown, previewing images in top-level paragraphs.
 func (m *model) renderAssistantText(b *strings.Builder, line *int, text string) {
 	var previewable func(string) bool
 	if m.images.available() {
