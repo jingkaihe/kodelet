@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.8.33-beta
+
+Added [inline image previews](docs/MANUAL.md#terminal-chat-tui) for tool results and replies in `kodelet chat` on Kitty, Ghostty, and iTerm2.
+
+Made Markdown links in terminal chat replies clickable and resolved relative Kodelet image links against the connected server.
+
 ## 0.8.32-beta
 
 Improved GPT-6.2 prompt caching on the OpenAI and Codex platforms by sending the system prompt as the leading developer message instead of top-level `instructions`, which the Responses API now appends after the input, outside the cached prefix, billing the system prompt as uncached input on every request. Other Responses API platforms still use `instructions`.
