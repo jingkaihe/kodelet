@@ -55,8 +55,8 @@ var modelsSupportingOriginalImageDetail = map[string]struct{}{
 }
 
 const (
-	maxImageFileSize              = 5 * 1024 * 1024
-	maxArtifactImageSize          = 32 * 1024 * 1024
+	// MaxImageInputBytes limits encoded image input before resizing for the model.
+	MaxImageInputBytes            = 32 << 20
 	maxDecodedImagePixels         = 40_000_000
 	ViewImageMaxWidth             = 2048
 	ViewImageMaxHeight            = 768
@@ -69,6 +69,9 @@ const (
 // MaxAnthropicImageBase64Size is the direct Claude API limit for each base64-encoded image.
 // https://platform.claude.com/docs/en/build-with-claude/vision#request-limits
 const MaxAnthropicImageBase64Size = 10_000_000
+
+// ErrImageInputTooLarge indicates the input exceeded the limit before resizing.
+var ErrImageInputTooLarge = errors.Errorf("image file too large: %d MiB file limit", MaxImageInputBytes>>20)
 
 // Result stores the processed image payload used across providers.
 type Result struct {
@@ -135,20 +138,35 @@ func MakeViewImageResult(path string, detail string, model string, provider stri
 	if !info.Mode().IsRegular() {
 		return nil, errors.Errorf("image path `%s` is not a file", cleanPath)
 	}
+	if info.Size() > MaxImageInputBytes {
+		return nil, ErrImageInputTooLarge
+	}
 
 	file, err := os.Open(cleanPath)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to open image file")
 	}
 	defer file.Close()
-	fileBytes, err := io.ReadAll(io.LimitReader(file, maxImageFileSize+1))
+	fileBytes, err := io.ReadAll(io.LimitReader(file, MaxImageInputBytes+1))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read image file")
 	}
-	if len(fileBytes) > maxImageFileSize {
-		return nil, errors.Errorf("image file too large: %d bytes (max: %d bytes)", len(fileBytes), maxImageFileSize)
-	}
 	return MakeViewImageResultBytes(fileBytes, cleanPath, detail, model, provider)
+}
+
+// ImageInputFormat checks the byte and pixel limits without decoding the pixel buffer.
+func ImageInputFormat(data []byte) (string, error) {
+	if len(data) > MaxImageInputBytes {
+		return "", ErrImageInputTooLarge
+	}
+	config, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return "", errors.Wrap(err, "unsupported image")
+	}
+	if config.Width <= 0 || config.Height <= 0 || config.Width > maxDecodedImagePixels/config.Height {
+		return "", errors.New("image exceeds the decoded pixel limit")
+	}
+	return format, nil
 }
 
 // MakeViewImageResultBytes preprocesses a persisted image without a runner filesystem round trip.
@@ -162,15 +180,8 @@ func MakeViewImageResultBytes(fileBytes []byte, label, detail, model, provider s
 	if err != nil {
 		return nil, err
 	}
-	if len(fileBytes) > maxArtifactImageSize {
-		return nil, errors.Errorf("image file too large: %d bytes (max: %d bytes)", len(fileBytes), maxArtifactImageSize)
-	}
-	config, _, err := image.DecodeConfig(bytes.NewReader(fileBytes))
-	if err != nil {
-		return nil, errors.Wrapf(err, "unable to process image %s: unsupported image", label)
-	}
-	if config.Width <= 0 || config.Height <= 0 || config.Width > maxDecodedImagePixels/config.Height {
-		return nil, errors.New("image exceeds the decoded pixel limit")
+	if _, err := ImageInputFormat(fileBytes); err != nil {
+		return nil, errors.Wrapf(err, "unable to process image %s", label)
 	}
 
 	img, format, err := decodeImage(fileBytes)

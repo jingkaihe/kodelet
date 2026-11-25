@@ -1,23 +1,17 @@
 package tui
 
 import (
-	"bytes"
 	"context"
-	"image/png"
 	"os"
 	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/jingkaihe/kodelet/pkg/chat"
-	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
+	"github.com/jingkaihe/kodelet/pkg/vision"
 	"github.com/pkg/errors"
 	"golang.design/x/clipboard"
-)
-
-var errClipboardImageTooLarge = errors.Errorf(
-	"image exceeds the %d MiB file limit for view_image", base.MaxImageFileSize/(1<<20),
 )
 
 type clipboardReader func(context.Context, clipboard.Format) ([]byte, error)
@@ -103,11 +97,12 @@ func stageClipboardImage(
 	runner runnerStatusProvider,
 	target chat.WorkspaceTarget,
 ) (string, error) {
-	if len(data) > base.MaxImageFileSize {
-		return "", errClipboardImageTooLarge
+	format, err := vision.ImageInputFormat(data)
+	if err != nil {
+		return "", err
 	}
-	if _, err := png.DecodeConfig(bytes.NewReader(data)); err != nil {
-		return "", errors.Wrap(err, "clipboard did not return a PNG image")
+	if format != "png" {
+		return "", errors.New("clipboard did not return a PNG image")
 	}
 	// Only insert paths on the runner's own machine; even a loopback URL
 	// can point at a remote runner. The turn can outlive this TUI, so leave

@@ -56,11 +56,14 @@ func TestMakeViewImageResultBytes(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2304, original.Width)
 
-	// Padding leaves a valid PNG but exercises the separate artifact/file limits.
-	large := append(append([]byte(nil), data...), make([]byte, maxImageFileSize)...)
-	_, err = MakeViewImageResultBytes(large, "art_large", "", "gpt-5.5", "openai")
+	// A local screenshot larger than the old 5 MiB input limit is still resized.
+	path := filepath.Join(t.TempDir(), "screenshot.png")
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+	require.NoError(t, os.Truncate(path, 6<<20))
+	large, err := MakeViewImageResult(path, "", "gpt-5.5", "openai")
 	require.NoError(t, err)
-	_, err = MakeViewImageResultBytes(make([]byte, maxArtifactImageSize+1), "art_large", "", "gpt-5.5", "openai")
+	assert.Equal(t, ViewImageMaxWidth, large.Width)
+	_, err = MakeViewImageResultBytes(make([]byte, MaxImageInputBytes+1), "art_large", "", "gpt-5.5", "openai")
 	require.ErrorContains(t, err, "too large")
 	_, err = MakeViewImageResultBytes(data, "art_image", "original", "gpt-5", "openai")
 	require.ErrorContains(t, err, "compatible models")
@@ -103,7 +106,7 @@ func TestMakeViewImageResultBytesFitsAnthropicPayload(t *testing.T) {
 			require.NoError(t, png.Encode(&buffer, img))
 			data := buffer.Bytes()
 			before := sha256.Sum256(data)
-			require.LessOrEqual(t, len(data), maxArtifactImageSize)
+			require.LessOrEqual(t, len(data), MaxImageInputBytes)
 			require.Greater(t, base64.StdEncoding.EncodedLen(len(data)), payloadLimit)
 
 			result, err := MakeViewImageResultBytes(data, "art_large", tt.detail, tt.model, "anthropic")
@@ -259,7 +262,8 @@ func TestMakeViewImageResultValidationErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "is not a file")
 
 	largePath := filepath.Join(dir, "large.png")
-	require.NoError(t, os.WriteFile(largePath, make([]byte, maxImageFileSize+1), 0o644))
+	require.NoError(t, os.WriteFile(largePath, nil, 0o600))
+	require.NoError(t, os.Truncate(largePath, MaxImageInputBytes+1))
 	_, err = MakeViewImageResult(largePath, "", "gpt-5", "openai")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "image file too large")

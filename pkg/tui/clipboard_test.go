@@ -9,10 +9,10 @@ import (
 	"testing/synctest"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/jingkaihe/kodelet/pkg/runner/registry"
+	"github.com/jingkaihe/kodelet/pkg/vision"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.design/x/clipboard"
@@ -138,8 +138,8 @@ func TestRejectedClipboardImageLeavesDraftAlone(t *testing.T) {
 		want string
 	}{
 		{"remote runner", imageTestPNG(t), "runner on this machine"},
-		{"invalid PNG", []byte("not PNG"), "PNG image"},
-		{"oversized", make([]byte, base.MaxImageFileSize+1), "file limit"},
+		{"invalid image", []byte("not PNG"), "unsupported image"},
+		{"oversized", make([]byte, vision.MaxImageInputBytes+1), "file limit"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newThemeTestModel(t, Config{Runner: runner, Remote: true})

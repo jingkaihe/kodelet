@@ -2041,7 +2041,7 @@ For detailed skill creation guide, see [docs/SKILLS.md](SKILLS.md).
 
 ### Image Input Security
 - Only HTTPS URLs are accepted for remote images (no HTTP)
-- File size limited to 5MB per image
+- Local `view_image` inputs, including pasted images, are limited to 32 MiB and 40 million pixels before resizing; the 5 MiB limit for `--image` is unchanged.
 - Maximum 10 images per message
 - Supported formats: JPEG, PNG, GIF, WebP only
 

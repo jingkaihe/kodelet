@@ -8,7 +8,7 @@ import (
 
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
-	"github.com/jingkaihe/kodelet/pkg/llm/base"
+	"github.com/jingkaihe/kodelet/pkg/vision"
 	"github.com/pkg/errors"
 	"golang.design/x/clipboard"
 	"golang.org/x/text/encoding/charmap"
@@ -96,7 +96,7 @@ func readX11Selection(c *xgb.Conn, format clipboard.Format) ([]byte, error) {
 	limit := 16 << 20 // Bound text as well as images across INCR chunks.
 	if format == clipboard.FmtImage {
 		candidates = []string{"image/png"}
-		limit = base.MaxImageFileSize
+		limit = vision.MaxImageInputBytes
 	}
 	for _, name := range candidates {
 		target, err := x11Atom(c, name)
@@ -108,7 +108,7 @@ func readX11Selection(c *xgb.Conn, format clipboard.Format) ([]byte, error) {
 		}
 		data, err = s.read(target, 8, limit)
 		if format == clipboard.FmtImage && errors.Is(err, errX11SelectionTooLarge) {
-			return nil, errClipboardImageTooLarge
+			return nil, vision.ErrImageInputTooLarge
 		}
 		if err != nil {
 			return nil, err
