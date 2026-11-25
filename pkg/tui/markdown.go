@@ -82,7 +82,8 @@ var hyperlinkPattern = regexp.MustCompile("\x1b\\]8;([^;\x07\x1b]*);([^\x07\x1b]
 
 // dropUnsafeHyperlinks removes hyperlinks that the terminal renderer would
 // truncate or discard, so a click never opens a different URL. Their URLs
-// remain visible as text.
+// remain visible as text. Wrapping re-emits each hyperlink through a parser
+// that keeps maxHyperlinkData bytes, so one that fills it may already be cut.
 func dropUnsafeHyperlinks(rendered string) string {
 	if !strings.Contains(rendered, "\x1b]8;") {
 		return rendered
@@ -90,7 +91,7 @@ func dropUnsafeHyperlinks(rendered string) string {
 	return hyperlinkPattern.ReplaceAllStringFunc(rendered, func(sequence string) string {
 		match := hyperlinkPattern.FindStringSubmatch(sequence)
 		params, url := match[1], match[2]
-		if url == "" || (!strings.Contains(url, ";") && len("8;"+params+";"+url) <= maxHyperlinkData) {
+		if url == "" || (!strings.Contains(url, ";") && len("8;"+params+";"+url) < maxHyperlinkData) {
 			return sequence
 		}
 		return ""

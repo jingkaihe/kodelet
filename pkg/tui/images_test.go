@@ -220,13 +220,21 @@ func TestMarkdownResolvesOnlyImageLinkNodes(t *testing.T) {
 		assert.Equal(t, []string{want}, slices.Collect(maps.Keys(links)), text)
 		assert.True(t, strings.HasSuffix(links[want], want), text)
 	}
+	// Wrapped links stay exact, and links the terminal renderer would truncate
+	// or discard only show their URL.
+	unwrapped := func(rendered string) string {
+		lines := strings.Split(ansi.Strip(rendered), "\n")
+		for i, line := range lines {
+			lines[i] = strings.TrimSpace(line)
+		}
+		return strings.Join(lines, "")
+	}
 	signed := "https://example.com/file?sig=" + strings.Repeat("a", 3900)
-	assert.Equal(t, []string{signed}, slices.Collect(maps.Keys(linkedCells(m.renderMarkdown("[file]("+signed+")", 10000, markdownAssistant)))))
-	// Links the terminal renderer would truncate or discard only show their URL.
-	for _, url := range []string{signed + strings.Repeat("a", 200), "https://example.com/a;b=c"} {
-		rendered := m.renderMarkdown("[file]("+url+")", 10000, markdownAssistant)
+	assert.Equal(t, []string{signed}, slices.Collect(maps.Keys(linkedCells(m.renderMarkdown("[file]("+signed+")", 80, markdownAssistant)))))
+	for _, url := range []string{signed + strings.Repeat("a", 200), "https://example.com/a;b=" + strings.Repeat("c", 100)} {
+		rendered := m.renderMarkdown("[file]("+url+")", 80, markdownAssistant)
 		assert.Empty(t, linkedCells(rendered))
-		assert.Contains(t, ansi.Strip(rendered), url)
+		assert.Contains(t, unwrapped(rendered), url)
 	}
 	assert.Contains(t, render("![chart](/i/abc)"), "https://connected.example/base/i/abc")
 	assert.Contains(t, render("[Download](/i/abc?download=1)"), "https://connected.example/base/i/abc?download=1")
