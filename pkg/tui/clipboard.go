@@ -146,14 +146,20 @@ func stageClipboardImage(
 	if err != nil {
 		return "", err
 	}
-	if format != "png" {
-		return "", errors.New("clipboard did not return a PNG image")
+	// Name the file from its bytes, not the clipboard owner's MIME label.
+	ext := format
+	switch format {
+	case "jpeg":
+		ext = "jpg"
+	case "png", "gif", "webp":
+	default:
+		return "", errors.Errorf("unsupported clipboard image format: %s", format)
 	}
 	if err := requireLocalClipboardRunner(ctx, runner, target); err != nil {
 		return "", err
 	}
 	// The turn can outlive this TUI, so leave successfully pasted files to OS temp cleanup.
-	return writeComposerTempFile("kodelet-paste-*.png", data)
+	return writeComposerTempFile("kodelet-paste-*."+ext, data)
 }
 
 func requireLocalClipboardRunner(ctx context.Context, runner runnerStatusProvider, target chat.WorkspaceTarget) error {

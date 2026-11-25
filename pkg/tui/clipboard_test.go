@@ -1,7 +1,12 @@
 package tui
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"image"
+	"image/gif"
+	"image/jpeg"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -9,6 +14,7 @@ import (
 	"testing/synctest"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/jingkaihe/kodelet/pkg/runner/registry"
@@ -62,6 +68,28 @@ func TestPasteImageIntoDraft(t *testing.T) {
 	send()
 	receiveRunMsg(t, m.runCh)
 	assert.Equal(t, draft, runner.req.Message)
+}
+
+func TestClipboardImagePreservesEncoding(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	runner := localClipboardRunner(t)
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	var jpg, gifData bytes.Buffer
+	require.NoError(t, jpeg.Encode(&jpg, img, nil))
+	require.NoError(t, gif.Encode(&gifData, img, nil))
+	// A single lossless WebP pixel (there's no WebP encoder in the Go standard library).
+	webp, err := base64.StdEncoding.DecodeString("UklGRh4AAABXRUJQVlA4TBEAAAAvAAAAAAdQsYZ1rP+BiOh/AAA=")
+	require.NoError(t, err)
+	for ext, data := range map[string][]byte{".jpg": jpg.Bytes(), ".gif": gifData.Bytes(), ".webp": webp} {
+		t.Run(ext, func(t *testing.T) {
+			path, err := stageClipboardImage(t.Context(), data, runner, chat.WorkspaceTarget{})
+			require.NoError(t, err)
+			assert.Equal(t, ext, filepath.Ext(path))
+			got, err := os.ReadFile(path)
+			require.NoError(t, err)
+			assert.Equal(t, data, got)
+		})
+	}
 }
 
 func TestPasteFinderFilesPrefersAndPreservesOriginals(t *testing.T) {

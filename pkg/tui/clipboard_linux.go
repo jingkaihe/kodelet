@@ -22,9 +22,11 @@ func init() {
 
 var errX11SelectionTooLarge = errors.New("clipboard selection is too large")
 
+var clipboardImageMIMEs = []string{"image/png", "image/jpeg", "image/gif", "image/webp"}
+
 func readDesktopClipboard(ctx context.Context, format clipboard.Format) ([]byte, error) {
 	if os.Getenv("DISPLAY") == "" {
-		return readNativeClipboard(ctx, format)
+		return readWaylandClipboard(ctx, format)
 	}
 	// WAYLAND_DISPLAY does not mean the compositor offers data-control. Use
 	// the same X11 selection for discovery and transfer, including XWayland.
@@ -32,7 +34,7 @@ func readDesktopClipboard(ctx context.Context, format clipboard.Format) ([]byte,
 	if err != nil {
 		// A stale DISPLAY need not prevent a working native Wayland paste.
 		if os.Getenv("WAYLAND_DISPLAY") != "" {
-			return readNativeClipboard(ctx, format)
+			return readWaylandClipboard(ctx, format)
 		}
 		return nil, clipboard.ErrUnavailable
 	}
@@ -40,6 +42,29 @@ func readDesktopClipboard(ctx context.Context, format clipboard.Format) ([]byte,
 	stop := context.AfterFunc(ctx, c.Close)
 	defer stop()
 	return readX11Selection(c, format)
+}
+
+func readWaylandClipboard(ctx context.Context, format clipboard.Format) ([]byte, error) {
+	if format != clipboard.FmtImage {
+		return readNativeClipboard(ctx, format)
+	}
+	if err := clipboard.Init(); err != nil {
+		return nil, err
+	}
+	// FmtImage requests only PNG; the library exposes the other advertised
+	// MIME types as custom formats that return the original encoded bytes.
+	offered, err := clipboard.Formats(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, mime := range clipboardImageMIMEs {
+		for _, f := range offered {
+			if f.MIME() == mime {
+				return clipboard.Read(ctx, f)
+			}
+		}
+	}
+	return nil, clipboard.ErrNoData
 }
 
 func x11Atom(c *xgb.Conn, name string) (xproto.Atom, error) {
@@ -95,7 +120,7 @@ func readX11Selection(c *xgb.Conn, format clipboard.Format) ([]byte, error) {
 	candidates := []string{"UTF8_STRING", "text/plain;charset=utf-8", "text/plain", "STRING"}
 	limit := 16 << 20 // Bound text as well as images across INCR chunks.
 	if format == clipboard.FmtImage {
-		candidates = []string{"image/png"}
+		candidates = clipboardImageMIMEs
 		limit = vision.MaxImageInputBytes
 	}
 	for _, name := range candidates {
