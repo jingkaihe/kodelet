@@ -111,7 +111,7 @@ func TestPasteFinderFilesPrefersAndPreservesOriginals(t *testing.T) {
 	assert.FileExists(t, original)
 	runner.runnerStatus.Runner.Host.InstanceID = "another-machine"
 	result = m.pasteClipboard()().(clipboardPasteMsg)
-	require.ErrorContains(t, result.err, "runner on this machine")
+	require.ErrorIs(t, result.err, errClipboardNeedsLocalRunner)
 }
 
 func TestPasteTextWithoutLocalRunner(t *testing.T) {
@@ -216,7 +216,7 @@ func TestRejectedClipboardImageLeavesDraftAlone(t *testing.T) {
 		data []byte
 		want string
 	}{
-		{"remote runner", imageTestPNG(t), "runner on this machine"},
+		{"remote runner", imageTestPNG(t), "To paste a file or image, use a runner on the same machine as this chat."},
 		{"invalid image", []byte("not PNG"), "unsupported image"},
 		{"oversized", make([]byte, vision.MaxImageInputBytes+1), "file limit"},
 	} {

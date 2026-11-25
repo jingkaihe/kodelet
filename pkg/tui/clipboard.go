@@ -20,6 +20,8 @@ import (
 
 type clipboardReader func(context.Context, clipboard.Format) ([]byte, error)
 
+var errClipboardNeedsLocalRunner = errors.New("clipboard paths require a local runner")
+
 func readNativeClipboard(ctx context.Context, format clipboard.Format) ([]byte, error) {
 	if err := clipboard.Init(); err != nil {
 		return nil, err
@@ -174,7 +176,7 @@ func requireLocalClipboardRunner(ctx context.Context, runner runnerStatusProvide
 			return errors.Wrap(err, "could not identify the runner for these paths")
 		}
 	}
-	return errors.New("pasting a file path requires a runner on this machine")
+	return errClipboardNeedsLocalRunner
 }
 
 func (m *model) finishClipboardPaste(msg clipboardPasteMsg) tea.Cmd {
@@ -190,7 +192,10 @@ func (m *model) finishClipboardPaste(msg clipboardPasteMsg) tea.Cmd {
 		return nil
 	case msg.err != nil:
 		detail := msg.err.Error()
-		if errors.Is(msg.err, context.DeadlineExceeded) {
+		switch {
+		case errors.Is(msg.err, errClipboardNeedsLocalRunner):
+			detail = "To paste a file or image, use a runner on the same machine as this chat."
+		case errors.Is(msg.err, context.DeadlineExceeded):
 			detail = "Clipboard paste timed out. Try copying the item again."
 		}
 		return m.addUINotification(uiNotification{

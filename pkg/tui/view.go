@@ -298,10 +298,14 @@ func (m model) renderShortcutsDialog() string {
 		ctrlCDescription = "Detach and quit"
 	}
 
+	pasteDescription := "Paste an image or text"
+	if runtime.GOOS == "darwin" {
+		pasteDescription = "Paste files, an image, or text"
+	}
 	baseRows := []shortcutHelpRow{
 		{shortcut: "Enter", description: "Send message"},
 		{shortcut: "Shift+Enter", description: "Insert newline"},
-		{shortcut: "Ctrl+V", description: "Paste image or text"},
+		{shortcut: "Ctrl+V", description: pasteDescription},
 		{shortcut: "Ctrl+G", description: "Edit draft in $EDITOR"},
 		{shortcut: "Ctrl+R", description: "Search previous sent messages"},
 		{shortcut: "Ctrl+L", description: "Browse and switch conversations"},
@@ -314,7 +318,7 @@ func (m model) renderShortcutsDialog() string {
 		{shortcut: "Ctrl+C", description: ctrlCDescription},
 	}
 	if runtime.GOOS == "darwin" {
-		baseRows = append(baseRows, shortcutHelpRow{shortcut: "Cmd+B", description: "Paste image or text"})
+		baseRows = append(baseRows, shortcutHelpRow{shortcut: "Cmd+B", description: pasteDescription})
 	}
 	overridden := make(map[string]struct{}, len(m.extensionShortcuts))
 	baseRows = append(baseRows,
