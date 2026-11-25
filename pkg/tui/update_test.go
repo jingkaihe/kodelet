@@ -853,7 +853,7 @@ func TestOpenComposerInEditorCreatesDraftAndClearsTransientUI(t *testing.T) {
 }
 
 func TestWriteComposerEditorFileRoundTripsDraft(t *testing.T) {
-	path, err := writeComposerEditorFile("draft body")
+	path, err := writeComposerTempFile("kodelet-composer-*.md", []byte("draft body"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.Remove(path) })
 

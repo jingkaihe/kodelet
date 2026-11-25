@@ -300,6 +300,8 @@ func (m model) renderShortcutsDialog() string {
 	baseRows := []shortcutHelpRow{
 		{shortcut: "Enter", description: "Send message"},
 		{shortcut: "Shift+Enter", description: "Insert newline"},
+		{shortcut: "Ctrl+V", description: "Paste image or text"},
+		{shortcut: "Cmd+B", description: "Paste image or text (macOS)"},
 		{shortcut: "Ctrl+G", description: "Edit draft in $EDITOR"},
 		{shortcut: "Ctrl+R", description: "Search previous sent messages"},
 		{shortcut: "Ctrl+L", description: "Browse and switch conversations"},

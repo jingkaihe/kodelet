@@ -77,6 +77,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case clipboardPasteMsg:
+		cmd := m.finishClipboardPaste(msg)
+		return m, cmd
 	case tuiAudioMsg:
 		cmd := m.updateAudio(msg)
 		return m, tea.Batch(cmd, waitForMsg(m.runCh))
@@ -831,6 +834,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if shortcut, ok := m.extensionShortcutForKey(msg.Keystroke()); ok {
 			return m, m.startExtensionShortcut(shortcut)
 		}
+		switch msg.Keystroke() {
+		case "ctrl+v", "super+b":
+			if m.reasoningPickerOpen || m.pastePending {
+				return m, nil
+			}
+			return m, m.pasteClipboard()
+		}
 		switch key {
 		case "ctrl+c", "ctrl+d":
 			if m.running {
@@ -932,6 +942,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "enter":
+			if m.pastePending {
+				return m, nil // Don't send a partial draft while the clipboard is being read.
+			}
 			if cmd, handled := m.handleLocalSlashCommand(strings.TrimSpace(m.textarea.Value())); handled {
 				return m, cmd
 			}
@@ -1297,21 +1310,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 	}
 
-	previousTextareaValue := m.textarea.Value()
-	previousSlashCommandHeight := m.slashCommandSuggestionsHeight()
-	var cmd tea.Cmd
-	m.textarea, cmd = m.textarea.Update(msg)
-	cmds = append(cmds, cmd)
-	if m.textarea.Value() != previousTextareaValue {
-		if m.slashDismissedDraft != "" && m.slashDismissedDraft != m.textarea.Value() {
-			m.slashDismissedDraft = ""
-		}
-		m.slashCommandIndex = -1
-	}
-	if m.slashCommandSuggestionsHeight() != previousSlashCommandHeight {
-		m.resize()
-		m.refreshViewport(false)
-	}
+	cmds = append(cmds, m.updateComposer(msg))
 
 	if shouldUpdateViewport(msg) {
 		var vpCmd tea.Cmd
@@ -1320,6 +1319,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m *model) updateComposer(msg tea.Msg) tea.Cmd {
+	previousDraft := m.textarea.Value()
+	previousHeight := m.slashCommandSuggestionsHeight()
+	var cmd tea.Cmd
+	m.textarea, cmd = m.textarea.Update(msg)
+	if m.textarea.Value() != previousDraft {
+		if m.slashDismissedDraft != m.textarea.Value() {
+			m.slashDismissedDraft = ""
+		}
+		m.slashCommandIndex = -1
+	}
+	if m.slashCommandSuggestionsHeight() != previousHeight {
+		m.resize()
+		m.refreshViewport(false)
+	}
+	return cmd
 }
 
 func (m *model) updateUIPromptKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -1476,7 +1493,7 @@ func (m *model) openComposerInEditor() tea.Cmd {
 		return m.notifyEditorWarning("Set $EDITOR or $VISUAL to use Ctrl+G.")
 	}
 
-	path, err := writeComposerEditorFile(m.textarea.Value())
+	path, err := writeComposerTempFile("kodelet-composer-*.md", []byte(m.textarea.Value()))
 	if err != nil {
 		return m.notifyEditorError("Failed to prepare $EDITOR: " + err.Error())
 	}
@@ -1511,13 +1528,17 @@ func (m *model) notifyEditorWarning(message string) tea.Cmd {
 	return m.addUINotification(uiNotification{level: uiNotificationWarning, title: "Editor unavailable", message: message})
 }
 
-func writeComposerEditorFile(value string) (string, error) {
-	file, err := os.CreateTemp("", "kodelet-composer-*.md")
+func writeComposerTempFile(pattern string, data []byte) (string, error) {
+	dir, err := filepath.Abs(os.TempDir())
+	if err != nil {
+		return "", err
+	}
+	file, err := os.CreateTemp(dir, pattern)
 	if err != nil {
 		return "", err
 	}
 	path := file.Name()
-	if _, err := file.WriteString(value); err != nil {
+	if _, err := file.Write(data); err != nil {
 		_ = file.Close()
 		_ = os.Remove(path)
 		return "", err

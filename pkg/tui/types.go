@@ -221,6 +221,7 @@ type conversationState struct {
 	historySearch                                 *historySearchState
 
 	draft          string
+	pastePending   bool
 	viewportOffset int
 	autoFollow     bool
 
@@ -327,11 +328,12 @@ type model struct {
 
 	messageHistoryStore *messagehistory.Store
 
-	viewport    viewport.Model
-	textarea    textarea.Model
-	spinner     spinner.Model
-	welcome     welcomeAnimation
-	welcomeSpin welcomeSpinAnimation
+	viewport      viewport.Model
+	textarea      textarea.Model
+	readClipboard clipboardReader
+	spinner       spinner.Model
+	welcome       welcomeAnimation
+	welcomeSpin   welcomeSpinAnimation
 
 	width  int
 	height int

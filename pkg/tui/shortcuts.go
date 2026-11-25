@@ -26,6 +26,7 @@ var overridableTUIShortcutKeys = map[string]string{
 	"ctrl+o": "toggle thought and tool details",
 	"ctrl+r": "search previous sent messages",
 	"ctrl+t": "select profile/model before starting",
+	"ctrl+v": "paste an image or text into the draft",
 	"ctrl+y": "change reasoning effort before starting",
 }
 
