@@ -137,8 +137,12 @@ func (m *model) finishClipboardPaste(msg clipboardPasteMsg) tea.Cmd {
 	case errors.Is(msg.err, clipboard.ErrUnavailable), errors.Is(msg.err, clipboard.ErrNoData):
 		return nil
 	case msg.err != nil:
+		detail := msg.err.Error()
+		if errors.Is(msg.err, context.DeadlineExceeded) {
+			detail = "Clipboard paste timed out. Try copying the item again."
+		}
 		return m.addUINotification(uiNotification{
-			level: uiNotificationWarning, title: "Paste failed", message: msg.err.Error(),
+			level: uiNotificationWarning, title: "Paste failed", message: detail,
 		})
 	case msg.path != "":
 		msg.text = msg.path

@@ -41,6 +41,6 @@ func TestX11ClipboardTransfer(t *testing.T) {
 		_, err = transfer.accept(text, incr)
 		require.NoError(t, err)
 		_, err = transfer.accept(text, incr)
-		require.ErrorContains(t, err, "exceeds 5 bytes")
+		require.ErrorIs(t, err, errX11SelectionTooLarge)
 	})
 }

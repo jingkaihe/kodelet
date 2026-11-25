@@ -14,6 +14,14 @@ import (
 	"golang.org/x/text/encoding/charmap"
 )
 
+func init() {
+	// XGB has its own stderr logger. Even a successful paste can log a
+	// missing Xauthority file over the TUI; surface read errors via Update.
+	xgb.Logger.SetOutput(io.Discard)
+}
+
+var errX11SelectionTooLarge = errors.New("clipboard selection is too large")
+
 func readDesktopClipboard(ctx context.Context, format clipboard.Format) ([]byte, error) {
 	if os.Getenv("DISPLAY") == "" {
 		return readNativeClipboard(ctx, format)
@@ -99,6 +107,9 @@ func readX11Selection(c *xgb.Conn, format clipboard.Format) ([]byte, error) {
 			continue
 		}
 		data, err = s.read(target, 8, limit)
+		if format == clipboard.FmtImage && errors.Is(err, errX11SelectionTooLarge) {
+			return nil, errClipboardImageTooLarge
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -182,7 +193,7 @@ func (t *x11Transfer) accept(reply *xproto.GetPropertyReply, incr xproto.Atom) (
 		return false, nil
 	}
 	if reply.BytesAfter != 0 || len(reply.Value) > t.limit-len(t.data) {
-		return false, errors.Errorf("clipboard selection exceeds %d bytes", t.limit)
+		return false, errX11SelectionTooLarge
 	}
 	if reply.Format != t.format {
 		return false, errors.New("invalid X11 clipboard property format")

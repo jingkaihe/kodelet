@@ -96,6 +96,9 @@ func TestStalledClipboardReadReleasesComposer(t *testing.T) {
 		result := paste().(clipboardPasteMsg) // Virtual time advances to the timeout.
 		require.ErrorIs(t, result.err, context.DeadlineExceeded)
 		updated, _ = updated.Update(result)
+		notices := updated.(model).uiNotifications
+		require.Len(t, notices, 1)
+		assert.Contains(t, notices[0].message, "Clipboard paste timed out")
 		updated, retry := updated.Update(pasteKey)
 		result = retry().(clipboardPasteMsg)
 		require.ErrorContains(t, result.err, "previous clipboard read")
