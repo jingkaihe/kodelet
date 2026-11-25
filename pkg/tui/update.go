@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 	"unicode"
@@ -834,9 +835,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if shortcut, ok := m.extensionShortcutForKey(msg.Keystroke()); ok {
 			return m, m.startExtensionShortcut(shortcut)
 		}
-		switch msg.Keystroke() {
-		case "ctrl+v", "super+b":
-			if m.reasoningPickerOpen || m.pastePending {
+		stroke := msg.Keystroke()
+		if stroke == "ctrl+v" || (runtime.GOOS == "darwin" && stroke == "super+b") {
+			if m.pastePending || !m.composerAcceptsPaste() {
 				return m, nil
 			}
 			return m, m.pasteClipboard()
@@ -942,7 +943,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "enter":
-			if m.pastePending {
+			if m.pastePending && m.composerAcceptsPaste() {
 				return m, nil // Don't send a partial draft while the clipboard is being read.
 			}
 			if cmd, handled := m.handleLocalSlashCommand(strings.TrimSpace(m.textarea.Value())); handled {

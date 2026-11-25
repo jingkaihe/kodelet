@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -301,7 +302,6 @@ func (m model) renderShortcutsDialog() string {
 		{shortcut: "Enter", description: "Send message"},
 		{shortcut: "Shift+Enter", description: "Insert newline"},
 		{shortcut: "Ctrl+V", description: "Paste image or text"},
-		{shortcut: "Cmd+B", description: "Paste image or text (macOS)"},
 		{shortcut: "Ctrl+G", description: "Edit draft in $EDITOR"},
 		{shortcut: "Ctrl+R", description: "Search previous sent messages"},
 		{shortcut: "Ctrl+L", description: "Browse and switch conversations"},
@@ -312,6 +312,9 @@ func (m model) renderShortcutsDialog() string {
 		{shortcut: "/stop", description: "Stop active turn"},
 		{shortcut: "Esc", description: escapeDescription},
 		{shortcut: "Ctrl+C", description: ctrlCDescription},
+	}
+	if runtime.GOOS == "darwin" {
+		baseRows = append(baseRows, shortcutHelpRow{shortcut: "Cmd+B", description: "Paste image or text"})
 	}
 	overridden := make(map[string]struct{}, len(m.extensionShortcuts))
 	baseRows = append(baseRows,
@@ -1222,6 +1225,9 @@ func (m model) inputBottomLeftLabel() string {
 	}
 	if m.startupErr != nil {
 		return "Startup failed"
+	}
+	if m.pastePending {
+		return "Reading clipboard…"
 	}
 	if m.running {
 		if m.resourceReload && m.resourcesLoading {

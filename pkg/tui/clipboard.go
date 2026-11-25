@@ -4,11 +4,8 @@ import (
 	"bytes"
 	"context"
 	"image/png"
-	"io"
 	"os"
-	"os/exec"
-	"runtime"
-	"slices"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -19,66 +16,17 @@ import (
 	"golang.design/x/clipboard"
 )
 
-var errClipboardImageTooLarge = errors.New("image exceeds the 5 MiB file limit for view_image")
+var errClipboardImageTooLarge = errors.Errorf(
+	"image exceeds the %d MiB file limit for view_image", base.MaxImageFileSize/(1<<20),
+)
 
 type clipboardReader func(context.Context, clipboard.Format) ([]byte, error)
 
-func readDesktopClipboard(ctx context.Context, format clipboard.Format) ([]byte, error) {
-	// Init is idempotent. Ordinary terminal paste doesn't need a desktop.
+func readNativeClipboard(ctx context.Context, format clipboard.Format) ([]byte, error) {
 	if err := clipboard.Init(); err != nil {
 		return nil, err
 	}
-	if runtime.GOOS != "linux" || os.Getenv("DISPLAY") == "" || os.Getenv("WAYLAND_DISPLAY") != "" {
-		return clipboard.Read(ctx, format)
-	}
-	// Some X11 owners return their text even for a PNG request.
-	formats, err := clipboard.Formats(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if !slices.Contains(formats, format) {
-		return nil, clipboard.ErrNoData
-	}
-	// The Go X11 backend cannot receive incremental transfers. Reading with
-	// it first can abort the transfer, so use xclip up front when available.
-	if path, err := exec.LookPath("xclip"); err == nil {
-		return readX11Selection(ctx, path, format)
-	}
-	data, err := clipboard.Read(ctx, format)
-	// With INCR the initial property is a 32-bit size, not the image bytes.
-	if format == clipboard.FmtImage && (err != nil || len(data) == 4) {
-		return nil, errors.New("could not read the X11 image; install xclip for large clipboard transfers")
-	}
-	return data, err
-}
-
-func readX11Selection(ctx context.Context, path string, format clipboard.Format) ([]byte, error) {
-	target := "UTF8_STRING"
-	if format == clipboard.FmtImage {
-		target = "image/png"
-	}
-	cmd := exec.CommandContext(ctx, path, "-selection", "clipboard", "-out", "-target", target)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	var src io.Reader = stdout
-	if format == clipboard.FmtImage {
-		src = io.LimitReader(stdout, base.MaxImageFileSize+1)
-	}
-	data, readErr := io.ReadAll(src)
-	_ = stdout.Close()
-	err = cmd.Wait()
-	if readErr != nil {
-		return nil, readErr
-	}
-	if format == clipboard.FmtImage && len(data) > base.MaxImageFileSize {
-		return nil, errClipboardImageTooLarge
-	}
-	return data, err
+	return clipboard.Read(ctx, format)
 }
 
 type clipboardPasteMsg struct {
@@ -88,25 +36,62 @@ type clipboardPasteMsg struct {
 	err   error
 }
 
+type tuiClipboard struct {
+	read clipboardReader
+	mu   sync.Mutex
+}
+
+type clipboardContents struct {
+	format clipboard.Format
+	data   []byte
+	err    error
+}
+
+func (c *tuiClipboard) contents(ctx context.Context) clipboardContents {
+	// Native reads can ignore cancellation and hold the library's global lock.
+	// Bound the wait for the UI without starting more workers behind a stuck read.
+	if !c.mu.TryLock() {
+		return clipboardContents{err: errors.New("the previous clipboard read has not finished")}
+	}
+	done := make(chan clipboardContents, 1)
+	go func() {
+		format := clipboard.FmtImage
+		data, err := c.read(ctx, format)
+		if errors.Is(err, clipboard.ErrNoData) && ctx.Err() == nil {
+			format = clipboard.FmtText
+			data, err = c.read(ctx, format)
+		}
+		c.mu.Unlock()
+		done <- clipboardContents{format: format, data: data, err: err}
+	}()
+	select {
+	case <-ctx.Done():
+		return clipboardContents{err: ctx.Err()}
+	case result := <-done:
+		return result
+	}
+}
+
 func (m *model) pasteClipboard() tea.Cmd {
 	state := m.conversationState
 	state.pastePending = true
-	ctx, read := m.ctx, m.readClipboard
+	ctx, source := m.ctx, m.clipboard
 	runner, _ := m.runner.(runnerStatusProvider)
 	target := m.workspaceTargetForState(state)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		msg := clipboardPasteMsg{state: state}
-		data, err := read(ctx, clipboard.FmtImage)
+		content := source.contents(ctx)
 		switch {
-		case err == nil:
-			msg.path, msg.err = stageClipboardImage(ctx, data, runner, target)
-		case errors.Is(err, clipboard.ErrNoData):
-			data, msg.err = read(ctx, clipboard.FmtText)
-			msg.text = string(data)
+		case ctx.Err() != nil:
+			msg.err = errors.Wrap(ctx.Err(), "reading clipboard")
+		case content.err != nil:
+			msg.err = content.err
+		case content.format == clipboard.FmtImage:
+			msg.path, msg.err = stageClipboardImage(ctx, content.data, runner, target)
 		default:
-			msg.err = err
+			msg.text = string(content.data)
 		}
 		return msg
 	}
@@ -142,7 +127,7 @@ func stageClipboardImage(
 
 func (m *model) finishClipboardPaste(msg clipboardPasteMsg) tea.Cmd {
 	msg.state.pastePending = false
-	if msg.state != m.conversationState || m.historySearch != nil {
+	if msg.state != m.conversationState || !m.composerAcceptsPaste() {
 		if msg.path != "" {
 			_ = os.Remove(msg.path)
 		}
@@ -161,4 +146,16 @@ func (m *model) finishClipboardPaste(msg clipboardPasteMsg) tea.Cmd {
 		return nil
 	}
 	return m.updateComposer(tea.PasteMsg{Content: msg.text})
+}
+
+func (m model) composerAcceptsPaste() bool {
+	if m.startupPending || m.startupErr != nil || m.status == "editing" {
+		return false
+	}
+	if m.audio != nil && m.audio.mode == "voice" {
+		return false // Dictation freezes the draft until accepted or cancelled.
+	}
+	_, surfaceFocused := m.focusedExtensionSurfaceKey()
+	return !surfaceFocused && !m.infoDialogOpen() && m.activeUIPrompt == nil &&
+		m.conversationPicker == nil && !m.modelPickerOpen && !m.reasoningPickerOpen && m.historySearch == nil
 }
