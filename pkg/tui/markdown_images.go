@@ -98,9 +98,9 @@ func previewMarker(index int) string {
 }
 
 // splitImagePreviews moves each previewable image in a top-level paragraph into
-// a paragraph of its own holding a numbered marker, keeping the text around it
-// in separate paragraphs. It returns source with the markers' text appended and
-// the images' short codes.
+// a paragraph of its own, after a numbered marker line, keeping the text around
+// it in separate paragraphs. It returns source with the markers' text appended
+// and the images' short codes.
 func splitImagePreviews(doc *ast.Document, source []byte, previewable func(string) bool) ([]byte, []string) {
 	var previews []string
 	for node := doc.FirstChild(); node != nil; {
@@ -118,14 +118,16 @@ func splitImagePreviews(doc *ast.Document, source []byte, previewable func(strin
 			for paragraph.FirstChild() != image {
 				before.AppendChild(before, paragraph.FirstChild())
 			}
-			paragraph.RemoveChild(paragraph, image)
 			if trimParagraph(before, source) {
 				doc.InsertBefore(doc, paragraph, before)
 			}
 			start := len(source)
 			source = append(source, previewMarker(len(previews))...)
+			markerText := ast.NewTextSegment(text.NewSegment(start, len(source)))
+			markerText.SetSoftLineBreak(true)
 			marker := ast.NewParagraph()
-			marker.AppendChild(marker, ast.NewTextSegment(text.NewSegment(start, len(source))))
+			marker.AppendChild(marker, markerText)
+			marker.AppendChild(marker, image)
 			doc.InsertBefore(doc, paragraph, marker)
 			previews = append(previews, shortCode)
 		}

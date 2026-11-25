@@ -165,6 +165,10 @@ func TestMarkdownPreviewsSplitImagesOutOfTopLevelParagraphs(t *testing.T) {
 		}
 		return strings.Join(lines, "\n")
 	}
+	// Each marker row is followed by the image's link, shown if it fails.
+	preview := func(index int) string {
+		return fmt.Sprintf("KODELETIMAGEPREVIEW%d\nImage: bridge → https://connected.example/i/%s", index, testShortCode)
+	}
 	for _, test := range []struct {
 		name, text, want string
 		previews         int
@@ -172,17 +176,17 @@ func TestMarkdownPreviewsSplitImagesOutOfTopLevelParagraphs(t *testing.T) {
 		{
 			name:     "image paragraph",
 			text:     "Here it is:\n\n" + image + "\n\nAI-generated.",
-			want:     "Here it is:\n\nKODELETIMAGEPREVIEW0\n\nAI-generated.",
+			want:     "Here it is:\n\n" + preview(0) + "\n\nAI-generated.",
 			previews: 1,
 		},
-		{name: "end of a sentence", text: "Here it is: " + image, want: "Here it is:\n\nKODELETIMAGEPREVIEW0", previews: 1},
-		{name: "next line", text: "Here it is:\n" + image + "\nAI-generated.", want: "Here it is:\n\nKODELETIMAGEPREVIEW0\n\nAI-generated.", previews: 1},
-		{name: "consecutive lines", text: image + "\n" + image, want: "KODELETIMAGEPREVIEW0\n\nKODELETIMAGEPREVIEW1", previews: 2},
-		{name: "mid-sentence", text: "See *this* " + image + " here", want: "See this\n\nKODELETIMAGEPREVIEW0\n\nhere", previews: 1},
+		{name: "end of a sentence", text: "Here it is: " + image, want: "Here it is:\n\n" + preview(0), previews: 1},
+		{name: "next line", text: "Here it is:\n" + image + "\nAI-generated.", want: "Here it is:\n\n" + preview(0) + "\n\nAI-generated.", previews: 1},
+		{name: "consecutive lines", text: image + "\n" + image, want: preview(0) + "\n\n" + preview(1), previews: 2},
+		{name: "mid-sentence", text: "See *this* " + image + " here", want: "See this\n\n" + preview(0) + "\n\nhere", previews: 1},
 		{
 			name:     "absolute link",
 			text:     "![chart](https://kodelet.example/base/i/" + testShortCode + ")",
-			want:     "KODELETIMAGEPREVIEW0",
+			want:     "KODELETIMAGEPREVIEW0\nImage: chart → https://kodelet.example/base/i/" + testShortCode,
 			previews: 1,
 		},
 		{name: "list item", text: "- " + image},
@@ -278,7 +282,7 @@ func TestImageSizesRequestedInOnePassAreKept(t *testing.T) {
 	renderPass := func() {
 		m.images.beginPass()
 		for i, cols := range []int{20, 18, 16} {
-			m.images.lines(attachment, cols, 30, i*20)
+			m.images.lines(attachment, cols, 30, i*20, nil)
 		}
 		m.images.endPass()
 		m.images.loadNear(0, 60)
@@ -337,6 +341,7 @@ func TestImagesLoadingAboveTheViewportKeepTheTextInPlace(t *testing.T) {
 		paragraphs = append(paragraphs, fmt.Sprintf("Paragraph %d.", i))
 	}
 	text := strings.Join(paragraphs, "\n\n")
+	const missing = "missingImageCode000000"
 	for _, test := range []struct {
 		name  string
 		entry chatEntry
@@ -346,12 +351,16 @@ func TestImagesLoadingAboveTheViewportKeepTheTextInPlace(t *testing.T) {
 			entry: chatEntry{kind: entryAssistant, blocks: []assistantBlock{{kind: blockText, text: "![bridge](/i/" + testShortCode + ")\n\n" + text}}},
 		},
 		{
+			name:  "a reply image in a sentence fails",
+			entry: chatEntry{kind: entryAssistant, blocks: []assistantBlock{{kind: blockText, text: "Here: ![missing](/i/" + missing + ") and more.\n\n" + text}}},
+		},
+		{
 			name: "a tool image shrinks once it fails",
 			entry: chatEntry{kind: entryAssistant, blocks: []assistantBlock{
 				{kind: blockTools, tools: []toolCall{{name: "draw_chart", done: true, structured: &tooltypes.StructuredToolResult{
 					ToolName:    "draw_chart",
 					Success:     true,
-					Attachments: []tooltypes.ToolAttachment{{Type: "image", ShortCode: "missing", ViewURL: "/i/missing", Width: 300, Height: 200}},
+					Attachments: []tooltypes.ToolAttachment{{Type: "image", ShortCode: missing, ViewURL: "/i/" + missing, Width: 300, Height: 200}},
 				}}}},
 				{kind: blockText, text: text},
 			}},
@@ -372,7 +381,7 @@ func TestImagesLoadingAboveTheViewportKeepTheTextInPlace(t *testing.T) {
 			reading := topLine()
 			m.loadVisibleImages()
 			waitForImages(t, &m, func() bool {
-				source := m.images.sources["missing"]
+				source := m.images.sources[missing]
 				return renditionsReady(m.images, 1) || (source != nil && source.err != nil)
 			})
 			m.refreshViewport(false) // as the pending refresh would
@@ -388,7 +397,7 @@ func TestImageFetchesAreBounded(t *testing.T) {
 	for i := range 6 {
 		code := fmt.Sprintf("image%d", i)
 		runner.images[code] = imageTestPNG(t)
-		m.images.lines(tooltypes.ToolAttachment{Type: "image", ShortCode: code}, 30, 10, i)
+		m.images.lines(tooltypes.ToolAttachment{Type: "image", ShortCode: code}, 30, 10, i, nil)
 	}
 	m.images.endPass()
 	m.images.loadNear(0, 10)
@@ -418,7 +427,7 @@ func TestQueuedImageFetchesSkipImagesAwayFromTheViewport(t *testing.T) {
 			if near(code) {
 				line = i
 			}
-			m.images.lines(tooltypes.ToolAttachment{Type: "image", ShortCode: code}, 30, 10, line)
+			m.images.lines(tooltypes.ToolAttachment{Type: "image", ShortCode: code}, 30, 10, line, nil)
 		}
 		m.images.endPass()
 		m.images.loadNear(0, 10)
@@ -461,7 +470,7 @@ func TestQueuedImageRendersSkipImagesAwayFromTheViewport(t *testing.T) {
 			if code == near {
 				line = 0
 			}
-			m.images.lines(tooltypes.ToolAttachment{Type: "image", ShortCode: code}, 30, 10, line)
+			m.images.lines(tooltypes.ToolAttachment{Type: "image", ShortCode: code}, 30, 10, line, nil)
 		}
 		m.images.endPass()
 		m.images.loadNear(0, 10)
@@ -493,7 +502,7 @@ func TestQueuedImageRenderRefetchesAnEvictedImage(t *testing.T) {
 	place := func(line int) func() {
 		return func() {
 			m.images.beginPass()
-			m.images.lines(tooltypes.ToolAttachment{Type: "image", ShortCode: "image"}, 30, 10, line)
+			m.images.lines(tooltypes.ToolAttachment{Type: "image", ShortCode: "image"}, 30, 10, line, nil)
 			m.images.endPass()
 			m.images.loadNear(0, 10)
 		}
@@ -519,8 +528,8 @@ func TestImageCacheEvictsImagesAwayFromTheViewport(t *testing.T) {
 	renderPass := func(top int) func() {
 		return func() {
 			m.images.beginPass()
-			m.images.lines(attachment("near"), 30, 10, 0)
-			m.images.lines(attachment("far"), 30, 10, 100)
+			m.images.lines(attachment("near"), 30, 10, 0, nil)
+			m.images.lines(attachment("far"), 30, 10, 100, nil)
 			m.images.endPass()
 			m.images.loadNear(top, 10)
 		}
@@ -540,7 +549,7 @@ func TestImageCacheEvictsImagesAwayFromTheViewport(t *testing.T) {
 	assert.NotNil(t, m.images.sources["far"].data)
 	m.images.mu.Unlock()
 
-	assert.Len(t, m.images.lines(attachment("near"), 30, 10, 0), 10, "an evicted image keeps its rows reserved")
+	assert.Len(t, m.images.lines(attachment("near"), 30, 10, 0, nil), 10, "an evicted image keeps its rows reserved")
 	drainImageUpdates(t, &m, renderPass(0), rendered("near"))
 	assert.Equal(t, 2, runner.fetchCount("near"), "scrolling back downloads it again")
 }

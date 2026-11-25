@@ -29,8 +29,8 @@ func (m *model) renderMarkdown(text string, width int, kind markdownKind) string
 }
 
 // renderMarkdownPreviews renders markdown with Kodelet image links resolved. With
-// previewable set, images in top-level paragraphs become markers on their own
-// rows for the returned images.
+// previewable set, each image in a top-level paragraph moves to a paragraph of
+// its own, below a marker row for the returned image.
 func (m *model) renderMarkdownPreviews(
 	text string,
 	width int,

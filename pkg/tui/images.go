@@ -183,17 +183,6 @@ func (s *tuiImages) protocolEnabled() bool {
 	return s.protocol != termimage.None && s.output != nil
 }
 
-// previewable reports whether an image can be previewed and has not failed.
-func (s *tuiImages) previewable(shortCode string) bool {
-	if s == nil {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	source := s.sources[shortCode]
-	return s.enabled() && validImageShortCode(shortCode) && (source == nil || source.err == nil)
-}
-
 func (s *tuiImages) available() bool {
 	if s == nil {
 		return false
@@ -204,8 +193,8 @@ func (s *tuiImages) available() bool {
 }
 
 // lines returns an attachment's rows at a transcript line, or nil to show only
-// its link.
-func (s *tuiImages) lines(attachment tooltypes.ToolAttachment, maxCols, maxRows, line int) []string {
+// its link. fallback, when set, replaces the explanation of a failure.
+func (s *tuiImages) lines(attachment tooltypes.ToolAttachment, maxCols, maxRows, line int, fallback []string) []string {
 	if s == nil || attachment.Type != "image" || attachment.Error != "" || !validImageShortCode(attachment.ShortCode) {
 		return nil
 	}
@@ -221,7 +210,7 @@ func (s *tuiImages) lines(attachment tooltypes.ToolAttachment, maxCols, maxRows,
 		s.sources[attachment.ShortCode] = source
 	}
 	if source.err != nil {
-		rows := []string{mutedStyle.Render(imageUnavailableText(source.err, maxCols))}
+		rows := failureLines(source.err, maxCols, fallback)
 		s.placing = append(s.placing, imagePlacement{source: source, line: line, height: len(rows)})
 		return rows
 	}
@@ -230,7 +219,7 @@ func (s *tuiImages) lines(attachment tooltypes.ToolAttachment, maxCols, maxRows,
 	if rendition := findRendition(source, cols, height); rendition != nil {
 		switch {
 		case rendition.err != nil:
-			rows = []string{mutedStyle.Render(imageUnavailableText(rendition.err, maxCols))}
+			rows = failureLines(rendition.err, maxCols, fallback)
 		case rendition.rendition != nil:
 			if rendition.lines == nil {
 				rendition.lines = make([]string, rendition.rows)
@@ -544,7 +533,7 @@ func (m *model) renderTranscriptImages(b *strings.Builder, line *int, attachment
 	}
 	maxCols, maxRows := m.imagePreviewLimits(len(indent) + 2)
 	for _, attachment := range attachments {
-		rows := m.images.lines(attachment, maxCols, maxRows, *line+1)
+		rows := m.images.lines(attachment, maxCols, maxRows, *line+1, nil)
 		if len(rows) == 0 {
 			continue
 		}
@@ -565,7 +554,7 @@ func (m *model) imagePreviewLimits(indent int) (maxCols, maxRows int) {
 func (m *model) renderAssistantText(b *strings.Builder, line *int, text string) {
 	var previewable func(string) bool
 	if m.images.available() {
-		previewable = m.images.previewable
+		previewable = validImageShortCode
 	}
 	rows, markers := m.assistantTextRows(text, previewable)
 	if previewable != nil && markers == nil {
@@ -574,18 +563,29 @@ func (m *model) renderAssistantText(b *strings.Builder, line *int, text string) 
 	}
 
 	maxCols, maxRows := m.imagePreviewLimits(0)
-	for i, row := range rows {
-		if shortCode, ok := markers[i]; ok {
-			attachment := tooltypes.ToolAttachment{Type: "image", ShortCode: shortCode}
-			preview := m.images.lines(attachment, maxCols, maxRows, *line)
-			for _, previewRow := range preview {
-				b.WriteString(previewRow + "\n")
-				*line++
-			}
+	for i := 0; i < len(rows); i++ {
+		shortCode, ok := markers[i]
+		if !ok {
+			b.WriteString(rows[i] + "\n")
+			*line++
 			continue
 		}
-		b.WriteString(row + "\n")
-		*line++
+		// The image's link follows its marker and is shown if the image fails.
+		end := i + 1
+		for end < len(rows) && strings.TrimSpace(ansi.Strip(rows[end])) != "" {
+			end++
+		}
+		link := rows[i+1 : end]
+		attachment := tooltypes.ToolAttachment{Type: "image", ShortCode: shortCode}
+		preview := m.images.lines(attachment, maxCols, maxRows, *line, link)
+		if preview == nil {
+			preview = link
+		}
+		for _, previewRow := range preview {
+			b.WriteString(previewRow + "\n")
+			*line++
+		}
+		i = end - 1
 	}
 }
 
@@ -609,6 +609,13 @@ func imageLoadingLines(rows int) []string {
 	lines := make([]string, max(1, rows))
 	lines[0] = mutedStyle.Render("Loading image…")
 	return lines
+}
+
+func failureLines(err error, width int, fallback []string) []string {
+	if len(fallback) > 0 {
+		return fallback
+	}
+	return []string{mutedStyle.Render(imageUnavailableText(err, width))}
 }
 
 func imageUnavailableText(err error, width int) string {
