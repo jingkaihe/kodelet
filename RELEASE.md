@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.8.35-beta
+
+Added [clipboard image paste](docs/MANUAL.md#terminal-chat-tui) to `kodelet chat` with a local runner: `Ctrl+V` (or `Cmd+B` on macOS) inserts the image's temporary path, or Finder files' original paths.
+
+Raised the local `view_image` input limit from 5 MiB to 32 MiB before resizing.
+
 ## 0.8.34-beta
 
 Added [inline image previews](docs/MANUAL.md#terminal-chat-tui) for tool results and replies in `kodelet chat` on Kitty, Ghostty, and iTerm2.
