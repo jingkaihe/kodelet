@@ -15,4 +15,4 @@ trap cleanup EXIT
 "$SCRIPT_DIR/extract-release-notes.sh" > "$RELEASE_NOTES_FILE"
 
 cd "$REPO_ROOT"
-goreleaser release --clean --release-notes "$RELEASE_NOTES_FILE"
+goreleaser release --parallelism 1 --clean --release-notes "$RELEASE_NOTES_FILE"

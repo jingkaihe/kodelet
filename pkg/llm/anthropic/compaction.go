@@ -164,16 +164,10 @@ func (t *Thread) compactContextNative(ctx context.Context, params anthropic.Mess
 	}
 	model := params.Model
 	params.MaxTokens = max(params.MaxTokens, 4096)
-	raw, err := json.Marshal(params)
+	betaParams, err := betaCompactionParams(params)
 	if err != nil {
-		return errors.Wrap(err, "failed to encode compaction request")
+		return err
 	}
-	var betaParams anthropic.BetaMessageNewParams
-	if err := json.Unmarshal(raw, &betaParams); err != nil {
-		return errors.Wrap(err, "failed to prepare beta compaction request")
-	}
-	// Signed blocks must round-trip without the SDK adding or dropping fields.
-	betaParams.SetExtraFields(map[string]any{"messages": params.Messages})
 	betaParams.Betas = []anthropic.AnthropicBeta{anthropic.AnthropicBetaCompact2026_09_04}
 	betaParams.Compaction = anthropic.BetaCompactionConfigUnionParam{
 		OfSummarize: &anthropic.BetaSummarizeCompactionParam{},
@@ -267,6 +261,26 @@ func (t *Thread) compactContextNative(ctx context.Context, params anthropic.Mess
 	}
 	t.FinalizeSwapContextLocked(block.Content)
 	return nil
+}
+
+// betaCompactionParams converts a request for the beta API, sending messages and
+// tools as originally encoded: signed blocks must round-trip unchanged, and
+// decoded tool schemas would re-encode in map order.
+func betaCompactionParams(params anthropic.MessageNewParams) (anthropic.BetaMessageNewParams, error) {
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return anthropic.BetaMessageNewParams{}, errors.Wrap(err, "failed to encode compaction request")
+	}
+	var betaParams anthropic.BetaMessageNewParams
+	if err := json.Unmarshal(raw, &betaParams); err != nil {
+		return anthropic.BetaMessageNewParams{}, errors.Wrap(err, "failed to prepare beta compaction request")
+	}
+	overrides := map[string]any{"messages": params.Messages}
+	if len(params.Tools) > 0 {
+		overrides["tools"] = params.Tools
+	}
+	betaParams.SetExtraFields(overrides)
+	return betaParams, nil
 }
 
 // Top-level usage excludes compaction iterations. Count those in addition to the

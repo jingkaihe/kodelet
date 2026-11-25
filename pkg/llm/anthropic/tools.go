@@ -1,10 +1,12 @@
 package anthropic
 
 import (
+	"maps"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
@@ -47,22 +49,24 @@ func toAnthropicTools(tools []tooltypes.Tool, useSubscription bool) []anthropic.
 	return anthropicTools
 }
 
+// anthropicInputSchema overrides the whole schema so it encodes with sorted keys;
+// the SDK writes ExtraFields in map iteration order.
 func anthropicInputSchema(tool tooltypes.Tool) anthropic.ToolInputSchemaParam {
-	raw := tooltypes.JSONSchemaForTool(tool)
-	schema := anthropic.ToolInputSchemaParam{
-		Properties:  raw["properties"],
-		Required:    schemaRequiredStrings(raw["required"]),
-		ExtraFields: make(map[string]any),
+	// The raw schema may be the tool's own map.
+	schema := maps.Clone(tooltypes.JSONSchemaForTool(tool))
+	if schema == nil {
+		schema = map[string]any{}
 	}
-	for key, value := range raw {
-		switch key {
-		case "type", "properties", "required":
-			continue
-		default:
-			schema.ExtraFields[key] = value
-		}
+	schema["type"] = "object"
+	if schema["properties"] == nil {
+		delete(schema, "properties")
 	}
-	return schema
+	if required := schemaRequiredStrings(schema["required"]); required != nil {
+		schema["required"] = required
+	} else {
+		delete(schema, "required")
+	}
+	return param.Override[anthropic.ToolInputSchemaParam](schema)
 }
 
 func schemaRequiredStrings(value any) []string {

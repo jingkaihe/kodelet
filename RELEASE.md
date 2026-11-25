@@ -1,10 +1,16 @@
 # Kodelet
 
-## 0.8.33-beta
+## 0.8.34-beta
 
 Added [inline image previews](docs/MANUAL.md#terminal-chat-tui) for tool results and replies in `kodelet chat` on Kitty, Ghostty, and iTerm2.
 
 Made Markdown links in terminal chat replies clickable and resolved relative Kodelet image links against the connected server.
+
+## 0.8.33-beta
+
+Fixed avoidable Anthropic prompt cache misses by keeping tool schemas identical across requests, including during native context compaction.
+
+Changed GitHub release automation to run GoReleaser jobs one at a time.
 
 ## 0.8.32-beta
 
