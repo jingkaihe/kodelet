@@ -3,8 +3,12 @@ package tui
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/jingkaihe/kodelet/pkg/chat"
@@ -24,21 +28,62 @@ func readNativeClipboard(ctx context.Context, format clipboard.Format) ([]byte, 
 }
 
 type clipboardPasteMsg struct {
-	state *conversationState
-	text  string
-	path  string
-	err   error
+	state    *conversationState
+	text     string
+	files    []string // Original file paths, never owned by the TUI.
+	tempPath string
+	err      error
 }
 
 type tuiClipboard struct {
-	read clipboardReader
-	mu   sync.Mutex
+	read      clipboardReader
+	readFiles func(context.Context) ([]string, error)
+	mu        sync.Mutex
+}
+
+func newTUIClipboard() *tuiClipboard {
+	c := &tuiClipboard{read: readDesktopClipboard}
+	if runtime.GOOS == "darwin" {
+		c.readFiles = func(ctx context.Context) ([]string, error) {
+			if err := clipboard.Init(); err != nil {
+				return nil, err
+			}
+			return clipboard.ReadFiles(ctx)
+		}
+	}
+	return c
 }
 
 type clipboardContents struct {
 	format clipboard.Format
 	data   []byte
+	files  []string
 	err    error
+}
+
+func (c *tuiClipboard) readPreferred(ctx context.Context) clipboardContents {
+	// Finder may offer both a file URL and its icon as an image.
+	if c.readFiles != nil {
+		files, err := c.readFiles(ctx)
+		if err != nil && !errors.Is(err, clipboard.ErrNoData) {
+			return clipboardContents{err: err}
+		}
+		if len(files) > 0 {
+			for _, path := range files {
+				if !filepath.IsAbs(path) || strings.IndexFunc(path, unicode.IsControl) >= 0 {
+					return clipboardContents{err: errors.New("invalid clipboard file path")}
+				}
+			}
+			return clipboardContents{format: clipboard.FmtFiles, files: files}
+		}
+	}
+	format := clipboard.FmtImage
+	data, err := c.read(ctx, format)
+	if errors.Is(err, clipboard.ErrNoData) && ctx.Err() == nil {
+		format = clipboard.FmtText
+		data, err = c.read(ctx, format)
+	}
+	return clipboardContents{format: format, data: data, err: err}
 }
 
 func (c *tuiClipboard) contents(ctx context.Context) clipboardContents {
@@ -49,14 +94,9 @@ func (c *tuiClipboard) contents(ctx context.Context) clipboardContents {
 	}
 	done := make(chan clipboardContents, 1)
 	go func() {
-		format := clipboard.FmtImage
-		data, err := c.read(ctx, format)
-		if errors.Is(err, clipboard.ErrNoData) && ctx.Err() == nil {
-			format = clipboard.FmtText
-			data, err = c.read(ctx, format)
-		}
+		result := c.readPreferred(ctx)
 		c.mu.Unlock()
-		done <- clipboardContents{format: format, data: data, err: err}
+		done <- result
 	}()
 	select {
 	case <-ctx.Done():
@@ -82,8 +122,13 @@ func (m *model) pasteClipboard() tea.Cmd {
 			msg.err = errors.Wrap(ctx.Err(), "reading clipboard")
 		case content.err != nil:
 			msg.err = content.err
+		case content.format == clipboard.FmtFiles:
+			msg.err = requireLocalClipboardRunner(ctx, runner, target)
+			if msg.err == nil {
+				msg.files = content.files
+			}
 		case content.format == clipboard.FmtImage:
-			msg.path, msg.err = stageClipboardImage(ctx, content.data, runner, target)
+			msg.tempPath, msg.err = stageClipboardImage(ctx, content.data, runner, target)
 		default:
 			msg.text = string(content.data)
 		}
@@ -104,27 +149,33 @@ func stageClipboardImage(
 	if format != "png" {
 		return "", errors.New("clipboard did not return a PNG image")
 	}
-	// Only insert paths on the runner's own machine; even a loopback URL
-	// can point at a remote runner. The turn can outlive this TUI, so leave
-	// successfully pasted files to OS temp cleanup.
+	if err := requireLocalClipboardRunner(ctx, runner, target); err != nil {
+		return "", err
+	}
+	// The turn can outlive this TUI, so leave successfully pasted files to OS temp cleanup.
+	return writeComposerTempFile("kodelet-paste-*.png", data)
+}
+
+func requireLocalClipboardRunner(ctx context.Context, runner runnerStatusProvider, target chat.WorkspaceTarget) error {
+	// Even a loopback URL can point at a remote runner.
 	local, err := localstate.LoadDefaultHostIdentity()
 	if err == nil && runner != nil {
 		status, err := runner.RunnerStatus(ctx, target)
 		if status.Runner != nil && status.Runner.Host.InstanceID == local.InstanceID {
-			return writeComposerTempFile("kodelet-paste-*.png", data)
+			return nil
 		}
 		if err != nil {
-			return "", errors.Wrap(err, "could not identify the clipboard image's runner")
+			return errors.Wrap(err, "could not identify the runner for these paths")
 		}
 	}
-	return "", errors.New("pasting an image path requires a runner on this machine")
+	return errors.New("pasting a file path requires a runner on this machine")
 }
 
 func (m *model) finishClipboardPaste(msg clipboardPasteMsg) tea.Cmd {
 	msg.state.pastePending = false
 	if msg.state != m.conversationState || !m.composerAcceptsPaste() {
-		if msg.path != "" {
-			_ = os.Remove(msg.path)
+		if msg.tempPath != "" {
+			_ = os.Remove(msg.tempPath)
 		}
 		return nil
 	}
@@ -139,8 +190,10 @@ func (m *model) finishClipboardPaste(msg clipboardPasteMsg) tea.Cmd {
 		return m.addUINotification(uiNotification{
 			level: uiNotificationWarning, title: "Paste failed", message: detail,
 		})
-	case msg.path != "":
-		msg.text = msg.path
+	case msg.tempPath != "":
+		msg.text = msg.tempPath
+	case len(msg.files) > 0:
+		msg.text = strings.Join(msg.files, "\n")
 	case msg.text == "":
 		return nil
 	}

@@ -173,7 +173,7 @@ func newModel(ctx context.Context, config Config) model {
 		themeSelection:      themeSelection,
 		viewport:            vp,
 		textarea:            ta,
-		clipboard:           &tuiClipboard{read: readDesktopClipboard},
+		clipboard:           newTUIClipboard(),
 		spinner:             sp,
 		runs:                map[int]*conversationRun{},
 		runByState:          map[string]int{},

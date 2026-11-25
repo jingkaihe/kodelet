@@ -18,8 +18,8 @@ import (
 	"golang.design/x/clipboard"
 )
 
-func TestPasteImageIntoDraft(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
+func localClipboardRunner(t *testing.T) *aboutRunner {
+	t.Helper()
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	store, err := localstate.NewStore()
 	require.NoError(t, err)
@@ -27,7 +27,14 @@ func TestPasteImageIntoDraft(t *testing.T) {
 	require.NoError(t, err)
 	runner := &aboutRunner{}
 	runner.runnerStatus.Runner = &registry.Runner{Host: protocol.Host{InstanceID: local.InstanceID}}
+	return runner
+}
+
+func TestPasteImageIntoDraft(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	runner := localClipboardRunner(t)
 	m := newThemeTestModel(t, Config{Runner: runner, Remote: true})
+	m.clipboard.readFiles = func(context.Context) ([]string, error) { return nil, clipboard.ErrNoData }
 	png := imageTestPNG(t)
 	m.clipboard.read = func(_ context.Context, format clipboard.Format) ([]byte, error) {
 		assert.Equal(t, clipboard.FmtImage, format)
@@ -38,16 +45,16 @@ func TestPasteImageIntoDraft(t *testing.T) {
 	require.NotNil(t, paste)
 	result := paste().(clipboardPasteMsg)
 	require.NoError(t, result.err)
-	require.True(t, filepath.IsAbs(result.path))
-	data, err := os.ReadFile(result.path)
+	require.True(t, filepath.IsAbs(result.tempPath))
+	data, err := os.ReadFile(result.tempPath)
 	require.NoError(t, err)
 	assert.Equal(t, png, data)
-	info, err := os.Stat(result.path)
+	info, err := os.Stat(result.tempPath)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 
 	updated, _ = updated.Update(result)
-	draft := "Inspect " + result.path
+	draft := "Inspect " + result.tempPath
 	assert.Equal(t, draft, updated.(model).textarea.Value())
 	assert.False(t, updated.(model).running)
 	_, send := updated.Update(keyPress(tea.KeyEnter))
@@ -57,8 +64,31 @@ func TestPasteImageIntoDraft(t *testing.T) {
 	assert.Equal(t, draft, runner.req.Message)
 }
 
+func TestPasteFinderFilesPrefersAndPreservesOriginals(t *testing.T) {
+	runner := localClipboardRunner(t)
+	m := newThemeTestModel(t, Config{Runner: runner, Remote: true})
+	original := filepath.Join(t.TempDir(), "my document.pdf")
+	require.NoError(t, os.WriteFile(original, []byte("original"), 0o600))
+	files := []string{original, "/some/other file"}
+	m.clipboard = &tuiClipboard{readFiles: func(context.Context) ([]string, error) {
+		return files, nil
+	}}
+	result := m.pasteClipboard()().(clipboardPasteMsg)
+	require.NoError(t, result.err)
+	m.finishClipboardPaste(result)
+	assert.Equal(t, original+"\n/some/other file", m.textarea.Value())
+
+	m.openShortcutsDialog()
+	m.finishClipboardPaste(result)
+	assert.FileExists(t, original)
+	runner.runnerStatus.Runner.Host.InstanceID = "another-machine"
+	result = m.pasteClipboard()().(clipboardPasteMsg)
+	require.ErrorContains(t, result.err, "runner on this machine")
+}
+
 func TestPasteTextWithoutLocalRunner(t *testing.T) {
 	m := newThemeTestModel(t, Config{Runner: &recordingRunner{}, Remote: true})
+	m.clipboard.readFiles = nil
 	m.clipboard.read = func(_ context.Context, format clipboard.Format) ([]byte, error) {
 		if format == clipboard.FmtImage {
 			return nil, clipboard.ErrNoData
@@ -77,6 +107,7 @@ func TestPasteTextWithoutLocalRunner(t *testing.T) {
 
 func TestStalledClipboardReadReleasesComposer(t *testing.T) {
 	m := newThemeTestModel(t, Config{Runner: &recordingRunner{}, Remote: true})
+	m.clipboard.readFiles = nil
 	m.textarea.SetValue("unfinished draft")
 	synctest.Test(t, func(t *testing.T) {
 		release := make(chan struct{})
@@ -118,7 +149,7 @@ func TestPasteDiscardsStagedImageWhenComposerLosesFocus(t *testing.T) {
 	m.openShortcutsDialog()
 	path := filepath.Join(t.TempDir(), "clipboard.png")
 	require.NoError(t, os.WriteFile(path, imageTestPNG(t), 0o600))
-	updated, _ := m.Update(clipboardPasteMsg{state: m.conversationState, path: path})
+	updated, _ := m.Update(clipboardPasteMsg{state: m.conversationState, tempPath: path})
 	assert.False(t, updated.(model).pastePending)
 	assert.Equal(t, "keep this draft", updated.(model).textarea.Value())
 	assert.NoFileExists(t, path)
@@ -143,13 +174,14 @@ func TestRejectedClipboardImageLeavesDraftAlone(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newThemeTestModel(t, Config{Runner: runner, Remote: true})
+			m.clipboard.readFiles = nil
 			m.textarea.SetValue("keep this draft")
 			m.clipboard.read = func(context.Context, clipboard.Format) ([]byte, error) {
 				return tt.data, nil
 			}
 			paste := m.pasteClipboard()
 			result := paste().(clipboardPasteMsg)
-			require.Empty(t, result.path)
+			require.Empty(t, result.tempPath)
 			m.finishClipboardPaste(result)
 			assert.Equal(t, "keep this draft", m.textarea.Value())
 			require.Len(t, m.uiNotifications, 1)
