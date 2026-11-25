@@ -216,6 +216,14 @@ func TestMarkdownResolvesOnlyImageLinkNodes(t *testing.T) {
 		assert.Equal(t, []string{want}, slices.Collect(maps.Keys(links)), text)
 		assert.True(t, strings.HasSuffix(links[want], want), text)
 	}
+	signed := "https://example.com/file?sig=" + strings.Repeat("a", 3900)
+	assert.Equal(t, []string{signed}, slices.Collect(maps.Keys(linkedCells(m.renderMarkdown("[file]("+signed+")", 10000, markdownAssistant)))))
+	// Links the terminal renderer would truncate or discard only show their URL.
+	for _, url := range []string{signed + strings.Repeat("a", 200), "https://example.com/a;b=c"} {
+		rendered := m.renderMarkdown("[file]("+url+")", 10000, markdownAssistant)
+		assert.Empty(t, linkedCells(rendered))
+		assert.Contains(t, ansi.Strip(rendered), url)
+	}
 	assert.Contains(t, render("![chart](/i/abc)"), "https://connected.example/base/i/abc")
 	assert.Contains(t, render("[Download](/i/abc?download=1)"), "https://connected.example/base/i/abc?download=1")
 	assert.Equal(t, "See https://connected.example/base/i/abc.", strings.TrimSpace(render("See [/i/abc](/i/abc).")))
@@ -682,12 +690,16 @@ func renditionsReady(images *tuiImages, count int) bool {
 // linkedCells maps the hyperlink targets of cells in rendered output, as a
 // terminal would draw it, to the text they cover.
 func linkedCells(rendered string) map[string]string {
-	height := strings.Count(rendered, "\n") + 1
-	buffer := uv.NewScreenBuffer(200, height)
+	lines := strings.Split(rendered, "\n")
+	width := 0
+	for _, line := range lines {
+		width = max(width, ansi.StringWidth(line))
+	}
+	buffer := uv.NewScreenBuffer(width, len(lines))
 	uv.NewStyledString(rendered).Draw(buffer, buffer.Bounds())
 	links := map[string]string{}
-	for y := range height {
-		for x := range 200 {
+	for y := range lines {
+		for x := range width {
 			if cell := buffer.CellAt(x, y); cell != nil && cell.Link.URL != "" {
 				links[cell.Link.URL] += cell.Content
 			}

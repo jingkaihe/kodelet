@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -70,7 +71,30 @@ func renderMarkdownWithRenderer(
 	}
 	var buf bytes.Buffer
 	err := md.Renderer().Render(&buf, source, doc)
-	return buf.String(), previews, err == nil
+	return dropUnsafeHyperlinks(buf.String()), previews, err == nil
+}
+
+// maxHyperlinkData is the escape sequence data the terminal renderer keeps;
+// see the parser pool in github.com/charmbracelet/x/ansi.
+const maxHyperlinkData = 4 << 10
+
+var hyperlinkPattern = regexp.MustCompile("\x1b\\]8;([^;\x07\x1b]*);([^\x07\x1b]*)(?:\x07|\x1b\\\\)")
+
+// dropUnsafeHyperlinks removes hyperlinks that the terminal renderer would
+// truncate or discard, so a click never opens a different URL. Their URLs
+// remain visible as text.
+func dropUnsafeHyperlinks(rendered string) string {
+	if !strings.Contains(rendered, "\x1b]8;") {
+		return rendered
+	}
+	return hyperlinkPattern.ReplaceAllStringFunc(rendered, func(sequence string) string {
+		match := hyperlinkPattern.FindStringSubmatch(sequence)
+		params, url := match[1], match[2]
+		if url == "" || (!strings.Contains(url, ";") && len("8;"+params+";"+url) <= maxHyperlinkData) {
+			return sequence
+		}
+		return ""
+	})
 }
 
 func (m *model) markdownRenderer(width int, kind markdownKind) goldmark.Markdown {
