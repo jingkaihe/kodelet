@@ -116,6 +116,7 @@ func TestPasteFinderFilesPrefersAndPreservesOriginals(t *testing.T) {
 
 func TestPasteTextWithoutLocalRunner(t *testing.T) {
 	m := newThemeTestModel(t, Config{Runner: &recordingRunner{}, Remote: true})
+	m.textarea.SetValue("prefix:")
 	m.clipboard.readFiles = nil
 	m.clipboard.read = func(_ context.Context, format clipboard.Format) ([]byte, error) {
 		if format == clipboard.FmtImage {
@@ -130,7 +131,26 @@ func TestPasteTextWithoutLocalRunner(t *testing.T) {
 	updated, paste := m.Update(key)
 	require.NotNil(t, paste)
 	updated, _ = updated.Update(paste())
-	assert.Equal(t, "one\ntwo", updated.(model).textarea.Value())
+	assert.Equal(t, "prefix:one\ntwo", updated.(model).textarea.Value())
+}
+
+func TestPastePathAtCursor(t *testing.T) {
+	for _, tt := range []struct {
+		draft string
+		col   int // Cursor on the last logical line.
+		want  string
+	}{
+		{"first\n猫犬", 1, "first\n猫 /img 犬"},
+		{"猫　犬", 2, "猫　/img 犬"},
+		{"first\n犬", 0, "first\n/img 犬"},
+		{"猫", 1, "猫 /img"},
+	} {
+		m := newThemeTestModel(t, Config{})
+		m.textarea.SetValue(tt.draft)
+		m.textarea.SetCursorColumn(tt.col)
+		m.finishClipboardPaste(clipboardPasteMsg{state: m.conversationState, tempPath: "/img"})
+		assert.Equal(t, tt.want, m.textarea.Value())
+	}
 }
 
 func TestStalledClipboardReadReleasesComposer(t *testing.T) {

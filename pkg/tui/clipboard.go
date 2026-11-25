@@ -197,13 +197,27 @@ func (m *model) finishClipboardPaste(msg clipboardPasteMsg) tea.Cmd {
 			level: uiNotificationWarning, title: "Paste failed", message: detail,
 		})
 	case msg.tempPath != "":
-		msg.text = msg.tempPath
+		msg.text = m.spaceClipboardPaths(msg.tempPath)
 	case len(msg.files) > 0:
-		msg.text = strings.Join(msg.files, "\n")
+		msg.text = m.spaceClipboardPaths(strings.Join(msg.files, "\n"))
 	case msg.text == "":
 		return nil
 	}
 	return m.updateComposer(tea.PasteMsg{Content: msg.text})
+}
+
+func (m *model) spaceClipboardPaths(paths string) string {
+	// The textarea column counts runes within the logical (not wrapped) line.
+	lines := strings.Split(m.textarea.Value(), "\n")
+	line := []rune(lines[m.textarea.Line()])
+	col := m.textarea.Column()
+	if col > 0 && !unicode.IsSpace(line[col-1]) {
+		paths = " " + paths
+	}
+	if col < len(line) && !unicode.IsSpace(line[col]) {
+		paths += " "
+	}
+	return paths
 }
 
 func (m model) composerAcceptsPaste() bool {
