@@ -8,6 +8,8 @@ SDKs live in `sdk/typescript/` and `sdk/go/`. Keep their wire types aligned with
 
 TUI audio uses `audio/` (Rust) and `pkg/audio/` (Go IPC); see [audio/README.md](audio/README.md) for local build/test tasks.
 
+The optional [clipboard helper](clipboard/README.md) is a separate Go module excluded from root `./...` checks. Keep native clipboard dependencies there, not in the TUI.
+
 Opt-in code mode uses a runner-local QuickJS/WASM runtime and tool catalog in `pkg/codemode/`, with shared execution and child ownership in `pkg/runner/`. The embedded runtime's pins and licenses are in `pkg/codemode/runtime_wasm_provenance.md`. `mise run code-generation` installs its locked npm dependency and generates the gitignored WASM alongside the frontend; `mise run codemode-generation` generates only the runtime. No external JavaScript runtime is required by the compiled binary. See [the code-mode design](docs/codemode-design.md) for lifecycle and authorization boundaries.
 
 ## Conventions
@@ -36,6 +38,7 @@ Use `mise` tasks. For code changes, run the relevant lint and tests:
 | TypeScript SDK | `mise run sdk-test` | `mise run sdk-test` |
 | Go SDK | `mise run sdk-go-lint` | `mise run sdk-go-test` |
 | MCP extension | `mise run mcp-lint` | `mise run mcp-test` |
+| Clipboard helper | `mise run clipboard-lint` | `mise run clipboard-test` |
 
 `mise run sdk-acceptance` checks TypeScript and Go SDK process boundaries.
 

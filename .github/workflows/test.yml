@@ -60,6 +60,12 @@ jobs:
       - name: Test MCP extension
         run: mise run mcp-test
 
+      - name: Lint clipboard helper
+        run: mise run clipboard-lint
+
+      - name: Test clipboard helper
+        run: mise run clipboard-test
+
       - name: Test TypeScript and Go SDKs across process boundaries
         run: mise run sdk-acceptance
 

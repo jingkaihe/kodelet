@@ -45,6 +45,19 @@ builds:
     ldflags:
       - -s -w -X main.version={{ .Version }}
 
+  - id: kodelet-clipboard
+    dir: clipboard
+    main: .
+    binary: kodelet-clipboard
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
 archives:
   - id: raw-binaries
     ids:
@@ -62,6 +75,12 @@ archives:
     formats:
       - binary
     name_template: kodelet-extension-mcp-{{ .Os }}-{{ .Arch }}
+  - id: clipboard-raw-binaries
+    ids:
+      - kodelet-clipboard
+    formats:
+      - binary
+    name_template: kodelet-clipboard-{{ .Os }}-{{ .Arch }}
 
 snapshot:
   version_template: "{{ if .Env.VERSION }}{{ .Env.VERSION }}{{ else }}{{ .Version }}{{ end }}"

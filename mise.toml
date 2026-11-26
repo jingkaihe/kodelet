@@ -111,6 +111,37 @@ run = [
   "cargo clippy --manifest-path audio/Cargo.toml --locked --all-targets -- -D warnings",
 ]
 
+[tasks.clipboard-build]
+description = "Build the optional clipboard helper into ./bin"
+env = { CGO_ENABLED = "0" }
+run = '''
+mkdir -p bin
+go -C clipboard build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o ../bin/kodelet-clipboard .
+'''
+
+[tasks.clipboard-install]
+description = "Install the clipboard helper into ~/.local/bin"
+depends = ["clipboard-build"]
+run = '''
+set -eu
+destination="$HOME/.local/bin"
+mkdir -p "$destination"
+staged=$(mktemp "$destination/.kodelet-clipboard.XXXXXX")
+trap 'rm -f "$staged"' EXIT
+install -m 755 bin/kodelet-clipboard "$staged"
+mv -f "$staged" "$destination/kodelet-clipboard"
+echo "Installed clipboard helper: $destination/kodelet-clipboard"
+'''
+
+[tasks.clipboard-test]
+description = "Vet and test the clipboard helper"
+env = { CGO_ENABLED = "1" }
+run = ["go -C clipboard vet ./...", "go -C clipboard test -race ./..."]
+
+[tasks.clipboard-lint]
+description = "Lint the clipboard helper module"
+run = "cd clipboard && golangci-lint run --config ../.golangci.yml ./..."
+
 [tasks.codemode-generation]
 description = "Generate the embedded QuickJS runtime from its locked npm dependency"
 run = ["go generate ./pkg/codemode"]
@@ -346,7 +377,7 @@ run = [
 
 [tasks.release]
 description = "Build GoReleaser snapshot artifacts"
-depends = ["lint", "test", "mcp-lint", "mcp-test"]
+depends = ["lint", "test", "mcp-lint", "mcp-test", "clipboard-lint", "clipboard-test"]
 run = [
   "mise run release-snapshot",
 ]
