@@ -130,8 +130,7 @@ func TestGetRunTool(t *testing.T) {
 	assert.Equal(t, "Run "+itoa(runs[0])+" of daily · Succeeded · 1m23s", summary)
 	for _, want := range []string{
 		"**daily** · run " + itoa(runs[0]) + " · Succeeded",
-		"- **Ran:** ",
-		"(1m23s)",
+		"- **Ran:** " + displayTime(toolNow.Add(-2*time.Hour)) + " for 1m23s",
 		"- **Tool calls:** 3 tool calls (bash 2, file\\_read 1), 1 failed",
 		"- **Tokens:** 1,200 input, 340 output, 45,000 cache read, 800 cache write",
 		"- **Cost:** $0.0123",

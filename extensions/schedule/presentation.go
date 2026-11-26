@@ -242,7 +242,7 @@ func runPresentation(run Run) map[string]any {
 	fmt.Fprintf(&b, "**%s** · run %d · %s\n\n", markdownText(run.ScheduleName), run.ID, runStatusLabel(run.Status))
 	fmt.Fprintf(&b, "- **Due:** %s\n", displayTime(run.ScheduledFor))
 	if duration, ok := runDuration(run); ok {
-		fmt.Fprintf(&b, "- **Ran:** %s to %s (%s)\n", displayTime(run.StartedAt), displayTime(*run.FinishedAt), formatDuration(duration))
+		fmt.Fprintf(&b, "- **Ran:** %s for %s\n", displayTime(run.StartedAt), formatDuration(duration))
 	} else {
 		fmt.Fprintf(&b, "- **Started:** %s\n", displayTime(run.StartedAt))
 	}
