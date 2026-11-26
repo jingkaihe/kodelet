@@ -288,6 +288,19 @@ run = ["go -C extensions/mcp vet ./...", "go -C extensions/mcp test -race ./..."
 description = "Lint the native MCP extension"
 run = ["cd extensions/mcp && golangci-lint run --config ../../.golangci.yml ./..."]
 
+[tasks.schedule-build]
+description = "Build the schedule extension"
+run = ["CGO_ENABLED=0 go -C extensions/schedule build -trimpath -ldflags=\"-s -w -X main.version=$VERSION\" -o ../../bin/kodelet-extension-schedule ."]
+
+[tasks.schedule-test]
+description = "Vet and test the schedule extension"
+env = { CGO_ENABLED = "1" }
+run = ["go -C extensions/schedule vet ./...", "go -C extensions/schedule test -race ./..."]
+
+[tasks.schedule-lint]
+description = "Lint the schedule extension"
+run = ["cd extensions/schedule && golangci-lint run --config ../../.golangci.yml ./..."]
+
 [tasks.sdk-acceptance]
 description = "Run SDK, ACP, daemon, and runner process-boundary gates (KODELET_TEST_EXTENSION_SDKS, default: typescript go)"
 run = ['''
@@ -377,7 +390,7 @@ run = [
 
 [tasks.release]
 description = "Build GoReleaser snapshot artifacts"
-depends = ["lint", "test", "mcp-lint", "mcp-test", "clipboard-lint", "clipboard-test"]
+depends = ["lint", "test", "mcp-lint", "mcp-test", "schedule-lint", "schedule-test", "clipboard-lint", "clipboard-test"]
 run = [
   "mise run release-snapshot",
 ]
@@ -417,6 +430,7 @@ run = [
   "go mod download",
   "go -C sdk/go mod download",
   "go -C extensions/mcp mod download",
+  "go -C extensions/schedule mod download",
   "go -C clipboard mod download",
   "echo 'Installing frontend npm dependencies...'",
   "cd pkg/webui/frontend && npm install",

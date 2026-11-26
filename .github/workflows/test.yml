@@ -63,6 +63,12 @@ jobs:
       - name: Test MCP extension
         run: mise run mcp-test
 
+      - name: Lint schedule extension
+        run: mise run schedule-lint
+
+      - name: Test schedule extension
+        run: mise run schedule-test
+
       - name: Lint clipboard helper
         run: mise run clipboard-lint
 

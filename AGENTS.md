@@ -4,7 +4,7 @@ Kodelet is an agentic coding CLI: Go backend in `cmd/kodelet/` and `pkg/`, React
 
 SDKs live in `sdk/typescript/` and `sdk/go/`. Keep their wire types aligned with `pkg/extensions` and `pkg/acp`.
 
-`sdk/go/` and `extensions/mcp/` are separate Go modules, excluded from root `./...` checks. Keep MCP dependencies out of the core and SDKs; see the [MCP guide](skills/kodelet/references/mcp.md).
+`sdk/go/`, `extensions/mcp/`, and `extensions/schedule/` are separate Go modules, excluded from root `./...` checks. Keep MCP dependencies out of the core and SDKs; see the [MCP guide](skills/kodelet/references/mcp.md). The [schedule extension](extensions/schedule/README.md) is not bundled with releases.
 
 TUI audio uses `audio/` (Rust) and `pkg/audio/` (Go IPC); see [audio/README.md](audio/README.md) for local build/test tasks.
 
@@ -38,6 +38,7 @@ Use `mise` tasks. For code changes, run the relevant lint and tests:
 | TypeScript SDK | `mise run sdk-test` | `mise run sdk-test` |
 | Go SDK | `mise run sdk-go-lint` | `mise run sdk-go-test` |
 | MCP extension | `mise run mcp-lint` | `mise run mcp-test` |
+| Schedule extension | `mise run schedule-lint` | `mise run schedule-test` |
 | Clipboard helper | `mise run clipboard-lint` | `mise run clipboard-test` |
 
 `mise run sdk-acceptance` checks TypeScript and Go SDK process boundaries.
