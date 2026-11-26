@@ -1,5 +1,9 @@
 # Kodelet
 
+## Unreleased
+
+Added the [schedule extension](extensions/schedule/README.md), `kodelet-extension-schedule`, which runs agent instructions on recurring cron schedules as new conversations. Agents manage a workspace's schedules with its tools, with user approval, and a separately supervised `kodelet-extension-schedule daemon` starts due runs. The standalone installer and Linux RPM and deb packages include it, and runners discover it on `PATH`; add its absolute path to `extensions.deny` to turn it off.
+
 ## 0.8.36-beta
 
 TUI clipboard paste now uses a separate `kodelet-clipboard` executable. The standalone installer and Linux RPM and deb packages include it; other installations can use the [matching helper release](clipboard/README.md#install).

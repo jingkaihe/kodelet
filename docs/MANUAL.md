@@ -1410,6 +1410,8 @@ Extensions are Kodelet's unified external extensibility primitive. They replace 
 
 Extensions communicate with Kodelet over stdio JSON-RPC using `Content-Length` framing. `stdout` is reserved for protocol messages and `stderr` is used for logs.
 
+The standalone installer and Linux RPM and deb packages include two extensions that runners discover on `PATH`: `kodelet-extension-mcp` for [MCP servers](../skills/kodelet/references/mcp.md) and `kodelet-extension-schedule`, which runs agent instructions on recurring cron schedules through a separately supervised daemon. See the [schedule extension guide](../extensions/schedule/README.md).
+
 ### TypeScript Agent SDK
 
 The `kodelet` TypeScript package lets Node.js applications create, resume, and stream agent sessions using your configured Kodelet daemon and runner.

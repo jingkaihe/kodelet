@@ -4,7 +4,7 @@ Kodelet is an agentic coding CLI: Go backend in `cmd/kodelet/` and `pkg/`, React
 
 SDKs live in `sdk/typescript/` and `sdk/go/`. Keep their wire types aligned with `pkg/extensions` and `pkg/acp`.
 
-`sdk/go/`, `extensions/mcp/`, and `extensions/schedule/` are separate Go modules, excluded from root `./...` checks. Keep MCP dependencies out of the core and SDKs; see the [MCP guide](skills/kodelet/references/mcp.md). The [schedule extension](extensions/schedule/README.md) is not bundled with releases.
+`sdk/go/`, `extensions/mcp/`, and `extensions/schedule/` are separate Go modules, excluded from root `./...` checks. Keep MCP dependencies out of the core and SDKs; see the [MCP guide](skills/kodelet/references/mcp.md). The [schedule extension](extensions/schedule/README.md) ships with releases like the MCP extension.
 
 TUI audio uses `audio/` (Rust) and `pkg/audio/` (Go IPC); see [audio/README.md](audio/README.md) for local build/test tasks.
 

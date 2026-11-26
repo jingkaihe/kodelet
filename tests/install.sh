@@ -22,6 +22,9 @@ gh() {
                 echo partial > "$9"
                 return 1
             fi
+            if [ "$scenario" = legacy ] && [[ "$7" == kodelet-extension-schedule-* ]]; then
+                return 1
+            fi
             echo "gh:$7" > "$9"
             ;;
         *) return 1 ;;
@@ -38,6 +41,11 @@ curl() {
             ;;
         https://github.com/jingkaihe/kodelet/releases/download/"$tag"/*)
             [ "$4" = -o ] || return 1
+            if [ "$scenario" = legacy ] && [[ "${url##*/}" == kodelet-extension-schedule-* ]]; then
+                echo "Not Found" > "$5"
+                echo 404 # Releases before the schedule extension.
+                return 0
+            fi
             echo "curl:${url##*/}" > "$5"
             echo 200
             ;;
@@ -48,20 +56,24 @@ curl() {
 # Keep the installer's optional system symlinks in the temporary directory.
 ln() { command ln -sf "$2" "$HOME/${3##*/}"; }
 
-for scenario in latest retry anonymous; do
+for scenario in latest retry anonymous legacy; do
     home="$trial/$scenario"
     mkdir -p "$home"
     (
         export HOME="$home" KODELET_INSTALL_DIR="$home/prefix" KODELET_VERSION=latest
-        if [ "$scenario" = retry ]; then KODELET_VERSION="${tag#v}"; fi
+        if [[ "$scenario" = retry || "$scenario" = legacy ]]; then KODELET_VERSION="${tag#v}"; fi
         source "$installer" --binary
     )
-    for binary in kodelet kodelet-extension-mcp kodelet-clipboard; do
+    for binary in kodelet kodelet-extension-mcp kodelet-extension-schedule kodelet-clipboard; do
+        path="$home/prefix/bin/$binary"
+        if [ "$scenario" = legacy ] && [ "$binary" = kodelet-extension-schedule ]; then
+            [ ! -e "$path" ] # A missing optional asset is skipped, not installed.
+            continue
+        fi
         transport=gh
         if [[ "$scenario" = anonymous || ( "$scenario" = retry && "$binary" = kodelet-clipboard ) ]]; then
             transport=curl
         fi
-        path="$home/prefix/bin/$binary"
         [[ -x "$path" && "$(cat "$path")" == "$transport:$binary-"* ]]
     done
 done

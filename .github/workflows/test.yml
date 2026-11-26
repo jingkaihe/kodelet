@@ -69,12 +69,6 @@ jobs:
       - name: Test schedule extension
         run: mise run schedule-test
 
-      - name: Build schedule extension
-        run: mise run schedule-build
-
-      - name: Verify schedule extension cross compilation
-        run: mise run schedule-cross-build
-
       - name: Lint clipboard helper
         run: mise run clipboard-lint
 

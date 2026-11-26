@@ -45,6 +45,23 @@ builds:
     ldflags:
       - -s -w -X main.version={{ .Version }}
 
+  - id: kodelet-extension-schedule
+    dir: extensions/schedule
+    main: .
+    binary: kodelet-extension-schedule
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
   - id: kodelet-clipboard
     dir: clipboard
     main: .
@@ -79,6 +96,12 @@ archives:
     formats:
       - binary
     name_template: kodelet-extension-mcp-{{ .Os }}-{{ .Arch }}
+  - id: schedule-raw-binaries
+    ids:
+      - kodelet-extension-schedule
+    formats:
+      - binary
+    name_template: kodelet-extension-schedule-{{ .Os }}-{{ .Arch }}
   - id: clipboard-raw-binaries
     ids:
       - kodelet-clipboard
@@ -105,6 +128,7 @@ nfpms:
     ids:
       - kodelet
       - kodelet-extension-mcp
+      - kodelet-extension-schedule
       - kodelet-clipboard
     package_name: kodelet
     formats:

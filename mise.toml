@@ -35,7 +35,7 @@ VERSION_PKG = "github.com/jingkaihe/kodelet/pkg/version"
 
 [tasks.build]
 description = "Build the application with embedded web UI"
-depends = ["code-generation", "mcp-build"]
+depends = ["code-generation", "mcp-build", "schedule-build"]
 run = [
   "mkdir -p bin",
   "echo 'Building kodelet binary...'",
@@ -44,7 +44,7 @@ run = [
 
 [tasks.build-dev]
 description = "Build the application without web UI (faster for development)"
-depends = ["codemode-generation", "mcp-build"]
+depends = ["codemode-generation", "mcp-build", "schedule-build"]
 run = [
   "mkdir -p bin",
   "echo 'Building kodelet binary (without frontend)...'",
@@ -291,16 +291,6 @@ run = ["cd extensions/mcp && golangci-lint run --config ../../.golangci.yml ./..
 [tasks.schedule-build]
 description = "Build the schedule extension"
 run = ["CGO_ENABLED=0 go -C extensions/schedule build -trimpath -ldflags=\"-s -w -X main.version=$VERSION\" -o ../../bin/kodelet-extension-schedule ."]
-
-[tasks.schedule-cross-build]
-description = "Check that the schedule extension builds for Linux and macOS on amd64 and arm64"
-run = ['''
-set -eu
-for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
-  echo "Building schedule extension for $target..."
-  CGO_ENABLED=0 GOOS="${target%/*}" GOARCH="${target#*/}" go -C extensions/schedule build -trimpath -o /dev/null .
-done
-''']
 
 [tasks.schedule-install]
 description = "Build the schedule extension and install it in ~/.local/bin (SCHEDULE_INSTALL_DIR overrides)"

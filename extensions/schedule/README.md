@@ -9,13 +9,17 @@ One executable has two modes that share a SQLite store:
 
 ## Install
 
+The standalone installer (`install.sh --binary`) and Kodelet's Linux RPM and deb packages install `kodelet-extension-schedule` alongside `kodelet`. For other installation methods, download `kodelet-extension-schedule-<os>-<arch>` from the matching [Kodelet release](https://github.com/jingkaihe/kodelet/releases) (`linux` or `darwin`; `amd64` or `arm64`), verify its SHA-256 against the release's `checksums.txt`, and install it as `kodelet-extension-schedule` on your `PATH`. The same executable serves as the extension and the `kodelet-extension-schedule daemon` command.
+
+To build and install from a checkout:
+
 ```bash
 mise run schedule-install
 ```
 
-This builds `bin/kodelet-extension-schedule` and installs it in `~/.local/bin`, so the same executable serves as the extension and the `kodelet-extension-schedule daemon` command; set `SCHEDULE_INSTALL_DIR` to install elsewhere. It replaces the file by renaming, so a running daemon is unaffected until you restart it.
+This builds `bin/kodelet-extension-schedule` and installs it in `~/.local/bin`; set `SCHEDULE_INSTALL_DIR` to install elsewhere. It replaces the file by renaming, so a running daemon is unaffected until you restart it.
 
-Kodelet discovers extensions on the runner's `PATH` unless `extensions.discover_path` is `false`, so the directory must be on `PATH` where the Kodelet server starts; restart the local server with `kodelet server restart` if it started before `~/.local/bin` was on its `PATH`. A copy in an [extension root](../../skills/kodelet/references/extensions.md#discovery) such as `~/.kodelet/extensions` takes precedence over `PATH`. Kodelet discovers the extension in new sessions; use `/reload` in a running conversation.
+Kodelet discovers extensions on the runner's `PATH` unless `extensions.discover_path` is `false`, so the directory must be on `PATH` where the Kodelet server starts; restart the local server with `kodelet server restart` if it started before `~/.local/bin` was on its `PATH`. A copy in an [extension root](../../skills/kodelet/references/extensions.md#discovery) such as `~/.kodelet/extensions` takes precedence over `PATH`. To turn the extension off, add its absolute path, such as `/usr/bin/kodelet-extension-schedule`, to `extensions.deny`. Kodelet discovers the extension in new sessions; use `/reload` in a running conversation.
 
 ## Tools
 
@@ -94,7 +98,7 @@ Only one daemon can use a database at a time. The daemon records a heartbeat, an
 
 ### Keep it running
 
-Kodelet does not supervise the daemon. On macOS, use a launchd agent such as `~/Library/LaunchAgents/dev.kodelet.schedule.plist`:
+Kodelet does not supervise the daemon. The examples below use `~/.local/bin`; use the path that `command -v kodelet-extension-schedule` prints, such as `/usr/bin` for packages. On macOS, use a launchd agent such as `~/Library/LaunchAgents/dev.kodelet.schedule.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>

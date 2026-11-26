@@ -232,8 +232,12 @@ install_binary() {
     if [ -z "$TEMP_DIR" ]; then
         TEMP_DIR="$(mktemp -d)"
     fi
-    for binary in kodelet kodelet-extension-mcp kodelet-clipboard; do
+    for binary in kodelet kodelet-extension-mcp kodelet-extension-schedule kodelet-clipboard; do
         status="$(download_release_asset "$binary-$OS-$ARCH" "$TEMP_DIR/$binary")" || fail "Failed to download $binary"
+        if [ "$status" = 404 ] && [ "$binary" = kodelet-extension-schedule ]; then
+            warn "${VERSION_TAG} has no schedule extension; leaving any existing installation unchanged"
+            continue
+        fi
         if [ "$status" = 404 ] && [ "$binary" = kodelet-clipboard ]; then
             warn "${VERSION_TAG} has no clipboard helper; leaving any existing helper unchanged"
             continue
