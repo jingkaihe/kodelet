@@ -1,6 +1,6 @@
 # Kodelet
 
-## Unreleased
+## 0.8.36-beta
 
 TUI clipboard paste now uses a separate `kodelet-clipboard` executable. The standalone installer and Linux RPM and deb packages include it; other installations can use the [matching helper release](clipboard/README.md#install).
 
