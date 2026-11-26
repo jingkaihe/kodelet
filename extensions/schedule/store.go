@@ -81,23 +81,6 @@ type Store struct {
 	db *sql.DB
 }
 
-// defaultDBPath returns KODELET_SCHEDULE_DB, or schedule/schedule.db under
-// KODELET_BASE_PATH (default ~/.kodelet).
-func defaultDBPath() (string, error) {
-	if path := strings.TrimSpace(os.Getenv("KODELET_SCHEDULE_DB")); path != "" {
-		return filepath.Abs(path)
-	}
-	base := os.Getenv("KODELET_BASE_PATH")
-	if base == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", errors.Wrap(err, "failed to resolve home directory")
-		}
-		base = filepath.Join(home, ".kodelet")
-	}
-	return filepath.Abs(filepath.Join(base, "schedule", "schedule.db"))
-}
-
 // openStore opens or creates the database at path and applies pending
 // migrations.
 func openStore(ctx context.Context, path string) (*Store, error) {

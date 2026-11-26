@@ -46,16 +46,26 @@ kodelet-extension-schedule daemon
 
 The daemon checks for due schedules, starts each run with `kodelet acp --runner <workspace>` in the schedule's directory and profile, and records its conversation and outcome. It reaches the server the same way the `kodelet` CLI does, so a local server starts automatically, and remote servers need `server` configuration and `kodelet auth login`.
 
-| Flag | Default | Purpose |
-| --- | --- | --- |
-| `--db` | see [storage](#storage) | Schedule database |
-| `--server` | CLI configuration | Kodelet server URL |
-| `--kodelet` | `kodelet` | `kodelet` executable used for runs |
-| `--poll-interval` | `30s` | How often to check for due schedules |
-| `--concurrency` | `2` | Maximum number of runs at once |
-| `--run-timeout` | `1h` | Cancel runs that take longer; `0` disables |
-| `--misfire-grace` | `1h` | Skip runs missed by more than this |
-| `--shutdown-grace` | `30s` | Time for runs to finish on shutdown before they are cancelled |
+| Flag | Setting | Default | Purpose |
+| --- | --- | --- | --- |
+| `--db` | `db` | see [storage](#storage) | Schedule database |
+| `--server` | `server` | CLI configuration | Kodelet server URL |
+| `--kodelet` | `kodelet` | `kodelet` | `kodelet` executable used for runs |
+| `--poll-interval` | `poll_interval` | `30s` | How often to check for due schedules |
+| `--concurrency` | `concurrency` | `2` | Maximum number of runs at once |
+| `--run-timeout` | `run_timeout` | `1h` | Cancel runs that take longer; `0` disables |
+| `--misfire-grace` | `misfire_grace` | `1h` | Skip runs missed by more than this |
+| `--shutdown-grace` | `shutdown_grace` | `30s` | Time for runs to finish on shutdown before they are cancelled |
+
+Each setting can also come from a `KODELET_SCHEDULE_<SETTING>` environment variable, such as `KODELET_SCHEDULE_POLL_INTERVAL=1m`, or from a YAML config file. Flags take precedence over environment variables, which take precedence over the config file. The config file is `schedule/config.yaml` under `$KODELET_BASE_PATH` (default `~/.kodelet`) when it exists, or the file named by `--config` or `KODELET_SCHEDULE_CONFIG`. Write durations as strings such as `90s` or `2h`:
+
+```yaml
+poll_interval: 1m
+concurrency: 1
+run_timeout: 30m
+```
+
+The extension reads the same `db` setting, so a database configured in the config file applies to both.
 
 Each occurrence runs at most once:
 
@@ -120,7 +130,7 @@ Service managers start with a minimal environment. If the daemon starts the loca
 
 ## Storage
 
-Schedules, the latest 20 runs of each schedule, and the daemon heartbeat live in `$KODELET_SCHEDULE_DB`, or `schedule/schedule.db` under `$KODELET_BASE_PATH` (default `~/.kodelet`). The extension and daemon must resolve the same path.
+Schedules, the latest 20 runs of each schedule, and the daemon heartbeat live in the `db` setting, or `schedule/schedule.db` under `$KODELET_BASE_PATH` (default `~/.kodelet`). The extension and daemon must resolve the same path; set it in the config file or `KODELET_SCHEDULE_DB` rather than with `--db`, which only the command you run sees.
 
 The extension and daemon apply pending schema migrations when they open the database, recording them in its `schema_migrations` table. An older executable refuses a database migrated by a newer one, so upgrade the extension and daemon together. To change the schema, append a migration to `scheduleMigrations` in `migrations.go`; never edit a released one.
 

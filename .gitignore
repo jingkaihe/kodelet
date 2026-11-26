@@ -59,3 +59,7 @@ kodelet-config.yaml
 REQ*.md
 
 mcp.json
+
+# Binaries left by go build in extension module directories
+extensions/mcp/mcp
+extensions/schedule/schedule

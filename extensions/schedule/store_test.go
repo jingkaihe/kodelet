@@ -216,17 +216,3 @@ func TestOpenStoreIsIdempotentAndSharedAcrossHandles(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, schedules, 1)
 }
-
-func TestDefaultDBPath(t *testing.T) {
-	base := t.TempDir()
-	t.Setenv("KODELET_SCHEDULE_DB", "")
-	t.Setenv("KODELET_BASE_PATH", base)
-	path, err := defaultDBPath()
-	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(base, "schedule", "schedule.db"), path)
-
-	t.Setenv("KODELET_SCHEDULE_DB", filepath.Join(base, "custom.db"))
-	path, err = defaultDBPath()
-	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(base, "custom.db"), path)
-}
