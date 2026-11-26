@@ -40,7 +40,7 @@ const (
 // Schedule is a recurring agent instruction bound to one workspace runner.
 type Schedule struct {
 	ID          string     `json:"id"`
-	Workspace   string     `json:"workspace,omitempty"`
+	Workspace   string     `json:"workspace"`
 	Name        string     `json:"name"`
 	Schedule    string     `json:"schedule"`
 	Instruction string     `json:"instruction"`

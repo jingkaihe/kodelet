@@ -309,9 +309,9 @@ const (
 
 // daemonHealth summarises the daemon heartbeat for listings.
 type daemonHealth struct {
-	State       string     `json:"state"`
-	HeartbeatAt *time.Time `json:"heartbeatAt,omitempty"`
-	Warning     string     `json:"warning,omitempty"`
+	State       string     `json:"state" jsonschema:"Daemon state; schedules fire only while it is running"`
+	HeartbeatAt *time.Time `json:"heartbeatAt,omitempty" jsonschema:"Latest daemon heartbeat (RFC 3339)"`
+	Warning     string     `json:"warning,omitempty" jsonschema:"What to tell the user when schedules may not fire"`
 }
 
 func assessDaemon(status DaemonStatus, found bool, now time.Time) daemonHealth {

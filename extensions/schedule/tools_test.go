@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/jingkaihe/kodelet/sdk/go/extension"
 	"github.com/jingkaihe/kodelet/sdk/go/extension/extensiontest"
 	"github.com/stretchr/testify/assert"
@@ -336,9 +337,93 @@ func TestModelFacingTextHidesRunnerBinding(t *testing.T) {
 		require.Empty(t, result.Error)
 		encoded, err := json.Marshal(result.StructuredContent)
 		require.NoError(t, err)
-		for _, text := range []string{result.Content, string(encoded)} {
+		data, err := json.Marshal(result.Data)
+		require.NoError(t, err)
+		for _, text := range []string{result.Content, string(encoded), string(data)} {
 			assert.NotContains(t, strings.ToLower(text), "workspace")
 			assert.NotContains(t, text, "runner-a")
 		}
 	}
+}
+
+func TestToolsDeclareCodeModeMetadata(t *testing.T) {
+	th := newToolHarness(t, "runner-a", true)
+
+	require.Len(t, th.init.Tools, 4)
+	for _, tool := range th.init.Tools {
+		assert.NotEmpty(t, tool.Short, tool.Name)
+		assert.LessOrEqual(t, len(tool.Short), 120, tool.Name)
+		require.NotNil(t, tool.OutputSchema, tool.Name)
+		assert.Equal(t, "object", tool.OutputSchema["type"], tool.Name)
+		_, err := resolveSchema(tool.OutputSchema)
+		assert.NoError(t, err, tool.Name)
+	}
+}
+
+func resolveSchema(document map[string]any) (*jsonschema.Resolved, error) {
+	data, err := json.Marshal(document)
+	if err != nil {
+		return nil, err
+	}
+	var schema jsonschema.Schema
+	if err := json.Unmarshal(data, &schema); err != nil {
+		return nil, err
+	}
+	return schema.Resolve(nil)
+}
+
+// TestStructuredContentMatchesOutputSchema checks every result against the
+// schema code mode validates it with, including optional fields.
+func TestStructuredContentMatchesOutputSchema(t *testing.T) {
+	th := newToolHarness(t, "runner-a", true)
+	schemas := map[string]*jsonschema.Resolved{}
+	for _, tool := range th.init.Tools {
+		resolved, err := resolveSchema(tool.OutputSchema)
+		require.NoError(t, err)
+		schemas[tool.Name] = resolved
+	}
+	check := func(name string, result extension.ToolResult) {
+		t.Helper()
+		require.Empty(t, result.Error, name)
+		require.NotNil(t, result.StructuredContent, name)
+		assert.NoError(t, schemas[name].Validate(result.StructuredContent), name)
+	}
+
+	check("schedule_list", th.call(t, "schedule_list", map[string]any{}))
+	created := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "@daily", "instruction": "p"})
+	check("schedule_create", created)
+	check("schedule_create", th.call(t, "schedule_create", map[string]any{"name": "paused", "schedule": "@daily", "instruction": "p", "enabled": false}))
+	schedules, err := th.store.List(t.Context(), "runner-a")
+	require.NoError(t, err)
+	id := schedules[0].ID
+	runID, claimed, err := th.store.Claim(t.Context(), id, *schedules[0].NextRunAt, toolNow.Add(48*time.Hour), Run{Status: RunRunning, StartedAt: toolNow})
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NoError(t, th.store.SetRunConversation(t.Context(), runID, "conv-1"))
+	require.NoError(t, th.store.FinishRun(t.Context(), runID, RunFailed, "runner offline", toolNow))
+	require.NoError(t, th.store.SaveHeartbeat(t.Context(), DaemonStatus{PID: 1, StartedAt: toolNow, HeartbeatAt: toolNow, PollInterval: time.Minute}))
+
+	listed := th.call(t, "schedule_list", map[string]any{})
+	check("schedule_list", listed)
+	assert.Contains(t, mustJSON(t, listed.StructuredContent), "runner offline", "the last run is included")
+	check("schedule_update", th.call(t, "schedule_update", map[string]any{"id": id, "enabled": false}))
+	check("schedule_update", th.call(t, "schedule_update", map[string]any{"id": id, "instruction": "q"}))
+	check("schedule_delete", th.call(t, "schedule_delete", map[string]any{"id": id}))
+}
+
+func mustJSON(t *testing.T, value any) string {
+	t.Helper()
+	data, err := json.Marshal(value)
+	require.NoError(t, err)
+	return string(data)
+}
+
+func presentationOf(t *testing.T, result extension.ToolResult) (summary, body string) {
+	t.Helper()
+	var data struct {
+		Presentation extension.Presentation `json:"presentation"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(mustJSON(t, result.Data)), &data))
+	assert.Equal(t, "markdown", data.Presentation.Format)
+	return data.Presentation.Summary, data.Presentation.Body
 }

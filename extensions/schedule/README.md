@@ -32,6 +32,8 @@ A schedule has a `name` (unique in its workspace), a `schedule`, an `instruction
 - `cwd` defaults to the conversation's directory and must stay inside it.
 - The model profile is the conversation's profile, including profiles provided by extensions. Updates never change it; to use another profile, recreate the schedule from a conversation using that profile. Kodelet resolves the profile again on the schedule's runner and directory at the start of every run.
 
+Results show users a Markdown summary of each schedule, while the agent reads plain text. In [code mode](../../docs/codemode-design.md), each tool declares a one-line summary and an output schema, so scripts can read typed results from `reply.data`: `schedule_list` returns `{schedules, daemon}`, `schedule_create` and `schedule_update` return `{schedule, upcomingRuns, daemon}`, and `schedule_delete` returns `{id, name}`. Check `daemon.state` to see whether schedules will fire.
+
 Creating, updating, and deleting a schedule needs the user's approval in an interactive client. Without one, for example in `kodelet run` or a scheduled run, these tools refuse, so unattended agents cannot plant or alter schedules.
 
 ### Schedule syntax

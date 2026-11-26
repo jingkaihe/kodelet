@@ -86,24 +86,32 @@ type toolset struct {
 func registerTools(ext *extension.Extension, stores *storeOpener, now func() time.Time) {
 	t := &toolset{stores: stores, now: now}
 	extension.RegisterTool(ext, extension.Tool[listInput]{
-		Name:        "schedule_list",
-		Description: "List scheduled instructions with their next and most recent runs. Each run is a new agent conversation started by the kodelet-extension-schedule daemon.",
-		Execute:     t.list,
+		Name:         "schedule_list",
+		Description:  "List scheduled instructions with their next and most recent runs. Each run is a new agent conversation started by the kodelet-extension-schedule daemon, which must be running for schedules to fire.",
+		Short:        "List scheduled instructions with their next and latest runs and whether the daemon is running.",
+		OutputSchema: outputSchema[listOutput](),
+		Execute:      t.list,
 	})
 	extension.RegisterTool(ext, extension.Tool[createInput]{
-		Name:        "schedule_create",
-		Description: "Schedule an instruction to run as a new agent conversation on a recurring cron schedule. Runs use this conversation's model profile. The user must approve the schedule before it is saved.",
-		Execute:     t.create,
+		Name:         "schedule_create",
+		Description:  "Schedule an instruction to run as a new agent conversation on a recurring cron schedule. Runs use this conversation's model profile. The user must approve the schedule before it is saved; the call fails if they decline or cannot be asked.",
+		Short:        "Schedule an instruction to run as a new conversation on a cron schedule; needs user approval.",
+		OutputSchema: outputSchema[scheduleOutput](),
+		Execute:      t.create,
 	})
 	extension.RegisterTool(ext, extension.Tool[updateInput]{
-		Name:        "schedule_update",
-		Description: "Change a schedule by ID; omitted fields keep their values, and the model profile never changes. Set enabled to pause or resume it. The user must approve the change.",
-		Execute:     t.update,
+		Name:         "schedule_update",
+		Description:  "Change a schedule by ID; omitted fields keep their values, and the model profile never changes. Set enabled to pause or resume it. The user must approve the change; the call fails if they decline or cannot be asked.",
+		Short:        "Change, pause, or resume a schedule by ID; needs user approval.",
+		OutputSchema: outputSchema[scheduleOutput](),
+		Execute:      t.update,
 	})
 	extension.RegisterTool(ext, extension.Tool[deleteInput]{
-		Name:        "schedule_delete",
-		Description: "Delete a schedule by ID, with its run history. The user must approve the deletion.",
-		Execute:     t.delete,
+		Name:         "schedule_delete",
+		Description:  "Delete a schedule by ID, with its run history. The user must approve the deletion; the call fails if they decline or cannot be asked.",
+		Short:        "Delete a schedule and its run history by ID; needs user approval.",
+		OutputSchema: outputSchema[deleteOutput](),
+		Execute:      t.delete,
 	})
 }
 
@@ -120,20 +128,14 @@ func (t *toolset) list(ctx context.Context, _ listInput, tc *extension.ToolConte
 	if err != nil {
 		return failure(err), nil
 	}
-	views := make([]Schedule, len(schedules))
-	for i, schedule := range schedules {
-		views[i] = modelView(schedule)
-	}
 	health := t.daemonHealth(ctx, store)
 
 	var b strings.Builder
 	switch len(schedules) {
 	case 0:
 		b.WriteString("No schedules.\n")
-	case 1:
-		b.WriteString("1 schedule.\n")
 	default:
-		fmt.Fprintf(&b, "%d schedules.\n", len(schedules))
+		fmt.Fprintf(&b, "%s.\n", countLabel(len(schedules)))
 	}
 	for _, schedule := range schedules {
 		b.WriteString("\n")
@@ -141,12 +143,9 @@ func (t *toolset) list(ctx context.Context, _ listInput, tc *extension.ToolConte
 	}
 	writeWarning(&b, health)
 	return extension.ToolResult{
-		Content: b.String(),
-		StructuredContent: map[string]any{
-			"schedules": views,
-			"daemon":    health,
-		},
-		Data: presentation(fmt.Sprintf("Listed %d schedule(s)", len(schedules))),
+		Content:           b.String(),
+		StructuredContent: listOutput{Schedules: newScheduleViews(schedules), Daemon: health},
+		Data:              listPresentation(schedules, health),
 	}, nil
 }
 
@@ -175,10 +174,11 @@ func (t *toolset) create(ctx context.Context, in createInput, tc *extension.Tool
 	if schedule.CWD, err = resolveCWD(tc, in.CWD); err != nil {
 		return failure(err), nil
 	}
-	runs := upcoming(spec, now, upcomingRuns)
 	if schedule.Enabled {
-		schedule.NextRunAt = &runs[0]
+		next := spec.Next(now)
+		schedule.NextRunAt = &next
 	}
+	runs := upcomingRunsOf(schedule)
 
 	store, err := t.stores.Get(ctx)
 	if err != nil {
@@ -193,18 +193,19 @@ func (t *toolset) create(ctx context.Context, in createInput, tc *extension.Tool
 	if err := store.Create(ctx, &schedule, now); err != nil {
 		return failure(err), nil
 	}
+	health := t.daemonHealth(ctx, store)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Created schedule %q (%s).\n\n", schedule.Name, schedule.ID)
 	writeSchedule(&b, schedule)
-	if schedule.Enabled {
+	if len(runs) > 0 {
 		fmt.Fprintf(&b, "  upcoming runs: %s\n", formatTimes(runs))
 	}
-	writeWarning(&b, t.daemonHealth(ctx, store))
+	writeWarning(&b, health)
 	return extension.ToolResult{
 		Content:           b.String(),
-		StructuredContent: map[string]any{"schedule": modelView(schedule), "upcomingRuns": runs},
-		Data:              presentation("Created schedule " + schedule.Name),
+		StructuredContent: scheduleOutput{Schedule: newScheduleView(schedule), UpcomingRuns: runs, Daemon: health},
+		Data:              createPresentation(schedule, runs, health),
 	}, nil
 }
 
@@ -224,7 +225,8 @@ func (t *toolset) update(ctx context.Context, in updateInput, tc *extension.Tool
 	now := t.now()
 	updated := current
 	updated.LastRun = nil
-	var changes []string
+	// changes describe each change for approval; changed names the fields.
+	var changes, changed []string
 	if in.Name != nil {
 		name, err := normalizeName(*in.Name)
 		if err != nil {
@@ -236,6 +238,7 @@ func (t *toolset) update(ctx context.Context, in updateInput, tc *extension.Tool
 			}
 			updated.Name = name
 			changes = append(changes, describeChange("Name", current.Name, name))
+			changed = append(changed, "name")
 		}
 	}
 	if in.Schedule != nil {
@@ -246,6 +249,7 @@ func (t *toolset) update(ctx context.Context, in updateInput, tc *extension.Tool
 			}
 			updated.Schedule = spec
 			changes = append(changes, describeChange("Schedule", current.Schedule, spec))
+			changed = append(changed, "schedule")
 		}
 	}
 	if in.Instruction != nil {
@@ -256,6 +260,7 @@ func (t *toolset) update(ctx context.Context, in updateInput, tc *extension.Tool
 		if instruction != current.Instruction {
 			updated.Instruction = instruction
 			changes = append(changes, "Instruction:\n"+instruction)
+			changed = append(changed, "instruction")
 		}
 	}
 	if in.CWD != nil {
@@ -266,32 +271,38 @@ func (t *toolset) update(ctx context.Context, in updateInput, tc *extension.Tool
 		if cwd != current.CWD {
 			updated.CWD = cwd
 			changes = append(changes, describeChange("Directory", current.CWD, cwd))
+			changed = append(changed, "directory")
 		}
 	}
 	if in.Enabled != nil && *in.Enabled != current.Enabled {
 		updated.Enabled = *in.Enabled
 		changes = append(changes, describeChange("Enabled", yesNo(current.Enabled), yesNo(updated.Enabled)))
+		if updated.Enabled {
+			changed = append(changed, "resumed")
+		} else {
+			changed = append(changed, "paused")
+		}
 	}
 	if len(changes) == 0 {
 		return failure(errors.Errorf("no changes to schedule %q", current.Name)), nil
 	}
 
+	// A new schedule or a resumed one starts from now. Otherwise next_run_at is
+	// kept, so an edit cannot undo a run the daemon claims meanwhile.
 	resetNext := updated.Schedule != current.Schedule || updated.Enabled != current.Enabled
-	var runs []time.Time
-	if updated.Enabled {
-		spec, err := parseSpec(updated.Schedule)
-		if err != nil {
-			return failure(err), nil
-		}
-		runs = upcoming(spec, now, upcomingRuns)
-		if resetNext && len(runs) > 0 {
-			updated.NextRunAt = &runs[0]
-		}
-	} else if resetNext {
+	if resetNext {
 		updated.NextRunAt = nil
+		if updated.Enabled {
+			spec, err := parseSpec(updated.Schedule)
+			if err != nil {
+				return failure(err), nil
+			}
+			next := spec.Next(now)
+			updated.NextRunAt = &next
+		}
 	}
 	message := strings.Join(changes, "\n")
-	if resetNext && len(runs) > 0 {
+	if runs := upcomingRunsOf(updated); resetNext && len(runs) > 0 {
 		message += "\nUpcoming runs: " + formatTimes(runs)
 	}
 	if err := confirm(ctx, tc, fmt.Sprintf("Update schedule %q?", current.Name), message, "Update"); err != nil {
@@ -303,17 +314,17 @@ func (t *toolset) update(ctx context.Context, in updateInput, tc *extension.Tool
 	if saved, err := store.Get(ctx, workspace, updated.ID); err == nil {
 		updated = saved
 	}
+	runs := upcomingRunsOf(updated)
+	health := t.daemonHealth(ctx, store)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Updated schedule %q (%s).\n\n", updated.Name, updated.ID)
 	writeSchedule(&b, updated)
-	if updated.Enabled {
-		writeWarning(&b, t.daemonHealth(ctx, store))
-	}
+	writeWarning(&b, health)
 	return extension.ToolResult{
 		Content:           b.String(),
-		StructuredContent: map[string]any{"schedule": modelView(updated)},
-		Data:              presentation("Updated schedule " + updated.Name),
+		StructuredContent: scheduleOutput{Schedule: newScheduleView(updated), UpcomingRuns: runs, Daemon: health},
+		Data:              updatePresentation(updated, changed, runs, health),
 	}, nil
 }
 
@@ -338,9 +349,24 @@ func (t *toolset) delete(ctx context.Context, in deleteInput, tc *extension.Tool
 	}
 	return extension.ToolResult{
 		Content:           fmt.Sprintf("Deleted schedule %q (%s).", current.Name, current.ID),
-		StructuredContent: map[string]any{"deleted": current.ID},
-		Data:              presentation("Deleted schedule " + current.Name),
+		StructuredContent: deleteOutput{ID: current.ID, Name: current.Name},
+		Data:              deletePresentation(current),
 	}, nil
+}
+
+// upcomingRunsOf returns the next runs of an enabled schedule, starting at
+// its stored next run; it is empty when the schedule is paused.
+func upcomingRunsOf(schedule Schedule) []time.Time {
+	runs := []time.Time{}
+	if !schedule.Enabled || schedule.NextRunAt == nil {
+		return runs
+	}
+	runs = append(runs, *schedule.NextRunAt)
+	spec, err := parseSpec(schedule.Schedule)
+	if err != nil {
+		return runs
+	}
+	return append(runs, upcoming(spec, *schedule.NextRunAt, upcomingRuns-1)...)
 }
 
 func (t *toolset) daemonHealth(ctx context.Context, store *Store) daemonHealth {
@@ -525,16 +551,6 @@ func yesNo(value bool) string {
 	return "no"
 }
 
-// modelView hides the internal workspace binding from tool results.
-func modelView(schedule Schedule) Schedule {
-	schedule.Workspace = ""
-	return schedule
-}
-
 func failure(err error) extension.ToolResult {
 	return extension.ToolResult{Error: err.Error()}
-}
-
-func presentation(summary string) map[string]any {
-	return map[string]any{"presentation": extension.Presentation{Summary: summary}}
 }
