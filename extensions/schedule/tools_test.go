@@ -349,7 +349,7 @@ func TestModelFacingTextHidesRunnerBinding(t *testing.T) {
 func TestToolsDeclareCodeModeMetadata(t *testing.T) {
 	th := newToolHarness(t, "runner-a", true)
 
-	require.Len(t, th.init.Tools, 4)
+	require.Len(t, th.init.Tools, 6)
 	for _, tool := range th.init.Tools {
 		assert.NotEmpty(t, tool.Short, tool.Name)
 		assert.LessOrEqual(t, len(tool.Short), 120, tool.Name)
@@ -408,6 +408,9 @@ func TestStructuredContentMatchesOutputSchema(t *testing.T) {
 	assert.Contains(t, mustJSON(t, listed.StructuredContent), "runner offline", "the last run is included")
 	check("schedule_update", th.call(t, "schedule_update", map[string]any{"id": id, "enabled": false}))
 	check("schedule_update", th.call(t, "schedule_update", map[string]any{"id": id, "instruction": "q"}))
+	check("schedule_list_runs", th.call(t, "schedule_list_runs", map[string]any{}))
+	check("schedule_list_runs", th.call(t, "schedule_list_runs", map[string]any{"scheduleId": schedules[1].ID}))
+	check("schedule_get_run", th.call(t, "schedule_get_run", map[string]any{"id": runID}))
 	check("schedule_delete", th.call(t, "schedule_delete", map[string]any{"id": id}))
 }
 

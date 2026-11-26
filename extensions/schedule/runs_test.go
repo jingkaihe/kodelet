@@ -78,34 +78,6 @@ func TestStoreListsAndGetsRunsInAWorkspace(t *testing.T) {
 	assert.ErrorIs(t, err, errRunNotFound)
 }
 
-func TestRunDetailsMigrationKeepsExistingRuns(t *testing.T) {
-	path := t.TempDir() + "/schedule.db"
-	db := openTestDB(t, path)
-	initial := scheduleMigrations()[:1]
-	require.NoError(t, migrate(t.Context(), db, initial))
-	_, err := db.ExecContext(t.Context(), `
-INSERT INTO schedules (id, workspace, name, schedule, instruction, cwd, created_at, updated_at)
-VALUES ('s1', 'runner-a', 'daily', '@daily', 'p', '/w', 0, 0);
-INSERT INTO runs (schedule_id, scheduled_for, started_at, finished_at, status, conversation_id)
-VALUES ('s1', 0, 0, 1, 'succeeded', 'conv-1');`)
-	require.NoError(t, err)
-
-	store, err := openStore(t.Context(), path)
-	require.NoError(t, err)
-	defer store.Close()
-
-	assert.Len(t, appliedVersions(t, db), len(scheduleMigrations()))
-	runs, err := store.ListRuns(t.Context(), "runner-a", "", 10)
-	require.NoError(t, err)
-	require.Len(t, runs, 1)
-	run, err := store.GetRun(t.Context(), "runner-a", runs[0].ID)
-	require.NoError(t, err)
-	assert.Equal(t, "conv-1", run.ConversationID)
-	assert.Empty(t, run.Output)
-	assert.Empty(t, run.Instruction)
-	assert.Nil(t, run.Stats)
-}
-
 func TestDaemonTruncatesLongOutputs(t *testing.T) {
 	store, _ := newTestStore(t)
 	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)

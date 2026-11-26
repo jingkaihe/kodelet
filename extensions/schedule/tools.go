@@ -113,6 +113,7 @@ func registerTools(ext *extension.Extension, stores *storeOpener, now func() tim
 		OutputSchema: outputSchema[deleteOutput](),
 		Execute:      t.delete,
 	})
+	registerRunTools(ext, t)
 }
 
 func (t *toolset) list(ctx context.Context, _ listInput, tc *extension.ToolContext) (extension.ToolResult, error) {
@@ -504,7 +505,7 @@ func writeSchedule(b *strings.Builder, schedule Schedule) {
 	fmt.Fprintf(b, "  cwd: %s\n", schedule.CWD)
 	fmt.Fprintf(b, "  profile: %s\n", profileLabel(schedule.Profile))
 	if run := schedule.LastRun; run != nil {
-		fmt.Fprintf(b, "  last run: %s, scheduled for %s", run.Status, formatTime(run.ScheduledFor))
+		fmt.Fprintf(b, "  last run %d: %s, scheduled for %s", run.ID, run.Status, formatTime(run.ScheduledFor))
 		if run.ConversationID != "" {
 			fmt.Fprintf(b, ", conversation %s", run.ConversationID)
 		}

@@ -25,6 +25,8 @@ Any [extension root](../../skills/kodelet/references/extensions.md#discovery) wo
 | `schedule_create` | Create a schedule |
 | `schedule_update` | Change a schedule by ID; omitted fields keep their values |
 | `schedule_delete` | Delete a schedule and its run history |
+| `schedule_list_runs` | List recent runs, newest first, optionally for one schedule |
+| `schedule_get_run` | Show a run's instruction, timing, stats, and final output |
 
 A schedule has a `name` (unique in its workspace), a `schedule`, an `instruction` for each run, a `cwd`, and an `enabled` flag. The agent cannot choose where or how a schedule runs:
 
@@ -32,7 +34,17 @@ A schedule has a `name` (unique in its workspace), a `schedule`, an `instruction
 - `cwd` defaults to the conversation's directory and must stay inside it.
 - The model profile is the conversation's profile, including profiles provided by extensions. Updates never change it; to use another profile, recreate the schedule from a conversation using that profile. Kodelet resolves the profile again on the schedule's runner and directory at the start of every run.
 
-Results show users a Markdown summary of each schedule, while the agent reads plain text. In [code mode](../../docs/codemode-design.md), each tool declares a one-line summary and an output schema, so scripts can read typed results from `reply.data`: `schedule_list` returns `{schedules, daemon}`, `schedule_create` and `schedule_update` return `{schedule, upcomingRuns, daemon}`, and `schedule_delete` returns `{id, name}`. Check `daemon.state` to see whether schedules will fire.
+Each run records the instruction, directory, and profile it used, when it was due, started, and finished, its outcome, its conversation, the agent's final message (up to 32 KiB), and stats: tool calls by tool, failed tool calls, context compactions, and token usage and estimated cost. Editing a schedule does not change the record of earlier runs. The daemon reads usage with `kodelet conversation show` after each run; if that fails, the run is recorded without it.
+
+Results show users Markdown, such as a table of runs or a run's final output, while the agent reads plain text. In [code mode](../../docs/codemode-design.md), each tool declares a one-line summary and an output schema, so scripts can read typed results from `reply.data`:
+
+| Tool | `reply.data` |
+| --- | --- |
+| `schedule_list` | `{schedules, daemon}`; check `daemon.state` to see whether schedules will fire |
+| `schedule_create`, `schedule_update` | `{schedule, upcomingRuns, daemon}` |
+| `schedule_delete` | `{id, name}` |
+| `schedule_list_runs` | `{runs}`, each with its outcome, `durationSeconds`, and `stats` |
+| `schedule_get_run` | `{run}`, adding `instruction`, `cwd`, `profile`, and `output` |
 
 Creating, updating, and deleting a schedule needs the user's approval in an interactive client. Without one, for example in `kodelet run` or a scheduled run, these tools refuse, so unattended agents cannot plant or alter schedules.
 

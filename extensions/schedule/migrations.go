@@ -54,7 +54,12 @@ CREATE TABLE runs (
 	finished_at INTEGER,
 	status TEXT NOT NULL,
 	conversation_id TEXT NOT NULL DEFAULT '',
-	error TEXT NOT NULL DEFAULT ''
+	error TEXT NOT NULL DEFAULT '',
+	instruction TEXT NOT NULL DEFAULT '',
+	cwd TEXT NOT NULL DEFAULT '',
+	profile TEXT NOT NULL DEFAULT '',
+	output TEXT NOT NULL DEFAULT '',
+	stats TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX runs_schedule ON runs (schedule_id, id);
 CREATE TABLE daemon (
@@ -67,17 +72,6 @@ CREATE TABLE daemon (
 	poll_interval_ms INTEGER NOT NULL,
 	stopped_at INTEGER
 );
-`),
-		},
-		{
-			Version:     20261127090000,
-			Description: "Record what each run did",
-			Up: execMigration(`
-ALTER TABLE runs ADD COLUMN instruction TEXT NOT NULL DEFAULT '';
-ALTER TABLE runs ADD COLUMN cwd TEXT NOT NULL DEFAULT '';
-ALTER TABLE runs ADD COLUMN profile TEXT NOT NULL DEFAULT '';
-ALTER TABLE runs ADD COLUMN output TEXT NOT NULL DEFAULT '';
-ALTER TABLE runs ADD COLUMN stats TEXT NOT NULL DEFAULT '';
 `),
 		},
 	}

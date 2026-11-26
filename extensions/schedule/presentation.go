@@ -193,3 +193,98 @@ func capitalize(text string) string {
 	}
 	return strings.ToUpper(text[:1]) + text[1:]
 }
+
+const maxDetailLength = 80
+
+// runListPresentation shows runs as a table; scope names the schedule when
+// the list is for one.
+func runListPresentation(runs []Run, scope string) map[string]any {
+	summary := runCountLabel(len(runs))
+	if scope != "" {
+		summary += " of " + scope
+	}
+	if len(runs) == 0 {
+		return presentationData(summary, "No runs yet.")
+	}
+	var b strings.Builder
+	b.WriteString("| Run | Schedule | Due | Status | Took | Tools | Cost | Conversation |\n")
+	b.WriteString("| --- | --- | --- | --- | --- | --- | --- | --- |\n")
+	for _, run := range runs {
+		took, tools, cost, conversation := "", "", "", ""
+		if duration, ok := runDuration(run); ok && run.Status != RunSkipped {
+			took = formatDuration(duration)
+		}
+		if run.Stats != nil {
+			tools = fmt.Sprintf("%d", run.Stats.ToolCalls)
+			if run.Stats.Usage != nil {
+				cost = formatCost(run.Stats.Usage.Cost)
+			}
+		}
+		if run.ConversationID != "" {
+			conversation = markdownCode(run.ConversationID)
+		}
+		status := runStatusLabel(run.Status)
+		if run.Error != "" {
+			status += ": " + markdownText(truncate(singleLine(run.Error), maxDetailLength))
+		}
+		fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %s | %s | %s |\n",
+			run.ID, markdownText(run.ScheduleName), displayTime(run.ScheduledFor),
+			status, took, tools, cost, conversation,
+		)
+	}
+	return presentationData(summary, b.String())
+}
+
+// runPresentation shows when a run ran, what it was asked and did, and the
+// agent's final output, rendered as the Markdown it usually is.
+func runPresentation(run Run) map[string]any {
+	var b strings.Builder
+	fmt.Fprintf(&b, "**%s** · run %d · %s\n\n", markdownText(run.ScheduleName), run.ID, runStatusLabel(run.Status))
+	fmt.Fprintf(&b, "- **Due:** %s\n", displayTime(run.ScheduledFor))
+	if duration, ok := runDuration(run); ok {
+		fmt.Fprintf(&b, "- **Ran:** %s to %s (%s)\n", displayTime(run.StartedAt), displayTime(*run.FinishedAt), formatDuration(duration))
+	} else {
+		fmt.Fprintf(&b, "- **Started:** %s\n", displayTime(run.StartedAt))
+	}
+	if run.Error != "" {
+		fmt.Fprintf(&b, "- **Detail:** %s\n", markdownText(singleLine(run.Error)))
+	}
+	if run.ConversationID != "" {
+		fmt.Fprintf(&b, "- **Conversation:** %s\n", markdownCode(run.ConversationID))
+	}
+	if run.CWD != "" {
+		fmt.Fprintf(&b, "- **Directory:** %s\n", markdownCode(run.CWD))
+	}
+	fmt.Fprintf(&b, "- **Profile:** %s\n", markdownText(profileLabel(run.Profile)))
+	if stats := run.Stats; stats != nil {
+		fmt.Fprintf(&b, "- **Tool calls:** %s\n", markdownText(describeToolCalls(*stats)))
+		if usage := stats.Usage; usage != nil {
+			fmt.Fprintf(&b, "- **Tokens:** %s\n", describeTokens(*usage))
+			fmt.Fprintf(&b, "- **Cost:** %s\n", formatCost(usage.Cost))
+		}
+		if stats.Compactions > 0 {
+			fmt.Fprintf(&b, "- **Context compactions:** %d\n", stats.Compactions)
+		}
+	}
+	if run.Instruction != "" {
+		b.WriteString("\n**Instruction**\n\n")
+		b.WriteString(markdownBlock(run.Instruction))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n**Final output**\n\n")
+	if run.Output == "" {
+		b.WriteString("None.\n")
+	} else {
+		b.WriteString(run.Output)
+		b.WriteString("\n")
+	}
+	summary := fmt.Sprintf("Run %d of %s · %s", run.ID, run.ScheduleName, runStatusLabel(run.Status))
+	if duration, ok := runDuration(run); ok && run.Status != RunSkipped {
+		summary += " · " + formatDuration(duration)
+	}
+	return presentationData(summary, b.String())
+}
+
+func singleLine(text string) string {
+	return strings.Join(strings.Fields(text), " ")
+}
