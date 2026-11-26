@@ -293,11 +293,11 @@ description = "Build the schedule extension"
 run = ["CGO_ENABLED=0 go -C extensions/schedule build -trimpath -ldflags=\"-s -w -X main.version=$VERSION\" -o ../../bin/kodelet-extension-schedule ."]
 
 [tasks.schedule-install]
-description = "Build the schedule extension and install it in ~/.kodelet/extensions (SCHEDULE_INSTALL_DIR overrides)"
+description = "Build the schedule extension and install it in ~/.local/bin (SCHEDULE_INSTALL_DIR overrides)"
 depends = ["schedule-build"]
 run = ['''
 set -eu
-dir="${SCHEDULE_INSTALL_DIR:-$HOME/.kodelet/extensions}"
+dir="${SCHEDULE_INSTALL_DIR:-$HOME/.local/bin}"
 mkdir -p "$dir"
 # Copy then rename, so a running daemon keeps its old binary intact.
 tmp="$(mktemp "$dir/.kodelet-extension-schedule.XXXXXX")"
@@ -305,6 +305,10 @@ cp bin/kodelet-extension-schedule "$tmp"
 chmod 0755 "$tmp"
 mv -f "$tmp" "$dir/kodelet-extension-schedule"
 echo "Installed $("$dir/kodelet-extension-schedule" version) to $dir"
+case ":$PATH:" in
+  *":$dir:"*) ;;
+  *) echo "Warning: $dir is not on PATH; Kodelet discovers the extension only from directories on the runner's PATH." ;;
+esac
 echo "Use /reload in running conversations, and restart the schedule daemon if it is running."
 ''']
 

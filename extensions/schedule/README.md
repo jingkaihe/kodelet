@@ -13,7 +13,9 @@ One executable has two modes that share a SQLite store:
 mise run schedule-install
 ```
 
-This builds `bin/kodelet-extension-schedule` and installs it in `~/.kodelet/extensions`; set `SCHEDULE_INSTALL_DIR` to install elsewhere. It replaces the file by renaming, so a running daemon is unaffected until you restart it. Any [extension root](../../skills/kodelet/references/extensions.md#discovery) works, including a directory on the runner's `PATH`. Kodelet discovers the extension in new sessions; use `/reload` in a running conversation.
+This builds `bin/kodelet-extension-schedule` and installs it in `~/.local/bin`, so the same executable serves as the extension and the `kodelet-extension-schedule daemon` command; set `SCHEDULE_INSTALL_DIR` to install elsewhere. It replaces the file by renaming, so a running daemon is unaffected until you restart it.
+
+Kodelet discovers extensions on the runner's `PATH` unless `extensions.discover_path` is `false`, so the directory must be on `PATH` where the Kodelet server starts; restart the local server with `kodelet server restart` if it started before `~/.local/bin` was on its `PATH`. A copy in an [extension root](../../skills/kodelet/references/extensions.md#discovery) such as `~/.kodelet/extensions` takes precedence over `PATH`. Kodelet discovers the extension in new sessions; use `/reload` in a running conversation.
 
 ## Tools
 
@@ -101,7 +103,7 @@ Kodelet does not supervise the daemon. On macOS, use a launchd agent such as `~/
   <string>dev.kodelet.schedule</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/you/.kodelet/extensions/kodelet-extension-schedule</string>
+    <string>/Users/you/.local/bin/kodelet-extension-schedule</string>
     <string>daemon</string>
     <string>--kodelet</string>
     <string>/opt/homebrew/bin/kodelet</string>
@@ -127,7 +129,7 @@ On Linux, use a systemd user unit such as `~/.config/systemd/user/kodelet-schedu
 Description=Kodelet schedule daemon
 
 [Service]
-ExecStart=%h/.kodelet/extensions/kodelet-extension-schedule daemon
+ExecStart=%h/.local/bin/kodelet-extension-schedule daemon
 Restart=on-failure
 
 [Install]
