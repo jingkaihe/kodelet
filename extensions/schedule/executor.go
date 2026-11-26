@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log/slog"
 	"strings"
 
 	"github.com/jingkaihe/kodelet/sdk/go/agent"
@@ -16,7 +15,6 @@ const maxStderrLength = 500
 type agentExecutor struct {
 	server  string
 	command string
-	log     *slog.Logger
 }
 
 // Execute runs the instruction and reports the agent's final output and run
@@ -43,16 +41,6 @@ func (e agentExecutor) Execute(ctx context.Context, schedule Schedule, started f
 	result := collector.result()
 	if result.Output == "" && response != nil {
 		result.Output = strings.TrimSpace(response.Content)
-	}
-	// Usage is best effort and read even after a failure or timeout, so it
-	// gets its own deadline.
-	usage, err := conversationUsage(context.WithoutCancel(ctx), e.command, e.server, session.ID())
-	if err != nil {
-		if e.log != nil {
-			e.log.Warn("failed to read run usage", "conversation", session.ID(), "error", err)
-		}
-	} else {
-		result.Stats.Usage = usage
 	}
 	switch {
 	case runErr != nil:

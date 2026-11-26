@@ -1,19 +1,12 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
-	"os/exec"
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/jingkaihe/kodelet/sdk/go/agent"
-	"github.com/pkg/errors"
 )
-
-const usageTimeout = 30 * time.Second
 
 // RunStats summarizes what a run did. It is stored as JSON, so fields can be
 // added without a migration.
@@ -22,16 +15,6 @@ type RunStats struct {
 	FailedToolCalls int            `json:"failedToolCalls" jsonschema:"Number of tool calls that failed"`
 	Tools           map[string]int `json:"tools,omitempty" jsonschema:"Tool calls by tool name"`
 	Compactions     int            `json:"compactions" jsonschema:"Number of context compactions"`
-	Usage           *RunUsage      `json:"usage,omitempty" jsonschema:"Token usage and cost; omitted when unavailable"`
-}
-
-// RunUsage is the token usage and estimated cost of a run's conversation.
-type RunUsage struct {
-	InputTokens      int64   `json:"inputTokens" jsonschema:"Uncached input tokens"`
-	OutputTokens     int64   `json:"outputTokens" jsonschema:"Output tokens"`
-	CacheReadTokens  int64   `json:"cacheReadTokens" jsonschema:"Input tokens read from the prompt cache"`
-	CacheWriteTokens int64   `json:"cacheWriteTokens" jsonschema:"Input tokens written to the prompt cache"`
-	Cost             float64 `json:"cost" jsonschema:"Estimated cost in US dollars"`
 }
 
 // runResult is what an executor reports about a run, even a failed one.
@@ -101,50 +84,6 @@ func (c *runCollector) result() runResult {
 		output = strings.TrimSpace(c.all.String())
 	}
 	return runResult{Output: output, Stats: stats}
-}
-
-// conversationUsage reads a conversation's usage through the kodelet CLI.
-func conversationUsage(ctx context.Context, command, server, conversationID string) (*RunUsage, error) {
-	ctx, cancel := context.WithTimeout(ctx, usageTimeout)
-	defer cancel()
-	args := []string{"conversation", "show", conversationID, "--format", "json", "--stats-only"}
-	if server != "" {
-		args = append(args, "--server", server)
-	}
-	out, err := exec.CommandContext(ctx, command, args...).Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return nil, errors.Errorf("kodelet conversation show failed: %s", lastLine(string(exitErr.Stderr)))
-		}
-		return nil, errors.Wrap(err, "kodelet conversation show failed")
-	}
-	var payload struct {
-		Usage *struct {
-			InputTokens              int64   `json:"inputTokens"`
-			OutputTokens             int64   `json:"outputTokens"`
-			CacheCreationInputTokens int64   `json:"cacheCreationInputTokens"`
-			CacheReadInputTokens     int64   `json:"cacheReadInputTokens"`
-			InputCost                float64 `json:"inputCost"`
-			OutputCost               float64 `json:"outputCost"`
-			CacheCreationCost        float64 `json:"cacheCreationCost"`
-			CacheReadCost            float64 `json:"cacheReadCost"`
-		} `json:"usage"`
-	}
-	if err := json.Unmarshal(out, &payload); err != nil {
-		return nil, errors.Wrap(err, "failed to parse conversation usage")
-	}
-	if payload.Usage == nil {
-		return nil, errors.New("conversation usage is unavailable")
-	}
-	u := payload.Usage
-	return &RunUsage{
-		InputTokens:      u.InputTokens,
-		OutputTokens:     u.OutputTokens,
-		CacheReadTokens:  u.CacheReadInputTokens,
-		CacheWriteTokens: u.CacheCreationInputTokens,
-		Cost:             u.InputCost + u.OutputCost + u.CacheCreationCost + u.CacheReadCost,
-	}, nil
 }
 
 type toolCount struct {

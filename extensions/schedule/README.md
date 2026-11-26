@@ -34,7 +34,7 @@ A schedule has a `name` (unique in its workspace), a `schedule`, an `instruction
 - `cwd` defaults to the conversation's directory and must stay inside it.
 - The model profile is the conversation's profile, including profiles provided by extensions. Updates never change it; to use another profile, recreate the schedule from a conversation using that profile. Kodelet resolves the profile again on the schedule's runner and directory at the start of every run.
 
-Each run records the instruction, directory, and profile it used, when it was due, started, and finished, its outcome, its conversation, the agent's final message (up to 32 KiB), and stats: tool calls by tool, failed tool calls, context compactions, and token usage and estimated cost. Editing a schedule does not change the record of earlier runs. The daemon reads usage with `kodelet conversation show` after each run; if that fails, the run is recorded without it.
+Each run records the instruction, directory, and profile it used, when it was due, started, and finished, its outcome, its conversation, the agent's final message (up to 32 KiB), and stats: tool calls by tool, failed tool calls, and context compactions. Editing a schedule does not change the record of earlier runs.
 
 Results show users Markdown, such as a table of runs or a run's final output, while the agent reads plain text. In [code mode](../../docs/codemode-design.md), each tool declares a one-line summary and an output schema, so scripts can read typed results from `reply.data`:
 

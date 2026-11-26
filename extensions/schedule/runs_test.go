@@ -20,7 +20,7 @@ func recordRun(t *testing.T, store *Store, schedule Schedule, due time.Time, sta
 	require.NoError(t, err)
 	require.True(t, claimed)
 	require.NoError(t, store.SetRunConversation(t.Context(), runID, "conv-"+schedule.Name))
-	result := runResult{Output: output, Stats: RunStats{ToolCalls: 1, Tools: map[string]int{"bash": 1}, Usage: &RunUsage{InputTokens: 10, OutputTokens: 5, Cost: 0.01}}}
+	result := runResult{Output: output, Stats: RunStats{ToolCalls: 1, Tools: map[string]int{"bash": 1}}}
 	require.NoError(t, store.FinishRun(t.Context(), runID, status, "", result, due.Add(time.Minute)))
 	return runID
 }
@@ -69,8 +69,7 @@ func TestStoreListsAndGetsRunsInAWorkspace(t *testing.T) {
 	assert.Equal(t, RunSucceeded, run.Status)
 	require.NotNil(t, run.FinishedAt)
 	require.NotNil(t, run.Stats)
-	require.NotNil(t, run.Stats.Usage)
-	assert.InDelta(t, 0.01, run.Stats.Usage.Cost, 1e-9)
+	assert.Equal(t, map[string]int{"bash": 1}, run.Stats.Tools)
 
 	_, err = store.GetRun(t.Context(), "runner-a", theirs)
 	assert.ErrorIs(t, err, errRunNotFound)

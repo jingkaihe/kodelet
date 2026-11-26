@@ -207,18 +207,15 @@ func runListPresentation(runs []Run, scope string) map[string]any {
 		return presentationData(summary, "No runs yet.")
 	}
 	var b strings.Builder
-	b.WriteString("| Run | Schedule | Due | Status | Took | Tools | Cost | Conversation |\n")
-	b.WriteString("| --- | --- | --- | --- | --- | --- | --- | --- |\n")
+	b.WriteString("| Run | Schedule | Due | Status | Took | Tools | Conversation |\n")
+	b.WriteString("| --- | --- | --- | --- | --- | --- | --- |\n")
 	for _, run := range runs {
-		took, tools, cost, conversation := "", "", "", ""
+		took, tools, conversation := "", "", ""
 		if duration, ok := runDuration(run); ok && run.Status != RunSkipped {
 			took = formatDuration(duration)
 		}
 		if run.Stats != nil {
 			tools = fmt.Sprintf("%d", run.Stats.ToolCalls)
-			if run.Stats.Usage != nil {
-				cost = formatCost(run.Stats.Usage.Cost)
-			}
 		}
 		if run.ConversationID != "" {
 			conversation = markdownCode(run.ConversationID)
@@ -227,9 +224,9 @@ func runListPresentation(runs []Run, scope string) map[string]any {
 		if run.Error != "" {
 			status += ": " + markdownText(truncate(singleLine(run.Error), maxDetailLength))
 		}
-		fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %s | %s | %s |\n",
+		fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %s | %s |\n",
 			run.ID, markdownText(run.ScheduleName), displayTime(run.ScheduledFor),
-			status, took, tools, cost, conversation,
+			status, took, tools, conversation,
 		)
 	}
 	return presentationData(summary, b.String())
@@ -258,10 +255,6 @@ func runPresentation(run Run) map[string]any {
 	fmt.Fprintf(&b, "- **Profile:** %s\n", markdownText(profileLabel(run.Profile)))
 	if stats := run.Stats; stats != nil {
 		fmt.Fprintf(&b, "- **Tool calls:** %s\n", markdownText(describeToolCalls(*stats)))
-		if usage := stats.Usage; usage != nil {
-			fmt.Fprintf(&b, "- **Tokens:** %s\n", describeTokens(*usage))
-			fmt.Fprintf(&b, "- **Cost:** %s\n", formatCost(usage.Cost))
-		}
 		if stats.Compactions > 0 {
 			fmt.Fprintf(&b, "- **Context compactions:** %d\n", stats.Compactions)
 		}

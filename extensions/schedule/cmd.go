@@ -286,7 +286,7 @@ func runDaemon(ctx context.Context, settings daemonSettings, logger *slog.Logger
 	}
 	defer lock.Close()
 	logger.Info("using schedule database", "path", settings.DBPath, "kodelet", command)
-	d := newDaemon(store, agentExecutor{server: settings.Server, command: command, log: logger}, settings.Config, logger)
+	d := newDaemon(store, agentExecutor{server: settings.Server, command: command}, settings.Config, logger)
 	return d.run(ctx)
 }
 
