@@ -10,12 +10,10 @@ One executable has two modes that share a SQLite store:
 ## Install
 
 ```bash
-mise run schedule-build
-mkdir -p ~/.kodelet/extensions
-cp bin/kodelet-extension-schedule ~/.kodelet/extensions/
+mise run schedule-install
 ```
 
-Any [extension root](../../skills/kodelet/references/extensions.md#discovery) works, including a directory on the runner's `PATH`. Kodelet discovers the extension in new sessions; use `/reload` in a running conversation.
+This builds `bin/kodelet-extension-schedule` and installs it in `~/.kodelet/extensions`; set `SCHEDULE_INSTALL_DIR` to install elsewhere. It replaces the file by renaming, so a running daemon is unaffected until you restart it. Any [extension root](../../skills/kodelet/references/extensions.md#discovery) works, including a directory on the runner's `PATH`. Kodelet discovers the extension in new sessions; use `/reload` in a running conversation.
 
 ## Tools
 

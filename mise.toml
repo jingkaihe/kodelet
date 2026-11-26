@@ -292,6 +292,22 @@ run = ["cd extensions/mcp && golangci-lint run --config ../../.golangci.yml ./..
 description = "Build the schedule extension"
 run = ["CGO_ENABLED=0 go -C extensions/schedule build -trimpath -ldflags=\"-s -w -X main.version=$VERSION\" -o ../../bin/kodelet-extension-schedule ."]
 
+[tasks.schedule-install]
+description = "Build the schedule extension and install it in ~/.kodelet/extensions (SCHEDULE_INSTALL_DIR overrides)"
+depends = ["schedule-build"]
+run = ['''
+set -eu
+dir="${SCHEDULE_INSTALL_DIR:-$HOME/.kodelet/extensions}"
+mkdir -p "$dir"
+# Copy then rename, so a running daemon keeps its old binary intact.
+tmp="$(mktemp "$dir/.kodelet-extension-schedule.XXXXXX")"
+cp bin/kodelet-extension-schedule "$tmp"
+chmod 0755 "$tmp"
+mv -f "$tmp" "$dir/kodelet-extension-schedule"
+echo "Installed $("$dir/kodelet-extension-schedule" version) to $dir"
+echo "Use /reload in running conversations, and restart the schedule daemon if it is running."
+''']
+
 [tasks.schedule-test]
 description = "Vet and test the schedule extension"
 env = { CGO_ENABLED = "1" }
