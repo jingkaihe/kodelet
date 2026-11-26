@@ -17,6 +17,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Test installer release downloads
+        run: bash tests/install.sh
+
       - name: Install C toolchain for Go race tests
         run: |
           sudo apt-get update

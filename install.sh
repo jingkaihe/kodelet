@@ -17,6 +17,7 @@ OS=""
 ARCH=""
 VERSION_TAG=""
 VERSION_NUMBER=""
+USE_GH=0
 PROFILE_FILE=""
 EXPORT_CMD=""
 NEEDS_SHELL_RELOAD=0
@@ -123,12 +124,25 @@ resolve_version_tag() {
         return 0
     fi
 
+    if command -v gh >/dev/null 2>&1 && gh auth status --hostname github.com --active >/dev/null 2>&1; then
+        USE_GH=1
+    fi
+
     if [ "$VERSION" = "latest" ]; then
-        require_command curl
-        VERSION_TAG="$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+        if [ "$USE_GH" -eq 1 ]; then
+            VERSION_TAG="$(gh api --hostname github.com \
+                "repos/$GITHUB_REPO/releases/latest" --jq .tag_name)" || VERSION_TAG=""
+        fi
 
         if [ -z "$VERSION_TAG" ]; then
-            VERSION_TAG="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/${GITHUB_REPO}/releases/latest" | sed 's#.*/tag/##')"
+            require_command curl
+            VERSION_TAG="$(curl -fsSL "https://api.github.com/repos/$GITHUB_REPO/releases/latest" |
+                sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)" || VERSION_TAG=""
+        fi
+
+        if [ -z "$VERSION_TAG" ]; then
+            VERSION_TAG="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$GITHUB_REPO/releases/latest" |
+                sed -n 's#^.*/releases/tag/##p')" || VERSION_TAG=""
         fi
 
         if [ -z "$VERSION_TAG" ]; then
@@ -146,6 +160,24 @@ resolve_version_tag() {
     fi
 
     VERSION_NUMBER="${VERSION_TAG#v}"
+}
+
+# Write only the HTTP status to stdout so callers can distinguish missing
+# optional assets from other errors. gh handles its own credentials.
+download_release_asset() {
+    local asset="$1" dest="$2"
+    echo "Downloading $asset from $GITHUB_REPO release $VERSION_TAG" >&2
+    if [ "$USE_GH" -eq 1 ]; then
+        if gh release download "$VERSION_TAG" --repo "github.com/$GITHUB_REPO" \
+            --pattern "$asset" --output "$dest" >/dev/null; then
+            printf '200\n'
+            return 0
+        fi
+        echo "Retrying $asset with curl" >&2
+    fi
+    require_command curl
+    curl -sSL -w '%{http_code}' -o "$dest" \
+        "https://github.com/$GITHUB_REPO/releases/download/$VERSION_TAG/$asset"
 }
 
 run_as_root() {
@@ -192,19 +224,16 @@ detect_shell_profile() {
 }
 
 install_binary() {
-    local binary download_url status
+    local binary status
     local binaries=()
 
-    require_command curl
     resolve_version_tag
 
     if [ -z "$TEMP_DIR" ]; then
         TEMP_DIR="$(mktemp -d)"
     fi
     for binary in kodelet kodelet-extension-mcp kodelet-clipboard; do
-        download_url="https://github.com/${GITHUB_REPO}/releases/download/${VERSION_TAG}/${binary}-${OS}-${ARCH}"
-        echo "Downloading standalone binary from: $download_url"
-        status="$(curl -sSL -w '%{http_code}' "$download_url" -o "$TEMP_DIR/$binary")" || fail "Failed to download $binary"
+        status="$(download_release_asset "$binary-$OS-$ARCH" "$TEMP_DIR/$binary")" || fail "Failed to download $binary"
         if [ "$status" = 404 ] && [ "$binary" = kodelet-clipboard ]; then
             warn "${VERSION_TAG} has no clipboard helper; leaving any existing helper unchanged"
             continue
@@ -271,21 +300,22 @@ detect_linux_package_format() {
 install_linux_package() {
     local package_format
     local asset_name
-    local download_url
+    local status
     local package_path
 
-    require_command curl
     resolve_version_tag
 
     package_format="$(detect_linux_package_format)" || return 1
     asset_name="kodelet_${VERSION_NUMBER}_linux_${ARCH}.${package_format}"
-    download_url="https://github.com/${GITHUB_REPO}/releases/download/${VERSION_TAG}/${asset_name}"
 
     TEMP_DIR="$(mktemp -d)"
     package_path="${TEMP_DIR}/${asset_name}"
 
-    echo "Downloading package from: $download_url"
-    curl -fL "$download_url" -o "$package_path"
+    status="$(download_release_asset "$asset_name" "$package_path")" || return 1
+    if [ "$status" != 200 ]; then
+        warn "Failed to download $asset_name (HTTP $status)"
+        return 1
+    fi
 
     if [ "$package_format" = "deb" ]; then
         if command -v apt-get >/dev/null 2>&1; then

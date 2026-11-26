@@ -82,7 +82,7 @@ curl -sSL https://raw.githubusercontent.com/jingkaihe/kodelet/main/install.sh | 
 curl -sSL https://raw.githubusercontent.com/jingkaihe/kodelet/main/install.sh | bash -s -- --binary
 ```
 
-By default the install script uses package-based installation: Homebrew on macOS and `.deb`/`.rpm` packages on Linux.
+By default the install script uses package-based installation: Homebrew on macOS and `.deb`/`.rpm` packages on Linux. For downloads from GitHub Releases, it uses `gh` when signed in to github.com and falls back to `curl`.
 
 ### Prerequisites
 
