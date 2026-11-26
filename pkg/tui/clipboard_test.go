@@ -1,17 +1,20 @@
 package tui
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"image"
 	"image/gif"
 	"image/jpeg"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
-	"testing/synctest"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/jingkaihe/kodelet/pkg/chat"
@@ -21,8 +24,27 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/vision"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.design/x/clipboard"
 )
+
+func installTestClipboardHelper(t *testing.T, body string) {
+	t.Helper()
+	dir := t.TempDir()
+	const prelude = `#!/bin/sh
+set -eu
+[ "$#" -eq 1 ] && [ "$1" = read-v1 ] || exit 2
+`
+	path := filepath.Join(dir, "kodelet-clipboard")
+	require.NoError(t, os.WriteFile(path, []byte(prelude+body), 0o700))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func serveClipboardResponse(t *testing.T, kind byte, data []byte) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "response")
+	require.NoError(t, os.WriteFile(path, append([]byte{kind}, data...), 0o600))
+	t.Setenv("KODELET_TEST_CLIPBOARD_RESPONSE", path)
+	installTestClipboardHelper(t, `exec /bin/cat "$KODELET_TEST_CLIPBOARD_RESPONSE"`)
+}
 
 func localClipboardRunner(t *testing.T) *aboutRunner {
 	t.Helper()
@@ -40,12 +62,8 @@ func TestPasteImageIntoDraft(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	runner := localClipboardRunner(t)
 	m := newThemeTestModel(t, Config{Runner: runner, Remote: true})
-	m.clipboard.readFiles = func(context.Context) ([]string, error) { return nil, clipboard.ErrNoData }
 	png := imageTestPNG(t)
-	m.clipboard.read = func(_ context.Context, format clipboard.Format) ([]byte, error) {
-		assert.Equal(t, clipboard.FmtImage, format)
-		return png, nil
-	}
+	serveClipboardResponse(t, 'I', png)
 	m.textarea.SetValue("Inspect ")
 	updated, paste := m.Update(keyPressWithMod('v', tea.ModCtrl))
 	require.NotNil(t, paste)
@@ -92,15 +110,14 @@ func TestClipboardImagePreservesEncoding(t *testing.T) {
 	}
 }
 
-func TestPasteFinderFilesPrefersAndPreservesOriginals(t *testing.T) {
+func TestPasteFinderFilesPreservesOriginals(t *testing.T) {
 	runner := localClipboardRunner(t)
 	m := newThemeTestModel(t, Config{Runner: runner, Remote: true})
 	original := filepath.Join(t.TempDir(), "my document.pdf")
 	require.NoError(t, os.WriteFile(original, []byte("original"), 0o600))
-	files := []string{original, "/some/other file"}
-	m.clipboard = &tuiClipboard{readFiles: func(context.Context) ([]string, error) {
-		return files, nil
-	}}
+	files, err := json.Marshal([]string{original, "/some/other file"})
+	require.NoError(t, err)
+	serveClipboardResponse(t, 'F', files)
 	result := m.pasteClipboard()().(clipboardPasteMsg)
 	require.NoError(t, result.err)
 	m.finishClipboardPaste(result)
@@ -117,13 +134,7 @@ func TestPasteFinderFilesPrefersAndPreservesOriginals(t *testing.T) {
 func TestPasteTextWithoutLocalRunner(t *testing.T) {
 	m := newThemeTestModel(t, Config{Runner: &recordingRunner{}, Remote: true})
 	m.textarea.SetValue("prefix:")
-	m.clipboard.readFiles = nil
-	m.clipboard.read = func(_ context.Context, format clipboard.Format) ([]byte, error) {
-		if format == clipboard.FmtImage {
-			return nil, clipboard.ErrNoData
-		}
-		return []byte("one\ntwo"), nil
-	}
+	serveClipboardResponse(t, 'T', []byte("one\ntwo"))
 	key := keyPressWithMod('v', tea.ModCtrl)
 	if runtime.GOOS == "darwin" {
 		key = keyPressWithMod('b', tea.ModSuper)
@@ -153,41 +164,67 @@ func TestPastePathAtCursor(t *testing.T) {
 	}
 }
 
-func TestStalledClipboardReadReleasesComposer(t *testing.T) {
+func TestStalledClipboardHelperReleasesComposer(t *testing.T) {
 	m := newThemeTestModel(t, Config{Runner: &recordingRunner{}, Remote: true})
-	m.clipboard.readFiles = nil
+	installTestClipboardHelper(t, `
+if [ "$KODELET_TEST_CLIPBOARD_STALL" = yes ]; then exec /bin/sleep 5; fi
+printf 'T recovered'
+`)
+	t.Setenv("KODELET_TEST_CLIPBOARD_STALL", "yes")
+	m.clipboard = func(ctx context.Context) (clipboardContents, error) {
+		ctx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
+		defer cancel()
+		return readClipboardHelper(ctx)
+	}
 	m.textarea.SetValue("unfinished draft")
-	synctest.Test(t, func(t *testing.T) {
-		release := make(chan struct{})
-		defer close(release)
-		calls := 0
-		m.clipboard.read = func(context.Context, clipboard.Format) ([]byte, error) {
-			calls++
-			<-release // Simulate a backend that ignores its context.
-			return nil, clipboard.ErrNoData
-		}
-		pasteKey := keyPressWithMod('v', tea.ModCtrl)
-		updated, paste := m.Update(pasteKey)
-		assert.Contains(t, updated.(model).inputBottomLeftLabel(), "Reading clipboard")
-		_, send := updated.Update(keyPress(tea.KeyEnter))
-		require.Nil(t, send)
+	pasteKey := keyPressWithMod('v', tea.ModCtrl)
+	updated, paste := m.Update(pasteKey)
+	assert.Contains(t, updated.(model).inputBottomLeftLabel(), "Reading clipboard")
+	_, send := updated.Update(keyPress(tea.KeyEnter))
+	require.Nil(t, send)
 
-		result := paste().(clipboardPasteMsg) // Virtual time advances to the timeout.
-		require.ErrorIs(t, result.err, context.DeadlineExceeded)
-		updated, _ = updated.Update(result)
-		notices := updated.(model).uiNotifications
-		require.Len(t, notices, 1)
-		assert.Contains(t, notices[0].message, "Clipboard paste timed out")
-		updated, retry := updated.Update(pasteKey)
-		result = retry().(clipboardPasteMsg)
-		require.ErrorContains(t, result.err, "previous clipboard read")
-		synctest.Wait()
-		assert.Equal(t, 1, calls)
-		updated, _ = updated.Update(result)
-		assert.Equal(t, "unfinished draft", updated.(model).textarea.Value())
-		_, send = updated.Update(keyPress(tea.KeyEnter))
-		require.NotNil(t, send)
-	})
+	start := time.Now()
+	result := paste().(clipboardPasteMsg)
+	require.ErrorIs(t, result.err, context.DeadlineExceeded)
+	assert.Less(t, time.Since(start), 3*time.Second, "do not wait for the helper to exit on its own")
+	updated, _ = updated.Update(result)
+	after := updated.(model)
+	require.Len(t, after.uiNotifications, 1)
+	assert.Contains(t, after.uiNotifications[0].message, "Clipboard paste timed out")
+	assert.Equal(t, "unfinished draft", after.textarea.Value())
+
+	t.Setenv("KODELET_TEST_CLIPBOARD_STALL", "no")
+	after.clipboard = readClipboardHelper
+	updated, retry := after.Update(pasteKey)
+	require.NotNil(t, retry)
+	updated, _ = updated.Update(retry())
+	assert.Equal(t, "unfinished draft recovered", updated.(model).textarea.Value())
+	_, send = updated.Update(keyPress(tea.KeyEnter))
+	require.NotNil(t, send)
+}
+
+func TestMissingClipboardHelperDoesNotBlockTerminalPaste(t *testing.T) {
+	m := newThemeTestModel(t, Config{})
+	t.Setenv("PATH", t.TempDir())
+	updated, paste := m.Update(keyPressWithMod('v', tea.ModCtrl))
+	require.NotNil(t, paste)
+	result := paste().(clipboardPasteMsg)
+	require.ErrorContains(t, result.err, "kodelet-clipboard")
+	updated, _ = updated.Update(result)
+	updated, _ = updated.Update(tea.PasteMsg{Content: "from the terminal"})
+	assert.Equal(t, "from the terminal", updated.(model).textarea.Value())
+}
+
+func TestRejectsMalformedClipboardResponse(t *testing.T) {
+	for _, tt := range []struct{ response, reason string }{
+		{"?unexpected protocol", "unrecognized"},
+		{`F["relative.pdf"]`, "invalid clipboard file path"},
+		{"E" + strings.Repeat("x", (4<<10)+1), "size limit"},
+	} {
+		contents, err := readClipboardResponse(bufio.NewReader(strings.NewReader(tt.response)))
+		require.ErrorContains(t, err, tt.reason)
+		assert.Empty(t, contents)
+	}
 }
 
 func TestPasteDiscardsStagedImageWhenComposerLosesFocus(t *testing.T) {
@@ -222,10 +259,9 @@ func TestRejectedClipboardImageLeavesDraftAlone(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newThemeTestModel(t, Config{Runner: runner, Remote: true})
-			m.clipboard.readFiles = nil
 			m.textarea.SetValue("keep this draft")
-			m.clipboard.read = func(context.Context, clipboard.Format) ([]byte, error) {
-				return tt.data, nil
+			m.clipboard = func(context.Context) (clipboardContents, error) {
+				return clipboardContents{kind: 'I', data: tt.data}, nil
 			}
 			paste := m.pasteClipboard()
 			result := paste().(clipboardPasteMsg)

@@ -1,6 +1,6 @@
 //go:build !linux
 
-package tui
+package main
 
 import (
 	"context"

@@ -1,4 +1,4 @@
-package tui
+package main
 
 import (
 	"context"
@@ -8,15 +8,13 @@ import (
 
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
-	"github.com/jingkaihe/kodelet/pkg/vision"
 	"github.com/pkg/errors"
 	"golang.design/x/clipboard"
 	"golang.org/x/text/encoding/charmap"
 )
 
 func init() {
-	// XGB has its own stderr logger. Even a successful paste can log a
-	// missing Xauthority file over the TUI; surface read errors via Update.
+	// XGB logs even a missing Xauthority file on successful reads.
 	xgb.Logger.SetOutput(io.Discard)
 }
 
@@ -118,10 +116,10 @@ func readX11Selection(c *xgb.Conn, format clipboard.Format) ([]byte, error) {
 		data = data[4:]
 	}
 	candidates := []string{"UTF8_STRING", "text/plain;charset=utf-8", "text/plain", "STRING"}
-	limit := 16 << 20 // Bound text as well as images across INCR chunks.
+	limit := maxTextBytes
 	if format == clipboard.FmtImage {
 		candidates = clipboardImageMIMEs
-		limit = vision.MaxImageInputBytes
+		limit = maxImageBytes
 	}
 	for _, name := range candidates {
 		target, err := x11Atom(c, name)
@@ -133,7 +131,7 @@ func readX11Selection(c *xgb.Conn, format clipboard.Format) ([]byte, error) {
 		}
 		data, err = s.read(target, 8, limit)
 		if format == clipboard.FmtImage && errors.Is(err, errX11SelectionTooLarge) {
-			return nil, vision.ErrImageInputTooLarge
+			return nil, errImageTooLarge
 		}
 		if err != nil {
 			return nil, err

@@ -330,7 +330,7 @@ type model struct {
 
 	viewport    viewport.Model
 	textarea    textarea.Model
-	clipboard   *tuiClipboard
+	clipboard   func(context.Context) (clipboardContents, error)
 	spinner     spinner.Model
 	welcome     welcomeAnimation
 	welcomeSpin welcomeSpinAnimation
