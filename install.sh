@@ -201,10 +201,14 @@ install_binary() {
     if [ -z "$TEMP_DIR" ]; then
         TEMP_DIR="$(mktemp -d)"
     fi
-    for binary in kodelet kodelet-extension-mcp; do
+    for binary in kodelet kodelet-extension-mcp kodelet-clipboard; do
         download_url="https://github.com/${GITHUB_REPO}/releases/download/${VERSION_TAG}/${binary}-${OS}-${ARCH}"
         echo "Downloading standalone binary from: $download_url"
         status="$(curl -sSL -w '%{http_code}' "$download_url" -o "$TEMP_DIR/$binary")" || fail "Failed to download $binary"
+        if [ "$status" = 404 ] && [ "$binary" = kodelet-clipboard ]; then
+            warn "${VERSION_TAG} has no clipboard helper; leaving any existing helper unchanged"
+            continue
+        fi
         if [ "$status" = 404 ] && [ "$binary" = kodelet-extension-mcp ] && [ "$VERSION" != latest ]; then
             warn "${VERSION_TAG} has no native MCP extension; leaving any existing MCP installation unchanged"
             continue

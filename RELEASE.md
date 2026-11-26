@@ -1,5 +1,9 @@
 # Kodelet
 
+## Unreleased
+
+TUI clipboard paste now uses a separate `kodelet-clipboard` executable. The standalone installer and Linux RPM and deb packages include it; other installations can use the [matching helper release](clipboard/README.md#install).
+
 ## 0.8.35-beta
 
 Added [clipboard image paste](docs/MANUAL.md#terminal-chat-tui) to `kodelet chat` with a local runner: `Ctrl+V` (or `Cmd+B` on macOS) inserts the image's temporary path, or Finder files' original paths.

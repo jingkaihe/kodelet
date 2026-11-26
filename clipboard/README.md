@@ -4,7 +4,9 @@
 
 ## Install
 
-Download `kodelet-clipboard-<os>-<arch>` from the matching [Kodelet release](https://github.com/jingkaihe/kodelet/releases) (`linux` or `darwin`; `amd64` or `arm64`). Verify its SHA-256 against the release’s `checksums.txt`, then install it as `kodelet-clipboard` on your `PATH`. For example, on an Apple Silicon Mac:
+The standalone installer (`install.sh --binary`) and Kodelet’s Linux RPM and deb packages install the helper alongside `kodelet`.
+
+For other installation methods, download `kodelet-clipboard-<os>-<arch>` from the matching [Kodelet release](https://github.com/jingkaihe/kodelet/releases) (`linux` or `darwin`; `amd64` or `arm64`). Verify its SHA-256 against the release’s `checksums.txt`, then install it as `kodelet-clipboard` on your `PATH`. For example, on an Apple Silicon Mac:
 
 ```sh
 mkdir -p "$HOME/.local/bin"
