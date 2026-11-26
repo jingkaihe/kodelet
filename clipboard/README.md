@@ -25,4 +25,4 @@ To build and install from a checkout instead, run `mise run clipboard-install`. 
 | `N` | Empty: no supported data or no desktop clipboard |
 | `E` | UTF-8 error message (up to 4 KiB) |
 
-A complete response, including `E`, exits with status zero. The TUI, not the helper, checks the runner and writes temporary image files.
+A complete response, including `E`, exits with status zero. The TUI stops waiting after five seconds; the helper independently exits after ten seconds if a read stalls. The TUI, not the helper, checks the runner and writes temporary image files.

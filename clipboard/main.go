@@ -7,11 +7,14 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"time"
 
 	"github.com/pkg/errors"
 )
 
 var version = "dev"
+
+const readTimeout = 10 * time.Second
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
@@ -27,15 +30,32 @@ func run(args []string, out io.Writer) error {
 			_, err := fmt.Fprintln(out, "kodelet-clipboard", version)
 			return err
 		case "read-v1":
-			var files fileReader
-			if runtime.GOOS == "darwin" {
-				files = readFinderFiles
-			}
-			result := readSelection(context.Background(), files, readDesktopClipboard)
-			return result.writeTo(out)
+			return readOnce(out)
 		}
 	}
 	return errors.New("usage: kodelet-clipboard read-v1 | --version")
+}
+
+func readOnce(out io.Writer) error {
+	ctx, cancel := context.WithTimeout(context.Background(), readTimeout)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		var files fileReader
+		if runtime.GOOS == "darwin" {
+			files = readFinderFiles
+		}
+		result := readSelection(ctx, files, readDesktopClipboard)
+		done <- result.writeTo(out)
+	}()
+	// Native reads can ignore cancellation. Return to main and exit the process
+	// without joining the worker, even if the TUI is no longer around to kill us.
+	select {
+	case <-ctx.Done():
+		return errors.Wrap(ctx.Err(), "reading clipboard")
+	case err := <-done:
+		return err
+	}
 }
 
 type response struct {

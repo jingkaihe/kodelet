@@ -12,6 +12,7 @@ import (
 	"golang.design/x/clipboard"
 )
 
+// These read-v1 limits match the protocol table in README.md and the TUI reader.
 const (
 	maxImageBytes = 32 << 20
 	maxTextBytes  = 16 << 20
