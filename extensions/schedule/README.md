@@ -122,6 +122,8 @@ Service managers start with a minimal environment. If the daemon starts the loca
 
 Schedules, the latest 20 runs of each schedule, and the daemon heartbeat live in `$KODELET_SCHEDULE_DB`, or `schedule/schedule.db` under `$KODELET_BASE_PATH` (default `~/.kodelet`). The extension and daemon must resolve the same path.
 
+The extension and daemon apply pending schema migrations when they open the database, recording them in its `schema_migrations` table. An older executable refuses a database migrated by a newer one, so upgrade the extension and daemon together. To change the schema, append a migration to `scheduleMigrations` in `migrations.go`; never edit a released one.
+
 The extension runs on the runner's host, so schedules are stored on that host and the daemon must run there too. For a remote runner, run the daemon on the runner's host with CLI access to the server.
 
 List the schedules of every workspace on this host:

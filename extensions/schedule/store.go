@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
-	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -99,8 +98,22 @@ func defaultDBPath() (string, error) {
 	return filepath.Abs(filepath.Join(base, "schedule", "schedule.db"))
 }
 
-// openStore opens or creates the database at path and applies migrations.
+// openStore opens or creates the database at path and applies pending
+// migrations.
 func openStore(ctx context.Context, path string) (*Store, error) {
+	db, err := openDB(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	if err := migrate(ctx, db, scheduleMigrations()); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &Store{db: db}, nil
+}
+
+// openDB opens the SQLite database at path without migrating it.
+func openDB(ctx context.Context, path string) (*sql.DB, error) {
 	path, err := filepath.Abs(path)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to resolve schedule database path")
@@ -113,6 +126,8 @@ func openStore(ctx context.Context, path string) (*Store, error) {
 		Path:   path,
 		RawQuery: url.Values{
 			"_pragma": {"busy_timeout=5000", "foreign_keys=ON", "journal_mode=WAL", "synchronous=NORMAL"},
+			// Transactions take the write lock up front, so processes that
+			// migrate or claim runs at once wait instead of failing.
 			"_txlock": {"immediate"},
 		}.Encode(),
 	}
@@ -124,84 +139,16 @@ func openStore(ctx context.Context, path string) (*Store, error) {
 	// in SQLite's busy handler.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	if err := migrate(ctx, db); err != nil {
+	if err := db.PingContext(ctx); err != nil {
 		db.Close()
-		return nil, err
+		return nil, errors.Wrap(err, "failed to open schedule database")
 	}
-	return &Store{db: db}, nil
+	return db, nil
 }
 
 // Close closes the database.
 func (s *Store) Close() error {
 	return s.db.Close()
-}
-
-var migrations = []string{
-	`
-CREATE TABLE schedules (
-	id TEXT PRIMARY KEY,
-	workspace TEXT NOT NULL,
-	name TEXT NOT NULL,
-	schedule TEXT NOT NULL,
-	instruction TEXT NOT NULL,
-	cwd TEXT NOT NULL,
-	profile TEXT NOT NULL DEFAULT '',
-	enabled INTEGER NOT NULL DEFAULT 1,
-	next_run_at INTEGER,
-	created_at INTEGER NOT NULL,
-	updated_at INTEGER NOT NULL,
-	UNIQUE (workspace, name)
-);
-CREATE INDEX schedules_due ON schedules (enabled, next_run_at);
-CREATE TABLE runs (
-	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	schedule_id TEXT NOT NULL REFERENCES schedules (id) ON DELETE CASCADE,
-	scheduled_for INTEGER NOT NULL,
-	started_at INTEGER NOT NULL,
-	finished_at INTEGER,
-	status TEXT NOT NULL,
-	conversation_id TEXT NOT NULL DEFAULT '',
-	error TEXT NOT NULL DEFAULT ''
-);
-CREATE INDEX runs_schedule ON runs (schedule_id, id);
-CREATE TABLE daemon (
-	id INTEGER PRIMARY KEY CHECK (id = 1),
-	pid INTEGER NOT NULL,
-	hostname TEXT NOT NULL,
-	version TEXT NOT NULL,
-	started_at INTEGER NOT NULL,
-	heartbeat_at INTEGER NOT NULL,
-	poll_interval_ms INTEGER NOT NULL,
-	stopped_at INTEGER
-);
-`,
-}
-
-func migrate(ctx context.Context, db *sql.DB) error {
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return errors.Wrap(err, "failed to open schedule database")
-	}
-	defer tx.Rollback()
-	var version int
-	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
-		return errors.Wrap(err, "failed to read schedule database version")
-	}
-	if version > len(migrations) {
-		return errors.Errorf("schedule database version %d is newer than this extension supports (%d); upgrade kodelet-extension-schedule", version, len(migrations))
-	}
-	if version == len(migrations) {
-		return nil
-	}
-	for i := version; i < len(migrations); i++ {
-		if _, err := tx.ExecContext(ctx, migrations[i]); err != nil {
-			return errors.Wrapf(err, "failed to apply schedule database migration %d", i+1)
-		}
-	}
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", len(migrations))); err != nil {
-		return errors.Wrap(err, "failed to record schedule database version")
-	}
-	return errors.Wrap(tx.Commit(), "failed to migrate schedule database")
 }
 
 const selectSchedules = `
