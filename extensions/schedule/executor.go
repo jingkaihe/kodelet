@@ -11,13 +11,14 @@ import (
 const maxStderrLength = 500
 
 // agentExecutor runs a scheduled instruction as a new conversation through
-// kodelet acp, on the schedule's runner and directory.
+// kodelet acp, on the schedule's runner and directory, and returns the
+// assistant text of the run.
 type agentExecutor struct {
 	server  string
 	command string
 }
 
-func (e agentExecutor) Execute(ctx context.Context, schedule Schedule, started func(conversationID string)) error {
+func (e agentExecutor) Execute(ctx context.Context, schedule Schedule, started func(conversationID string)) (string, error) {
 	client := agent.NewClient(agent.ClientOptions{
 		Server:  e.server,
 		Runner:  schedule.Workspace,
@@ -29,17 +30,17 @@ func (e agentExecutor) Execute(ctx context.Context, schedule Schedule, started f
 		Profile: schedule.Profile,
 	})
 	if err != nil {
-		return describeAgentError(err, "failed to start the conversation")
+		return "", describeAgentError(err, "failed to start the conversation")
 	}
 	started(session.ID())
 	response, err := session.RunAndWait(ctx, agent.RunOptions{Message: schedule.Instruction})
 	if err != nil {
-		return describeAgentError(err, "the run failed")
+		return "", describeAgentError(err, "the run failed")
 	}
 	if response.StopReason == "cancelled" {
-		return errors.New("the run was cancelled")
+		return response.Content, errors.New("the run was cancelled")
 	}
-	return nil
+	return response.Content, nil
 }
 
 // describeAgentError adds the last stderr line of an exited kodelet acp

@@ -69,6 +69,11 @@ CREATE TABLE daemon (
 );
 `),
 		},
+		{
+			Version:     20261127090000,
+			Description: "Record the response of each run",
+			Up:          execMigration(`ALTER TABLE runs ADD COLUMN response TEXT NOT NULL DEFAULT ''`),
+		},
 	}
 }
 

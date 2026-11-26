@@ -21,8 +21,9 @@ import (
 const runHistoryLimit = 20
 
 var (
-	errNotFound  = errors.New("schedule not found")
-	errNameTaken = errors.New("a schedule with this name already exists")
+	errNotFound    = errors.New("schedule not found")
+	errRunNotFound = errors.New("run not found")
+	errNameTaken   = errors.New("a schedule with this name already exists")
 )
 
 // RunStatus is the outcome of one scheduled run.
@@ -53,15 +54,20 @@ type Schedule struct {
 	LastRun     *Run       `json:"lastRun,omitempty"`
 }
 
-// Run records one claimed occurrence of a schedule.
+// Run records one claimed occurrence of a schedule. ScheduleID,
+// ScheduleName, and Response are only loaded by ListRuns and GetRun, and
+// Response only by GetRun.
 type Run struct {
 	ID             int64      `json:"id"`
+	ScheduleID     string     `json:"scheduleId,omitempty"`
+	ScheduleName   string     `json:"scheduleName,omitempty"`
 	ScheduledFor   time.Time  `json:"scheduledFor"`
 	StartedAt      time.Time  `json:"startedAt"`
 	FinishedAt     *time.Time `json:"finishedAt,omitempty"`
 	Status         RunStatus  `json:"status"`
 	ConversationID string     `json:"conversationId,omitempty"`
 	Error          string     `json:"error,omitempty"`
+	Response       string     `json:"response,omitempty"`
 }
 
 // DaemonStatus is the daemon's latest heartbeat.
@@ -349,13 +355,85 @@ func (s *Store) SetRunConversation(ctx context.Context, runID int64, conversatio
 	return errors.Wrap(err, "failed to record run conversation")
 }
 
-// FinishRun records a run's outcome.
-func (s *Store) FinishRun(ctx context.Context, runID int64, status RunStatus, message string, finishedAt time.Time) error {
+// FinishRun records a run's outcome and the agent's response, if any.
+func (s *Store) FinishRun(ctx context.Context, runID int64, status RunStatus, message, response string, finishedAt time.Time) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE runs SET status = ?, error = ?, finished_at = ? WHERE id = ?`,
-		string(status), message, finishedAt.UnixMilli(), runID,
+		`UPDATE runs SET status = ?, error = ?, response = ?, finished_at = ? WHERE id = ?`,
+		string(status), message, response, finishedAt.UnixMilli(), runID,
 	)
 	return errors.Wrap(err, "failed to record run outcome")
+}
+
+const selectRuns = `
+SELECT
+	r.id, r.schedule_id, s.name, r.scheduled_for, r.started_at, r.finished_at,
+	r.status, r.conversation_id, r.error
+FROM runs r
+JOIN schedules s ON s.id = r.schedule_id
+`
+
+func scanRun(row rowScanner, extra ...any) (Run, error) {
+	var (
+		run                     Run
+		scheduledFor, startedAt int64
+		finishedAt              sql.NullInt64
+		status                  string
+	)
+	dest := []any{
+		&run.ID, &run.ScheduleID, &run.ScheduleName, &scheduledFor, &startedAt, &finishedAt,
+		&status, &run.ConversationID, &run.Error,
+	}
+	if err := row.Scan(append(dest, extra...)...); err != nil {
+		return Run{}, err
+	}
+	run.ScheduledFor = time.UnixMilli(scheduledFor)
+	run.StartedAt = time.UnixMilli(startedAt)
+	run.FinishedAt = timePtr(finishedAt)
+	run.Status = RunStatus(status)
+	return run, nil
+}
+
+// ListRuns returns up to limit runs of workspace, newest first, optionally
+// only those of one schedule. Responses are not loaded.
+func (s *Store) ListRuns(ctx context.Context, workspace, scheduleID string, limit int) ([]Run, error) {
+	rows, err := s.db.QueryContext(ctx, selectRuns+`
+WHERE s.workspace = ? AND (? = '' OR r.schedule_id = ?)
+ORDER BY r.id DESC
+LIMIT ?`, workspace, scheduleID, scheduleID, limit)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to query runs")
+	}
+	defer rows.Close()
+	runs := []Run{}
+	for rows.Next() {
+		run, err := scanRun(rows)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to read run")
+		}
+		runs = append(runs, run)
+	}
+	return runs, errors.Wrap(rows.Err(), "failed to query runs")
+}
+
+// GetRun returns one run of workspace with its response.
+func (s *Store) GetRun(ctx context.Context, workspace string, runID int64) (Run, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT
+	r.id, r.schedule_id, s.name, r.scheduled_for, r.started_at, r.finished_at,
+	r.status, r.conversation_id, r.error, r.response
+FROM runs r
+JOIN schedules s ON s.id = r.schedule_id
+WHERE s.workspace = ? AND r.id = ?`, workspace, runID)
+	var response string
+	run, err := scanRun(row, &response)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Run{}, errRunNotFound
+	}
+	if err != nil {
+		return Run{}, errors.Wrap(err, "failed to read run")
+	}
+	run.Response = response
+	return run, nil
 }
 
 // AbandonRunningRuns marks runs left running by a previous daemon as failed.

@@ -20,18 +20,24 @@ type fakeExecutor struct {
 	mu    sync.Mutex
 	calls []Schedule
 	run   func(ctx context.Context, schedule Schedule) error
+	// response is returned by every run; it defaults to "done <name>".
+	response string
 }
 
-func (f *fakeExecutor) Execute(ctx context.Context, schedule Schedule, started func(string)) error {
+func (f *fakeExecutor) Execute(ctx context.Context, schedule Schedule, started func(string)) (string, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, schedule)
 	run := f.run
+	response := f.response
 	f.mu.Unlock()
+	if response == "" {
+		response = "done " + schedule.Name
+	}
 	started("conv-" + schedule.ID)
 	if run != nil {
-		return run(ctx, schedule)
+		return response, run(ctx, schedule)
 	}
-	return nil
+	return response, nil
 }
 
 func (f *fakeExecutor) callCount() int {
@@ -115,6 +121,9 @@ func TestDaemonRunsDueSchedules(t *testing.T) {
 	assert.Equal(t, "conv-"+schedule.ID, saved.LastRun.ConversationID)
 	assert.True(t, due.Equal(saved.LastRun.ScheduledFor))
 	assert.True(t, due.Add(24*time.Hour).Equal(*saved.NextRunAt))
+	run, err := store.GetRun(t.Context(), "runner-a", saved.LastRun.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "done daily", run.Response)
 
 	tickAndWait(t, d)
 	assert.Equal(t, 1, exec.callCount(), "each occurrence runs once")
