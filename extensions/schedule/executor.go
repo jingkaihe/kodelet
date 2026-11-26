@@ -10,7 +10,7 @@ import (
 
 const maxStderrLength = 500
 
-// agentExecutor runs a scheduled task as a new conversation through
+// agentExecutor runs a scheduled instruction as a new conversation through
 // kodelet acp, on the schedule's runner and directory.
 type agentExecutor struct {
 	server  string
@@ -32,7 +32,7 @@ func (e agentExecutor) Execute(ctx context.Context, schedule Schedule, started f
 		return describeAgentError(err, "failed to start the conversation")
 	}
 	started(session.ID())
-	response, err := session.RunAndWait(ctx, agent.RunOptions{Message: schedule.Task})
+	response, err := session.RunAndWait(ctx, agent.RunOptions{Message: schedule.Instruction})
 	if err != nil {
 		return describeAgentError(err, "the run failed")
 	}

@@ -108,7 +108,7 @@ func TestDaemonRunsDueSchedules(t *testing.T) {
 	ran := exec.calls[0]
 	assert.Equal(t, "runner-a", ran.Workspace)
 	assert.Equal(t, "/work/runner-a", ran.CWD)
-	assert.Equal(t, schedule.Task, ran.Task)
+	assert.Equal(t, schedule.Instruction, ran.Instruction)
 	saved, err := store.Get(t.Context(), "runner-a", schedule.ID)
 	require.NoError(t, err)
 	assert.Equal(t, RunSucceeded, saved.LastRun.Status)
@@ -146,7 +146,7 @@ func TestDaemonSkipsMissedRuns(t *testing.T) {
 func TestDaemonSkipsOverlappingRuns(t *testing.T) {
 	store, _ := newTestStore(t)
 	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
-	schedule := Schedule{Workspace: "runner-a", Name: "minutely", Schedule: "CRON_TZ=UTC * * * * *", Task: "p", CWD: "/w", Enabled: true, NextRunAt: &due}
+	schedule := Schedule{Workspace: "runner-a", Name: "minutely", Schedule: "CRON_TZ=UTC * * * * *", Instruction: "p", CWD: "/w", Enabled: true, NextRunAt: &due}
 	require.NoError(t, store.Create(t.Context(), &schedule, due))
 	release := make(chan struct{})
 	exec := &fakeExecutor{run: func(context.Context, Schedule) error {
@@ -238,7 +238,7 @@ func TestDaemonRecordsFailures(t *testing.T) {
 func TestDaemonDisablesInvalidSchedules(t *testing.T) {
 	store, _ := newTestStore(t)
 	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
-	schedule := Schedule{Workspace: "runner-a", Name: "broken", Schedule: "not cron", Task: "p", CWD: "/w", Enabled: true, NextRunAt: &due}
+	schedule := Schedule{Workspace: "runner-a", Name: "broken", Schedule: "not cron", Instruction: "p", CWD: "/w", Enabled: true, NextRunAt: &due}
 	require.NoError(t, store.Create(t.Context(), &schedule, due))
 	exec := &fakeExecutor{}
 	d, clock := newTestDaemon(store, exec, nil)

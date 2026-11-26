@@ -21,13 +21,13 @@ func newTestStore(t *testing.T) (*Store, string) {
 func createTestSchedule(t *testing.T, store *Store, workspace, name string, next time.Time) Schedule {
 	t.Helper()
 	schedule := Schedule{
-		Workspace: workspace,
-		Name:      name,
-		Schedule:  "CRON_TZ=UTC 0 9 * * *",
-		Task:      "Summarise yesterday's commits",
-		CWD:       "/work/" + workspace,
-		Enabled:   true,
-		NextRunAt: &next,
+		Workspace:   workspace,
+		Name:        name,
+		Schedule:    "CRON_TZ=UTC 0 9 * * *",
+		Instruction: "Summarise yesterday's commits",
+		CWD:         "/work/" + workspace,
+		Enabled:     true,
+		NextRunAt:   &next,
 	}
 	require.NoError(t, store.Create(t.Context(), &schedule, next.Add(-time.Hour)))
 	return schedule
@@ -43,7 +43,7 @@ func TestStoreScopesSchedulesByWorkspace(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, schedules, 1)
 	assert.Equal(t, a.ID, schedules[0].ID)
-	assert.Equal(t, "Summarise yesterday's commits", schedules[0].Task)
+	assert.Equal(t, "Summarise yesterday's commits", schedules[0].Instruction)
 	assert.True(t, next.Equal(*schedules[0].NextRunAt))
 
 	all, err := store.List(t.Context(), "")
@@ -67,7 +67,7 @@ func TestStoreRejectsDuplicateNamesInAWorkspace(t *testing.T) {
 	next := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
 	createTestSchedule(t, store, "runner-a", "daily", next)
 
-	duplicate := Schedule{Workspace: "runner-a", Name: "daily", Schedule: "@daily", Task: "p", CWD: "/w", Enabled: true}
+	duplicate := Schedule{Workspace: "runner-a", Name: "daily", Schedule: "@daily", Instruction: "p", CWD: "/w", Enabled: true}
 	assert.ErrorIs(t, store.Create(t.Context(), &duplicate, next), errNameTaken)
 }
 
@@ -82,11 +82,11 @@ func TestStoreUpdateKeepsClaimedNextRunUnlessReset(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, claimed)
 
-	schedule.Task = "New task"
+	schedule.Instruction = "New instruction"
 	require.NoError(t, store.Update(t.Context(), &schedule, false, due))
 	saved, err := store.Get(t.Context(), "runner-a", schedule.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "New task", saved.Task)
+	assert.Equal(t, "New instruction", saved.Instruction)
 	assert.True(t, claimedNext.Equal(*saved.NextRunAt), "the stale next run must not undo the claim")
 
 	schedule.Enabled = false

@@ -55,7 +55,7 @@ func (c daemonConfig) validate() error {
 	return nil
 }
 
-// executor runs one scheduled task to completion. It calls started with the
+// executor runs one scheduled instruction to completion. It calls started with the
 // conversation ID once the conversation exists.
 type executor interface {
 	Execute(ctx context.Context, schedule Schedule, started func(conversationID string)) error

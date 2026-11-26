@@ -38,20 +38,20 @@ const (
 	RunSkipped   RunStatus = "skipped"
 )
 
-// Schedule is a recurring agent task bound to one workspace runner.
+// Schedule is a recurring agent instruction bound to one workspace runner.
 type Schedule struct {
-	ID        string     `json:"id"`
-	Workspace string     `json:"workspace,omitempty"`
-	Name      string     `json:"name"`
-	Schedule  string     `json:"schedule"`
-	Task      string     `json:"task"`
-	CWD       string     `json:"cwd"`
-	Profile   string     `json:"profile,omitempty"`
-	Enabled   bool       `json:"enabled"`
-	NextRunAt *time.Time `json:"nextRunAt,omitempty"`
-	CreatedAt time.Time  `json:"createdAt"`
-	UpdatedAt time.Time  `json:"updatedAt"`
-	LastRun   *Run       `json:"lastRun,omitempty"`
+	ID          string     `json:"id"`
+	Workspace   string     `json:"workspace,omitempty"`
+	Name        string     `json:"name"`
+	Schedule    string     `json:"schedule"`
+	Instruction string     `json:"instruction"`
+	CWD         string     `json:"cwd"`
+	Profile     string     `json:"profile,omitempty"`
+	Enabled     bool       `json:"enabled"`
+	NextRunAt   *time.Time `json:"nextRunAt,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+	LastRun     *Run       `json:"lastRun,omitempty"`
 }
 
 // Run records one claimed occurrence of a schedule.
@@ -143,7 +143,7 @@ CREATE TABLE schedules (
 	workspace TEXT NOT NULL,
 	name TEXT NOT NULL,
 	schedule TEXT NOT NULL,
-	task TEXT NOT NULL,
+	instruction TEXT NOT NULL,
 	cwd TEXT NOT NULL,
 	profile TEXT NOT NULL DEFAULT '',
 	enabled INTEGER NOT NULL DEFAULT 1,
@@ -206,7 +206,7 @@ func migrate(ctx context.Context, db *sql.DB) error {
 
 const selectSchedules = `
 SELECT
-	s.id, s.workspace, s.name, s.schedule, s.task, s.cwd, s.profile, s.enabled,
+	s.id, s.workspace, s.name, s.schedule, s.instruction, s.cwd, s.profile, s.enabled,
 	s.next_run_at, s.created_at, s.updated_at,
 	r.id, r.scheduled_for, r.started_at, r.finished_at, r.status, r.conversation_id, r.error
 FROM schedules s
@@ -227,7 +227,7 @@ func scanSchedule(row rowScanner) (Schedule, error) {
 		runStatus, conversationID, runError            sql.NullString
 	)
 	err := row.Scan(
-		&schedule.ID, &schedule.Workspace, &schedule.Name, &schedule.Schedule, &schedule.Task,
+		&schedule.ID, &schedule.Workspace, &schedule.Name, &schedule.Schedule, &schedule.Instruction,
 		&schedule.CWD, &schedule.Profile, &enabled,
 		&nextRunAt, &createdAt, &updatedAt,
 		&runID, &scheduledFor, &runStartedAt, &runFinished, &runStatus, &conversationID, &runError,
@@ -298,9 +298,9 @@ func (s *Store) Create(ctx context.Context, schedule *Schedule, now time.Time) e
 	schedule.CreatedAt = now
 	schedule.UpdatedAt = now
 	_, err = s.db.ExecContext(ctx, `
-INSERT INTO schedules (id, workspace, name, schedule, task, cwd, profile, enabled, next_run_at, created_at, updated_at)
+INSERT INTO schedules (id, workspace, name, schedule, instruction, cwd, profile, enabled, next_run_at, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		schedule.ID, schedule.Workspace, schedule.Name, schedule.Schedule, schedule.Task,
+		schedule.ID, schedule.Workspace, schedule.Name, schedule.Schedule, schedule.Instruction,
 		schedule.CWD, schedule.Profile, schedule.Enabled, millisPtr(schedule.NextRunAt),
 		now.UnixMilli(), now.UnixMilli(),
 	)
@@ -313,11 +313,11 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 func (s *Store) Update(ctx context.Context, schedule *Schedule, resetNext bool, now time.Time) error {
 	result, err := s.db.ExecContext(ctx, `
 UPDATE schedules SET
-	name = ?, schedule = ?, task = ?, cwd = ?, profile = ?, enabled = ?,
+	name = ?, schedule = ?, instruction = ?, cwd = ?, profile = ?, enabled = ?,
 	next_run_at = CASE WHEN ? THEN ? ELSE next_run_at END,
 	updated_at = ?
 WHERE id = ? AND workspace = ?`,
-		schedule.Name, schedule.Schedule, schedule.Task, schedule.CWD, schedule.Profile, schedule.Enabled,
+		schedule.Name, schedule.Schedule, schedule.Instruction, schedule.CWD, schedule.Profile, schedule.Enabled,
 		resetNext, millisPtr(schedule.NextRunAt),
 		now.UnixMilli(),
 		schedule.ID, schedule.Workspace,

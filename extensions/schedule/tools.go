@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	maxNameLength = 100
-	maxTaskLength = 64 * 1024
-	upcomingRuns  = 3
+	maxNameLength        = 100
+	maxInstructionLength = 64 * 1024
+	upcomingRuns         = 3
 )
 
 var errNotApproved = errors.New("the user did not approve this change, or no interactive session was available to ask; do not retry unless the user asks")
@@ -24,20 +24,20 @@ var errNotApproved = errors.New("the user did not approve this change, or no int
 type listInput struct{}
 
 type createInput struct {
-	Name     string `json:"name" jsonschema:"Short unique name"`
-	Schedule string `json:"schedule" jsonschema:"Five-field cron expression (minute hour day-of-month month day-of-week) or a descriptor such as @daily or @every 6h. Prefix with CRON_TZ=<IANA zone> to pick a timezone; otherwise the host's local time applies."`
-	Task     string `json:"task" jsonschema:"Instructions each run gives to a new agent conversation"`
-	CWD      string `json:"cwd,omitempty" jsonschema:"Directory to run in, inside the current directory; defaults to the current directory"`
-	Enabled  *bool  `json:"enabled,omitempty" jsonschema:"Whether the schedule is active; defaults to true"`
+	Name        string `json:"name" jsonschema:"Short unique name"`
+	Schedule    string `json:"schedule" jsonschema:"Five-field cron expression (minute hour day-of-month month day-of-week) or a descriptor such as @daily or @every 6h. Prefix with CRON_TZ=<IANA zone> to pick a timezone; otherwise the host's local time applies."`
+	Instruction string `json:"instruction" jsonschema:"What each run should do, given to a new agent conversation as its first message"`
+	CWD         string `json:"cwd,omitempty" jsonschema:"Directory to run in, inside the current directory; defaults to the current directory"`
+	Enabled     *bool  `json:"enabled,omitempty" jsonschema:"Whether the schedule is active; defaults to true"`
 }
 
 type updateInput struct {
-	ID       string  `json:"id" jsonschema:"Schedule ID from schedule_list"`
-	Name     *string `json:"name,omitempty" jsonschema:"New unique name"`
-	Schedule *string `json:"schedule,omitempty" jsonschema:"New cron expression or descriptor, optionally prefixed with CRON_TZ=<IANA zone>"`
-	Task     *string `json:"task,omitempty" jsonschema:"New instructions"`
-	CWD      *string `json:"cwd,omitempty" jsonschema:"New directory, inside the current directory"`
-	Enabled  *bool   `json:"enabled,omitempty" jsonschema:"Enable or pause the schedule"`
+	ID          string  `json:"id" jsonschema:"Schedule ID from schedule_list"`
+	Name        *string `json:"name,omitempty" jsonschema:"New unique name"`
+	Schedule    *string `json:"schedule,omitempty" jsonschema:"New cron expression or descriptor, optionally prefixed with CRON_TZ=<IANA zone>"`
+	Instruction *string `json:"instruction,omitempty" jsonschema:"New instruction"`
+	CWD         *string `json:"cwd,omitempty" jsonschema:"New directory, inside the current directory"`
+	Enabled     *bool   `json:"enabled,omitempty" jsonschema:"Enable or pause the schedule"`
 }
 
 type deleteInput struct {
@@ -87,12 +87,12 @@ func registerTools(ext *extension.Extension, stores *storeOpener, now func() tim
 	t := &toolset{stores: stores, now: now}
 	extension.RegisterTool(ext, extension.Tool[listInput]{
 		Name:        "schedule_list",
-		Description: "List scheduled tasks with their next and most recent runs. Each run is a new agent conversation started by the kodelet-extension-schedule daemon.",
+		Description: "List scheduled instructions with their next and most recent runs. Each run is a new agent conversation started by the kodelet-extension-schedule daemon.",
 		Execute:     t.list,
 	})
 	extension.RegisterTool(ext, extension.Tool[createInput]{
 		Name:        "schedule_create",
-		Description: "Schedule a task to run as a new agent conversation on a recurring cron schedule. Runs use this conversation's model profile. The user must approve the schedule before it is saved.",
+		Description: "Schedule an instruction to run as a new agent conversation on a recurring cron schedule. Runs use this conversation's model profile. The user must approve the schedule before it is saved.",
 		Execute:     t.create,
 	})
 	extension.RegisterTool(ext, extension.Tool[updateInput]{
@@ -169,7 +169,7 @@ func (t *toolset) create(ctx context.Context, in createInput, tc *extension.Tool
 	if schedule.Name, err = normalizeName(in.Name); err != nil {
 		return failure(err), nil
 	}
-	if schedule.Task, err = normalizeTask(in.Task); err != nil {
+	if schedule.Instruction, err = normalizeInstruction(in.Instruction); err != nil {
 		return failure(err), nil
 	}
 	if schedule.CWD, err = resolveCWD(tc, in.CWD); err != nil {
@@ -248,14 +248,14 @@ func (t *toolset) update(ctx context.Context, in updateInput, tc *extension.Tool
 			changes = append(changes, describeChange("Schedule", current.Schedule, spec))
 		}
 	}
-	if in.Task != nil {
-		task, err := normalizeTask(*in.Task)
+	if in.Instruction != nil {
+		instruction, err := normalizeInstruction(*in.Instruction)
 		if err != nil {
 			return failure(err), nil
 		}
-		if task != current.Task {
-			updated.Task = task
-			changes = append(changes, "Task:\n"+task)
+		if instruction != current.Instruction {
+			updated.Instruction = instruction
+			changes = append(changes, "Instruction:\n"+instruction)
 		}
 	}
 	if in.CWD != nil {
@@ -399,15 +399,15 @@ func normalizeName(name string) (string, error) {
 	return name, nil
 }
 
-func normalizeTask(task string) (string, error) {
-	task = strings.TrimSpace(task)
+func normalizeInstruction(instruction string) (string, error) {
+	instruction = strings.TrimSpace(instruction)
 	switch {
-	case task == "":
-		return "", errors.New("task is required")
-	case len(task) > maxTaskLength:
-		return "", errors.Errorf("task must be at most %d bytes", maxTaskLength)
+	case instruction == "":
+		return "", errors.New("instruction is required")
+	case len(instruction) > maxInstructionLength:
+		return "", errors.Errorf("instruction must be at most %d bytes", maxInstructionLength)
 	}
-	return task, nil
+	return instruction, nil
 }
 
 func checkNameAvailable(ctx context.Context, store *Store, workspace, name, exceptID string) error {
@@ -451,7 +451,7 @@ func describeSchedule(schedule Schedule, runs []time.Time) string {
 	fmt.Fprintf(&b, "Directory: %s\n", schedule.CWD)
 	fmt.Fprintf(&b, "Profile: %s\n", profileLabel(schedule.Profile))
 	fmt.Fprintf(&b, "Enabled: %s\n", yesNo(schedule.Enabled))
-	fmt.Fprintf(&b, "Task:\n%s", schedule.Task)
+	fmt.Fprintf(&b, "Instruction:\n%s", schedule.Instruction)
 	return b.String()
 }
 
@@ -460,7 +460,7 @@ func describeChange(field, from, to string) string {
 }
 
 // writeSchedule writes a model-facing description of schedule, including the
-// full task so the model can edit it.
+// full instruction so the model can edit it.
 func writeSchedule(b *strings.Builder, schedule Schedule) {
 	state := "enabled"
 	if !schedule.Enabled {
@@ -487,8 +487,8 @@ func writeSchedule(b *strings.Builder, schedule Schedule) {
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString("  task:\n")
-	for line := range strings.SplitSeq(schedule.Task, "\n") {
+	b.WriteString("  instruction:\n")
+	for line := range strings.SplitSeq(schedule.Instruction, "\n") {
 		fmt.Fprintf(b, "    %s\n", line)
 	}
 }

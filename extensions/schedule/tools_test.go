@@ -94,9 +94,9 @@ func TestCreateBindsScheduleToCurrentConversation(t *testing.T) {
 	th := newToolHarness(t, "runner-a", true)
 
 	result := th.call(t, "schedule_create", map[string]any{
-		"name":     "nightly review",
-		"schedule": "CRON_TZ=UTC 0 9 * * *",
-		"task":     "Review open pull requests",
+		"name":        "nightly review",
+		"schedule":    "CRON_TZ=UTC 0 9 * * *",
+		"instruction": "Review open pull requests",
 	})
 
 	require.Empty(t, result.Error)
@@ -121,7 +121,7 @@ func TestCreateBindsScheduleToCurrentConversation(t *testing.T) {
 
 func TestToolsRejectModelChosenWorkspaceAndProfile(t *testing.T) {
 	th := newToolHarness(t, "runner-a", true)
-	result := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "@daily", "task": "p"})
+	result := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "@daily", "instruction": "p"})
 	require.Empty(t, result.Error)
 	schedules, err := th.store.List(t.Context(), "runner-a")
 	require.NoError(t, err)
@@ -130,7 +130,7 @@ func TestToolsRejectModelChosenWorkspaceAndProfile(t *testing.T) {
 	for _, field := range []string{"workspace", "profile"} {
 		t.Run(field, func(t *testing.T) {
 			_, err := th.harness.ExecuteTool(t.Context(), "schedule_create", map[string]any{
-				"name": "other", "schedule": "@daily", "task": "p", field: "chosen",
+				"name": "other", "schedule": "@daily", "instruction": "p", field: "chosen",
 			}, th.callInfo())
 			assert.Error(t, err)
 			_, err = th.harness.ExecuteTool(t.Context(), "schedule_update", map[string]any{
@@ -151,7 +151,7 @@ func TestCreateWithoutConversationProfileUsesServerDefault(t *testing.T) {
 	th := newToolHarness(t, "runner-a", true)
 	th.profile = ""
 
-	result := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "@daily", "task": "p"})
+	result := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "@daily", "instruction": "p"})
 
 	require.Empty(t, result.Error)
 	assert.Contains(t, th.lastConfirm(t).Message, "Profile: server default")
@@ -170,13 +170,13 @@ func TestCreateValidatesInput(t *testing.T) {
 		input map[string]any
 		err   string
 	}{
-		{name: "bad schedule", input: map[string]any{"name": "a", "schedule": "nope", "task": "p"}, err: "invalid schedule"},
-		{name: "blank name", input: map[string]any{"name": " ", "schedule": "@daily", "task": "p"}, err: "name is required"},
-		{name: "blank task", input: map[string]any{"name": "a", "schedule": "@daily", "task": " "}, err: "task is required"},
-		{name: "cwd outside", input: map[string]any{"name": "a", "schedule": "@daily", "task": "p", "cwd": "/"}, err: "must be inside the current directory"},
-		{name: "cwd escapes", input: map[string]any{"name": "a", "schedule": "@daily", "task": "p", "cwd": "../"}, err: "must be inside the current directory"},
-		{name: "cwd missing", input: map[string]any{"name": "a", "schedule": "@daily", "task": "p", "cwd": "missing"}, err: "does not exist"},
-		{name: "cwd file", input: map[string]any{"name": "a", "schedule": "@daily", "task": "p", "cwd": "file"}, err: "not a directory"},
+		{name: "bad schedule", input: map[string]any{"name": "a", "schedule": "nope", "instruction": "p"}, err: "invalid schedule"},
+		{name: "blank name", input: map[string]any{"name": " ", "schedule": "@daily", "instruction": "p"}, err: "name is required"},
+		{name: "blank instruction", input: map[string]any{"name": "a", "schedule": "@daily", "instruction": " "}, err: "instruction is required"},
+		{name: "cwd outside", input: map[string]any{"name": "a", "schedule": "@daily", "instruction": "p", "cwd": "/"}, err: "must be inside the current directory"},
+		{name: "cwd escapes", input: map[string]any{"name": "a", "schedule": "@daily", "instruction": "p", "cwd": "../"}, err: "must be inside the current directory"},
+		{name: "cwd missing", input: map[string]any{"name": "a", "schedule": "@daily", "instruction": "p", "cwd": "missing"}, err: "does not exist"},
+		{name: "cwd file", input: map[string]any{"name": "a", "schedule": "@daily", "instruction": "p", "cwd": "file"}, err: "not a directory"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -185,9 +185,9 @@ func TestCreateValidatesInput(t *testing.T) {
 		})
 	}
 
-	result := th.call(t, "schedule_create", map[string]any{"name": "a", "schedule": "@daily", "task": "p", "cwd": "sub"})
+	result := th.call(t, "schedule_create", map[string]any{"name": "a", "schedule": "@daily", "instruction": "p", "cwd": "sub"})
 	require.Empty(t, result.Error)
-	result = th.call(t, "schedule_create", map[string]any{"name": "a", "schedule": "@daily", "task": "p"})
+	result = th.call(t, "schedule_create", map[string]any{"name": "a", "schedule": "@daily", "instruction": "p"})
 	assert.Contains(t, result.Error, "already exists")
 
 	schedules, err := th.store.List(t.Context(), "runner-a")
@@ -199,7 +199,7 @@ func TestCreateValidatesInput(t *testing.T) {
 func TestMutationsRequireApproval(t *testing.T) {
 	t.Run("without interactive UI", func(t *testing.T) {
 		th := newToolHarness(t, "runner-a", false)
-		result := th.call(t, "schedule_create", map[string]any{"name": "a", "schedule": "@daily", "task": "p"})
+		result := th.call(t, "schedule_create", map[string]any{"name": "a", "schedule": "@daily", "instruction": "p"})
 		assert.Equal(t, errNotApproved.Error(), result.Error)
 		schedules, err := th.store.List(t.Context(), "")
 		require.NoError(t, err)
@@ -208,7 +208,7 @@ func TestMutationsRequireApproval(t *testing.T) {
 
 	t.Run("declined", func(t *testing.T) {
 		th := newToolHarness(t, "runner-a", true)
-		result := th.call(t, "schedule_create", map[string]any{"name": "a", "schedule": "@daily", "task": "p"})
+		result := th.call(t, "schedule_create", map[string]any{"name": "a", "schedule": "@daily", "instruction": "p"})
 		require.Empty(t, result.Error)
 		schedules, err := th.store.List(t.Context(), "runner-a")
 		require.NoError(t, err)
@@ -217,14 +217,14 @@ func TestMutationsRequireApproval(t *testing.T) {
 		th.mu.Lock()
 		th.approve = false
 		th.mu.Unlock()
-		result = th.call(t, "schedule_update", map[string]any{"id": id, "task": "changed"})
+		result = th.call(t, "schedule_update", map[string]any{"id": id, "instruction": "changed"})
 		assert.Equal(t, errNotApproved.Error(), result.Error)
 		result = th.call(t, "schedule_delete", map[string]any{"id": id})
 		assert.Equal(t, errNotApproved.Error(), result.Error)
 
 		saved, err := th.store.Get(t.Context(), "runner-a", id)
 		require.NoError(t, err)
-		assert.Equal(t, "p", saved.Task)
+		assert.Equal(t, "p", saved.Instruction)
 	})
 }
 
@@ -232,7 +232,7 @@ func TestToolsRequireARunner(t *testing.T) {
 	th := newToolHarness(t, "", true)
 	for name, input := range map[string]map[string]any{
 		"schedule_list":   {},
-		"schedule_create": {"name": "a", "schedule": "@daily", "task": "p"},
+		"schedule_create": {"name": "a", "schedule": "@daily", "instruction": "p"},
 		"schedule_delete": {"id": "abc"},
 	} {
 		result := th.call(t, name, input)
@@ -262,7 +262,7 @@ func TestToolsCannotReachOtherWorkspaces(t *testing.T) {
 
 func TestUpdateAndDelete(t *testing.T) {
 	th := newToolHarness(t, "runner-a", true)
-	result := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "CRON_TZ=UTC 0 9 * * *", "task": "p"})
+	result := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "CRON_TZ=UTC 0 9 * * *", "instruction": "p"})
 	require.Empty(t, result.Error)
 	schedules, err := th.store.List(t.Context(), "runner-a")
 	require.NoError(t, err)
@@ -287,7 +287,7 @@ func TestUpdateAndDelete(t *testing.T) {
 	assert.False(t, saved.Enabled)
 	assert.Nil(t, saved.NextRunAt)
 
-	result = th.call(t, "schedule_update", map[string]any{"id": id, "enabled": false, "task": "p"})
+	result = th.call(t, "schedule_update", map[string]any{"id": id, "enabled": false, "instruction": "p"})
 	assert.Contains(t, result.Error, "no changes")
 
 	result = th.call(t, "schedule_update", map[string]any{"id": id, "enabled": true})
@@ -326,12 +326,12 @@ func TestModelFacingTextHidesRunnerBinding(t *testing.T) {
 	assert.NotContains(t, strings.ToLower(string(declarations)), "workspace")
 
 	results := []extension.ToolResult{
-		th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "@daily", "task": "p"}),
+		th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "@daily", "instruction": "p"}),
 		th.call(t, "schedule_list", map[string]any{}),
 	}
 	schedules, err := th.store.List(t.Context(), "runner-a")
 	require.NoError(t, err)
-	results = append(results, th.call(t, "schedule_update", map[string]any{"id": schedules[0].ID, "task": "q"}))
+	results = append(results, th.call(t, "schedule_update", map[string]any{"id": schedules[0].ID, "instruction": "q"}))
 	for _, result := range results {
 		require.Empty(t, result.Error)
 		encoded, err := json.Marshal(result.StructuredContent)

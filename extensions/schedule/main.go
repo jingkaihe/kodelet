@@ -1,4 +1,4 @@
-// kodelet-extension-schedule runs agent tasks on recurring schedules. Without
+// kodelet-extension-schedule runs agent instructions on recurring schedules. Without
 // arguments it serves Kodelet's extension protocol with tools to manage the
 // schedules of the current workspace; the daemon subcommand runs them.
 package main
@@ -77,7 +77,7 @@ func runDaemonCommand(args []string) int {
 	config := defaultDaemonConfig()
 	dbPath := flags.String("db", "", "schedule database (default $KODELET_SCHEDULE_DB or ~/.kodelet/schedule/schedule.db)")
 	server := flags.String("server", "", "Kodelet server URL (default: the kodelet CLI's configured or local server)")
-	command := flags.String("kodelet", "kodelet", "kodelet executable that runs tasks")
+	command := flags.String("kodelet", "kodelet", "kodelet executable that runs scheduled instructions")
 	flags.DurationVar(&config.PollInterval, "poll-interval", config.PollInterval, "how often to check for due schedules")
 	flags.IntVar(&config.Concurrency, "concurrency", config.Concurrency, "maximum number of runs at once")
 	flags.DurationVar(&config.RunTimeout, "run-timeout", config.RunTimeout, "cancel runs that take longer than this (0 disables)")

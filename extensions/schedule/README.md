@@ -1,6 +1,6 @@
 # Schedule extension
 
-`kodelet-extension-schedule` runs agent tasks on recurring schedules. Each run starts a new agent conversation, so you can open, resume, or fork it like any other conversation.
+`kodelet-extension-schedule` runs agent instructions on recurring schedules. Each run starts a new agent conversation, so you can open, resume, or fork it like any other conversation.
 
 One executable has two modes that share a SQLite store:
 
@@ -26,7 +26,7 @@ Any [extension root](../../skills/kodelet/references/extensions.md#discovery) wo
 | `schedule_update` | Change a schedule by ID; omitted fields keep their values |
 | `schedule_delete` | Delete a schedule and its run history |
 
-A schedule has a `name` (unique in its workspace), a `schedule`, a `task` with the instructions for each run, a `cwd`, and an `enabled` flag. The agent cannot choose where or how a schedule runs:
+A schedule has a `name` (unique in its workspace), a `schedule`, an `instruction` for each run, a `cwd`, and an `enabled` flag. The agent cannot choose where or how a schedule runs:
 
 - The workspace is the runner hosting the conversation that creates the schedule. Tools only see and change schedules of that runner.
 - `cwd` defaults to the conversation's directory and must stay inside it.
