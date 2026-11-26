@@ -91,14 +91,15 @@ func runStatusLabel(status RunStatus) string {
 	}
 }
 
-// writeScheduleMarkdown writes a schedule's heading, details, and instruction.
+// writeScheduleMarkdown writes a schedule's title line, details, and
+// instruction. It avoids headings, which terminal renderers show as raw
+// markers.
 func writeScheduleMarkdown(b *strings.Builder, schedule Schedule, runs []time.Time) {
 	state := "enabled"
 	if !schedule.Enabled {
 		state = "paused"
 	}
-	fmt.Fprintf(b, "### %s\n\n", markdownText(schedule.Name))
-	fmt.Fprintf(b, "%s · %s\n\n", markdownCode(schedule.Schedule), state)
+	fmt.Fprintf(b, "**%s** · %s · %s\n\n", markdownText(schedule.Name), markdownCode(schedule.Schedule), state)
 	if schedule.Enabled {
 		switch {
 		case len(runs) > 0:
