@@ -49,8 +49,12 @@ builds:
     dir: clipboard
     main: .
     binary: kodelet-clipboard
-    goos: [linux, darwin]
-    goarch: [amd64, arm64]
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
     env:
       - CGO_ENABLED=0
     flags:

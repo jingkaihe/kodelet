@@ -417,6 +417,7 @@ run = [
   "go mod download",
   "go -C sdk/go mod download",
   "go -C extensions/mcp mod download",
+  "go -C clipboard mod download",
   "echo 'Installing frontend npm dependencies...'",
   "cd pkg/webui/frontend && npm install",
   "echo 'Installing TypeScript SDK npm dependencies and building the SDK...'",
