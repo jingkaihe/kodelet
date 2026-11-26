@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,8 +18,12 @@ const (
 
 type historyInput struct {
 	ScheduleID string `json:"scheduleId,omitempty" jsonschema:"Only list runs of this schedule ID; defaults to runs of every schedule"`
+	Status     string `json:"status,omitempty" jsonschema:"Only list runs with this status: running, succeeded, failed, canceled, or skipped"`
 	Limit      *int   `json:"limit,omitempty" jsonschema:"Maximum number of runs, from 1 to 50; defaults to 10"`
 }
+
+// allRunStatuses lists every run status, in lifecycle order.
+var allRunStatuses = []RunStatus{RunRunning, RunSucceeded, RunFailed, RunCanceled, RunSkipped}
 
 type runDetailsInput struct {
 	ID int64 `json:"id" jsonschema:"Run ID from schedule_history or a schedule's lastRun"`
@@ -27,7 +32,7 @@ type runDetailsInput struct {
 func registerRunTools(ext *extension.Extension, t *toolset) {
 	extension.RegisterTool(ext, extension.Tool[historyInput]{
 		Name:         "schedule_history",
-		Description:  "List recent runs of scheduled instructions, newest first, optionally for one schedule, with their outcome, duration, and stats. The latest 20 runs of each schedule are kept. Use schedule_run_details for a run's instruction and final output.",
+		Description:  "List recent runs of scheduled instructions, newest first, optionally only those of one schedule or with one status, with their outcome, duration, and stats. The latest 20 runs of each schedule are kept. Use schedule_run_details for a run's instruction and final output.",
 		Short:        "List recent scheduled runs with outcome, duration, and stats, newest first.",
 		OutputSchema: outputSchema[runListOutput](),
 		Execute:      t.history,
@@ -53,6 +58,10 @@ func (t *toolset) history(ctx context.Context, in historyInput, tc *extension.To
 	if limit < 1 || limit > maxRunLimit {
 		return failure(errors.Errorf("limit must be from 1 to %d", maxRunLimit)), nil
 	}
+	status := RunStatus(strings.TrimSpace(in.Status))
+	if status != "" && !slices.Contains(allRunStatuses, status) {
+		return failure(errors.Errorf("status must be one of running, succeeded, failed, canceled, or skipped")), nil
+	}
 	store, err := t.stores.Get(ctx)
 	if err != nil {
 		return failure(err), nil
@@ -66,16 +75,19 @@ func (t *toolset) history(ctx context.Context, in historyInput, tc *extension.To
 		}
 		scope = schedule.Name
 	}
-	runs, err := store.ListRuns(ctx, workspace, scheduleID, limit)
+	runs, err := store.ListRuns(ctx, workspace, RunFilter{ScheduleID: scheduleID, Status: status, Limit: limit})
 	if err != nil {
 		return failure(err), nil
 	}
 
 	var b strings.Builder
-	if len(runs) == 0 {
+	switch {
+	case len(runs) > 0:
+		fmt.Fprintf(&b, "%s, newest first.\n\n", runCountLabel(len(runs), status))
+	case status != "":
+		fmt.Fprintf(&b, "No %s runs.\n", status)
+	default:
 		b.WriteString("No runs yet.\n")
-	} else {
-		fmt.Fprintf(&b, "%s, newest first.\n\n", runCountLabel(len(runs)))
 	}
 	for _, run := range runs {
 		writeRunSummary(&b, run)
@@ -83,7 +95,7 @@ func (t *toolset) history(ctx context.Context, in historyInput, tc *extension.To
 	return extension.ToolResult{
 		Content:           b.String(),
 		StructuredContent: runListOutput{Runs: newRunSummaryViews(runs)},
-		Data:              runListPresentation(runs, scope),
+		Data:              runListPresentation(runs, status, scope),
 	}, nil
 }
 
@@ -160,11 +172,13 @@ func writeIndented(b *strings.Builder, label, text string) {
 	}
 }
 
-func runCountLabel(count int) string {
-	if count == 1 {
-		return "1 run"
+// runCountLabel counts runs, such as "1 run" or "3 failed runs".
+func runCountLabel(count int, status RunStatus) string {
+	noun := plural(count, "run", "runs")
+	if status != "" {
+		noun = string(status) + " " + noun
 	}
-	return fmt.Sprintf("%d runs", count)
+	return fmt.Sprintf("%d %s", count, noun)
 }
 
 // describeToolCalls summarizes tool use, such as "3 (bash 2, file_read 1), 1 failed".

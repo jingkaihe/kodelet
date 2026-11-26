@@ -25,7 +25,7 @@ Any [extension root](../../skills/kodelet/references/extensions.md#discovery) wo
 | `schedule_create` | Create a schedule |
 | `schedule_update` | Change a schedule by ID; omitted fields keep their values |
 | `schedule_delete` | Delete a schedule and its run history |
-| `schedule_history` | List recent runs, newest first, optionally for one schedule |
+| `schedule_history` | List recent runs, newest first; filter by `scheduleId` or `status`, and set `limit` (1 to 50, default 10) |
 | `schedule_run_details` | Show a run's instruction, timing, stats, and final output |
 
 A schedule has a `name` (unique in its workspace), a `schedule`, an `instruction` for each run, a `cwd`, and an `enabled` flag. The agent cannot choose where or how a schedule runs:

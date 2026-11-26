@@ -61,15 +61,29 @@ func scanRun(row rowScanner, detail bool) (Run, error) {
 	return run, nil
 }
 
-// ListRuns returns up to limit runs of workspace, newest first, optionally
-// only those of one schedule. It does not load instructions or outputs.
-func (s *Store) ListRuns(ctx context.Context, workspace, scheduleID string, limit int) ([]Run, error) {
+// RunFilter selects runs for ListRuns; empty fields match every run.
+type RunFilter struct {
+	ScheduleID string
+	Status     RunStatus
+	Limit      int
+}
+
+// ListRuns returns up to filter.Limit matching runs of workspace, newest
+// first. It does not load instructions or outputs.
+func (s *Store) ListRuns(ctx context.Context, workspace string, filter RunFilter) ([]Run, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT`+runColumns+`
 FROM runs r
 JOIN schedules s ON s.id = r.schedule_id
-WHERE s.workspace = ? AND (? = '' OR r.schedule_id = ?)
+WHERE s.workspace = ?
+	AND (? = '' OR r.schedule_id = ?)
+	AND (? = '' OR r.status = ?)
 ORDER BY r.id DESC
-LIMIT ?`, workspace, scheduleID, scheduleID, limit)
+LIMIT ?`,
+		workspace,
+		filter.ScheduleID, filter.ScheduleID,
+		string(filter.Status), string(filter.Status),
+		filter.Limit,
+	)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to query runs")
 	}

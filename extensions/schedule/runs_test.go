@@ -37,7 +37,7 @@ func TestStoreListsAndGetsRunsInAWorkspace(t *testing.T) {
 	third := recordRun(t, store, daily, due.Add(2*time.Hour), RunSucceeded, "third response")
 	theirs := recordRun(t, store, other, due, RunSucceeded, "secret")
 
-	runs, err := store.ListRuns(t.Context(), "runner-a", "", 10)
+	runs, err := store.ListRuns(t.Context(), "runner-a", RunFilter{Limit: 10})
 	require.NoError(t, err)
 	require.Len(t, runs, 3)
 	assert.Equal(t, []int64{third, second, first}, []int64{runs[0].ID, runs[1].ID, runs[2].ID}, "newest first")
@@ -49,14 +49,22 @@ func TestStoreListsAndGetsRunsInAWorkspace(t *testing.T) {
 	require.NotNil(t, runs[0].Stats, "listing loads stats")
 	assert.Equal(t, 1, runs[0].Stats.ToolCalls)
 
-	runs, err = store.ListRuns(t.Context(), "runner-a", daily.ID, 1)
+	runs, err = store.ListRuns(t.Context(), "runner-a", RunFilter{ScheduleID: daily.ID, Limit: 1})
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
 	assert.Equal(t, third, runs[0].ID)
 
-	runs, err = store.ListRuns(t.Context(), "runner-a", other.ID, 10)
+	runs, err = store.ListRuns(t.Context(), "runner-a", RunFilter{ScheduleID: other.ID, Limit: 10})
 	require.NoError(t, err)
 	assert.Empty(t, runs, "another workspace's schedule")
+
+	runs, err = store.ListRuns(t.Context(), "runner-a", RunFilter{Status: RunFailed, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+	assert.Equal(t, second, runs[0].ID)
+	runs, err = store.ListRuns(t.Context(), "runner-a", RunFilter{ScheduleID: daily.ID, Status: RunFailed, Limit: 10})
+	require.NoError(t, err)
+	assert.Empty(t, runs, "filters combine")
 
 	// Editing the schedule does not rewrite what earlier runs used.
 	daily.Instruction = "changed later"
@@ -88,7 +96,7 @@ func TestDaemonTruncatesLongOutputs(t *testing.T) {
 	clock.Set(due)
 	tickAndWait(t, d)
 
-	runs, err := store.ListRuns(t.Context(), "runner-a", schedule.ID, 1)
+	runs, err := store.ListRuns(t.Context(), "runner-a", RunFilter{ScheduleID: schedule.ID, Limit: 1})
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
 	run, err := store.GetRun(t.Context(), "runner-a", runs[0].ID)

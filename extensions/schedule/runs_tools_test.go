@@ -72,6 +72,24 @@ func TestHistoryTool(t *testing.T) {
 	summary, _ = presentationOf(t, result)
 	assert.Equal(t, "1 run of daily", summary)
 
+	result = th.call(t, "schedule_history", map[string]any{"status": "failed"})
+	require.Empty(t, result.Error)
+	assert.Contains(t, result.Content, "1 failed run, newest first.")
+	assert.Contains(t, result.Content, "weekly")
+	assert.NotContains(t, result.Content, "daily")
+	summary, _ = presentationOf(t, result)
+	assert.Equal(t, "1 failed run", summary)
+
+	result = th.call(t, "schedule_history", map[string]any{"scheduleId": daily.ID, "status": "failed"})
+	require.Empty(t, result.Error)
+	assert.Equal(t, "No failed runs.\n", result.Content)
+	summary, body = presentationOf(t, result)
+	assert.Equal(t, "0 failed runs of daily", summary)
+	assert.Equal(t, "No failed runs.", body)
+
+	result = th.call(t, "schedule_history", map[string]any{"status": "broken"})
+	assert.Contains(t, result.Error, "status must be one of")
+
 	for _, limit := range []int{0, 51} {
 		result = th.call(t, "schedule_history", map[string]any{"limit": limit})
 		assert.Equal(t, "limit must be from 1 to 50", result.Error)

@@ -196,14 +196,17 @@ func capitalize(text string) string {
 
 const maxDetailLength = 80
 
-// runListPresentation shows runs as a table; scope names the schedule when
-// the list is for one.
-func runListPresentation(runs []Run, scope string) map[string]any {
-	summary := runCountLabel(len(runs))
+// runListPresentation shows runs as a table. status and scope name the
+// status and schedule the list was filtered by, if any.
+func runListPresentation(runs []Run, status RunStatus, scope string) map[string]any {
+	summary := runCountLabel(len(runs), status)
 	if scope != "" {
 		summary += " of " + scope
 	}
 	if len(runs) == 0 {
+		if status != "" {
+			return presentationData(summary, fmt.Sprintf("No %s runs.", status))
+		}
 		return presentationData(summary, "No runs yet.")
 	}
 	var b strings.Builder
