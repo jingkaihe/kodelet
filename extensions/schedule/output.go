@@ -31,7 +31,7 @@ type scheduleView struct {
 
 // runView is a schedule's latest run as tools report it.
 type runView struct {
-	ID             int64      `json:"id" jsonschema:"Run ID for schedule_get_run"`
+	ID             int64      `json:"id" jsonschema:"Run ID for schedule_run_details"`
 	ScheduledFor   time.Time  `json:"scheduledFor" jsonschema:"Time the run was due (RFC 3339)"`
 	StartedAt      time.Time  `json:"startedAt" jsonschema:"Time the daemon started handling the run (RFC 3339)"`
 	FinishedAt     *time.Time `json:"finishedAt,omitempty" jsonschema:"Time the run ended (RFC 3339); omitted while running"`
@@ -54,9 +54,9 @@ type scheduleOutput struct {
 	Daemon       daemonHealth `json:"daemon" jsonschema:"Whether the daemon that starts runs is alive"`
 }
 
-// runSummaryView is a run in schedule_list_runs.
+// runSummaryView is a run in schedule_history.
 type runSummaryView struct {
-	ID              int64      `json:"id" jsonschema:"Run ID for schedule_get_run"`
+	ID              int64      `json:"id" jsonschema:"Run ID for schedule_run_details"`
 	ScheduleID      string     `json:"scheduleId" jsonschema:"ID of the schedule the run belongs to"`
 	ScheduleName    string     `json:"scheduleName" jsonschema:"Name of the schedule the run belongs to"`
 	ScheduledFor    time.Time  `json:"scheduledFor" jsonschema:"Time the run was due (RFC 3339)"`
@@ -69,7 +69,7 @@ type runSummaryView struct {
 	Stats           *RunStats  `json:"stats,omitempty" jsonschema:"What the run did; omitted while running and for skipped runs"`
 }
 
-// runDetailView is a run in schedule_get_run, with what it ran and produced.
+// runDetailView is a run in schedule_run_details, with what it ran and produced.
 type runDetailView struct {
 	ID              int64      `json:"id" jsonschema:"Run ID"`
 	ScheduleID      string     `json:"scheduleId" jsonschema:"ID of the schedule the run belongs to"`
@@ -88,12 +88,12 @@ type runDetailView struct {
 	Stats           *RunStats  `json:"stats,omitempty" jsonschema:"What the run did; omitted while running and for skipped runs"`
 }
 
-// runListOutput is the structured result of schedule_list_runs.
+// runListOutput is the structured result of schedule_history.
 type runListOutput struct {
 	Runs []runSummaryView `json:"runs" jsonschema:"Runs, newest first"`
 }
 
-// runOutput is the structured result of schedule_get_run.
+// runOutput is the structured result of schedule_run_details.
 type runOutput struct {
 	Run runDetailView `json:"run" jsonschema:"The run"`
 }

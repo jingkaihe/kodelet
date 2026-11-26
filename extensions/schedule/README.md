@@ -25,8 +25,8 @@ Any [extension root](../../skills/kodelet/references/extensions.md#discovery) wo
 | `schedule_create` | Create a schedule |
 | `schedule_update` | Change a schedule by ID; omitted fields keep their values |
 | `schedule_delete` | Delete a schedule and its run history |
-| `schedule_list_runs` | List recent runs, newest first, optionally for one schedule |
-| `schedule_get_run` | Show a run's instruction, timing, stats, and final output |
+| `schedule_history` | List recent runs, newest first, optionally for one schedule |
+| `schedule_run_details` | Show a run's instruction, timing, stats, and final output |
 
 A schedule has a `name` (unique in its workspace), a `schedule`, an `instruction` for each run, a `cwd`, and an `enabled` flag. The agent cannot choose where or how a schedule runs:
 
@@ -43,8 +43,8 @@ Results show users Markdown, such as a table of runs or a run's final output, wh
 | `schedule_list` | `{schedules, daemon}`; check `daemon.state` to see whether schedules will fire |
 | `schedule_create`, `schedule_update` | `{schedule, upcomingRuns, daemon}` |
 | `schedule_delete` | `{id, name}` |
-| `schedule_list_runs` | `{runs}`, each with its outcome, `durationSeconds`, and `stats` |
-| `schedule_get_run` | `{run}`, adding `instruction`, `cwd`, `profile`, and `output` |
+| `schedule_history` | `{runs}`, each with its outcome, `durationSeconds`, and `stats` |
+| `schedule_run_details` | `{run}`, adding `instruction`, `cwd`, `profile`, and `output` |
 
 Creating, updating, and deleting a schedule needs the user's approval in an interactive client. Without one, for example in `kodelet run` or a scheduled run, these tools refuse, so unattended agents cannot plant or alter schedules.
 

@@ -42,11 +42,11 @@ func seedRuns(t *testing.T, th *toolHarness) (daily, weekly Schedule, runs []int
 	return daily, weekly, runs
 }
 
-func TestListRunsTool(t *testing.T) {
+func TestHistoryTool(t *testing.T) {
 	th := newToolHarness(t, "runner-a", true)
 	daily, weekly, runs := seedRuns(t, th)
 
-	result := th.call(t, "schedule_list_runs", map[string]any{})
+	result := th.call(t, "schedule_history", map[string]any{})
 	require.Empty(t, result.Error)
 	assert.Contains(t, result.Content, "2 runs, newest first.")
 	assert.Contains(t, result.Content, "weekly ("+weekly.ID+"): failed")
@@ -66,24 +66,24 @@ func TestListRunsTool(t *testing.T) {
 	assert.Contains(t, body, "| Failed: runner offline |")
 	assert.Contains(t, body, "| Succeeded | 1m23s | 3 | `conv-daily` |")
 
-	result = th.call(t, "schedule_list_runs", map[string]any{"scheduleId": daily.ID, "limit": 1})
+	result = th.call(t, "schedule_history", map[string]any{"scheduleId": daily.ID, "limit": 1})
 	require.Empty(t, result.Error)
 	assert.Contains(t, result.Content, "1 run, newest first.")
 	summary, _ = presentationOf(t, result)
 	assert.Equal(t, "1 run of daily", summary)
 
 	for _, limit := range []int{0, 51} {
-		result = th.call(t, "schedule_list_runs", map[string]any{"limit": limit})
+		result = th.call(t, "schedule_history", map[string]any{"limit": limit})
 		assert.Equal(t, "limit must be from 1 to 50", result.Error)
 	}
-	result = th.call(t, "schedule_list_runs", map[string]any{"scheduleId": "missing"})
+	result = th.call(t, "schedule_history", map[string]any{"scheduleId": "missing"})
 	assert.Equal(t, errNotFound.Error(), result.Error)
 }
 
-func TestListRunsToolWithoutRuns(t *testing.T) {
+func TestHistoryToolWithoutRuns(t *testing.T) {
 	th := newToolHarness(t, "runner-a", true)
 
-	result := th.call(t, "schedule_list_runs", map[string]any{})
+	result := th.call(t, "schedule_history", map[string]any{})
 
 	require.Empty(t, result.Error)
 	assert.Equal(t, "No runs yet.\n", result.Content)
@@ -92,14 +92,14 @@ func TestListRunsToolWithoutRuns(t *testing.T) {
 	assert.Equal(t, "No runs yet.", body)
 }
 
-func TestGetRunTool(t *testing.T) {
+func TestRunDetailsTool(t *testing.T) {
 	th := newToolHarness(t, "runner-a", true)
 	daily, _, runs := seedRuns(t, th)
 	// The run keeps the instruction it ran, not later edits.
 	daily.Instruction = "Changed afterwards"
 	require.NoError(t, th.store.Update(t.Context(), &daily, false, toolNow))
 
-	result := th.call(t, "schedule_get_run", map[string]any{"id": runs[0]})
+	result := th.call(t, "schedule_run_details", map[string]any{"id": runs[0]})
 
 	require.Empty(t, result.Error)
 	for _, want := range []string{
@@ -136,11 +136,11 @@ func TestGetRunTool(t *testing.T) {
 	}
 }
 
-func TestGetRunToolWithoutOutput(t *testing.T) {
+func TestRunDetailsToolWithoutOutput(t *testing.T) {
 	th := newToolHarness(t, "runner-a", true)
 	_, _, runs := seedRuns(t, th)
 
-	result := th.call(t, "schedule_get_run", map[string]any{"id": runs[1]})
+	result := th.call(t, "schedule_run_details", map[string]any{"id": runs[1]})
 
 	require.Empty(t, result.Error)
 	assert.Contains(t, result.Content, "error: runner offline")
@@ -151,15 +151,15 @@ func TestGetRunToolWithoutOutput(t *testing.T) {
 	assert.Contains(t, body, "**Final output**\n\nNone.")
 }
 
-func TestGetRunToolIsScopedToTheWorkspace(t *testing.T) {
+func TestRunToolsAreScopedToTheWorkspace(t *testing.T) {
 	th := newToolHarness(t, "runner-b", true)
 	_, _, runs := seedRuns(t, th)
 
 	for _, id := range runs {
-		result := th.call(t, "schedule_get_run", map[string]any{"id": id})
+		result := th.call(t, "schedule_run_details", map[string]any{"id": id})
 		assert.Equal(t, errRunNotFound.Error(), result.Error)
 	}
-	result := th.call(t, "schedule_list_runs", map[string]any{})
+	result := th.call(t, "schedule_history", map[string]any{})
 	assert.Contains(t, result.Content, "1 run, newest first.")
 	assert.Contains(t, result.Content, "theirs")
 }

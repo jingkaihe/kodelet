@@ -408,9 +408,9 @@ func TestStructuredContentMatchesOutputSchema(t *testing.T) {
 	assert.Contains(t, mustJSON(t, listed.StructuredContent), "runner offline", "the last run is included")
 	check("schedule_update", th.call(t, "schedule_update", map[string]any{"id": id, "enabled": false}))
 	check("schedule_update", th.call(t, "schedule_update", map[string]any{"id": id, "instruction": "q"}))
-	check("schedule_list_runs", th.call(t, "schedule_list_runs", map[string]any{}))
-	check("schedule_list_runs", th.call(t, "schedule_list_runs", map[string]any{"scheduleId": schedules[1].ID}))
-	check("schedule_get_run", th.call(t, "schedule_get_run", map[string]any{"id": runID}))
+	check("schedule_history", th.call(t, "schedule_history", map[string]any{}))
+	check("schedule_history", th.call(t, "schedule_history", map[string]any{"scheduleId": schedules[1].ID}))
+	check("schedule_run_details", th.call(t, "schedule_run_details", map[string]any{"id": runID}))
 	check("schedule_delete", th.call(t, "schedule_delete", map[string]any{"id": id}))
 }
 
