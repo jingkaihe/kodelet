@@ -219,12 +219,26 @@ func TestRejectsMalformedClipboardResponse(t *testing.T) {
 	for _, tt := range []struct{ response, reason string }{
 		{"?unexpected protocol", "unrecognized"},
 		{`F["relative.pdf"]`, "invalid clipboard file path"},
-		{"E" + strings.Repeat("x", (4<<10)+1), "size limit"},
+		{"E" + strings.Repeat("x", maxClipboardErrorBytes+1), "size limit"},
 	} {
 		contents, err := readClipboardResponse(bufio.NewReader(strings.NewReader(tt.response)))
 		require.ErrorContains(t, err, tt.reason)
 		assert.Empty(t, contents)
 	}
+}
+
+func TestFailedClipboardHelperReportsDiagnostic(t *testing.T) {
+	installTestClipboardHelper(t, `
+exec 1>&-
+printf '\033[31munknown read-v1 command\033[0m\n' >&2
+printf '%8192snot retained' '' >&2
+exit 2
+`)
+	_, err := readClipboardHelper(t.Context())
+	require.ErrorContains(t, err, "exit status 2")
+	require.ErrorContains(t, err, "unknown read-v1 command")
+	assert.NotContains(t, err.Error(), "\x1b")
+	assert.NotContains(t, err.Error(), "not retained")
 }
 
 func TestPasteDiscardsStagedImageWhenComposerLosesFocus(t *testing.T) {
