@@ -92,16 +92,17 @@ describe('UIInputDialog', () => {
       />
     );
 
-    expect(screen.getByText('A tool call incoming')).toBeInTheDocument();
+    expect(
+      screen.getByRole('dialog', { name: 'Allow bash?', description: 'A tool call incoming' })
+    ).toHaveAttribute('aria-modal', 'true');
     expect(screen.queryByTestId('ui-input-response')).not.toBeInTheDocument();
-    expect(screen.getByTestId('ui-input-dialog')).toHaveAttribute('aria-modal', 'true');
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Allow' })).toHaveFocus();
     });
 
     fireEvent.keyDown(screen.getByRole('button', { name: 'Allow' }), { key: 'Tab' });
-    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Cancel' }), {
+    expect(screen.getByRole('button', { name: 'Dismiss dialog' })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Dismiss dialog' }), {
       key: 'Tab',
       shiftKey: true,
     });
@@ -112,6 +113,44 @@ describe('UIInputDialog', () => {
 
     expect(onSubmit).toHaveBeenCalledWith('');
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the shared dialog header and action buttons', () => {
+    const onCancel = vi.fn();
+    render(
+      <UIInputDialog
+        mode="confirm"
+        request={{ id: 'confirm-2', title: 'Update schedule?', confirmButtonText: 'Update' }}
+        onCancel={onCancel}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('heading', { name: 'Update schedule?' })).toHaveClass(
+      'new-chat-context-title'
+    );
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveClass('new-chat-secondary-button');
+    expect(screen.getByRole('button', { name: 'Update' })).toHaveClass('new-chat-primary-button');
+    expect(document.querySelector('.panel-action-button, .primary-pill-button')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss dialog' }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables every dismissal control while a response is submitting', () => {
+    render(
+      <UIInputDialog
+        mode="confirm"
+        request={{ id: 'confirm-3', title: 'Allow bash?' }}
+        submitting
+        onCancel={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Dismiss dialog' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Sending…' })).toBeDisabled();
   });
 
   it('dismisses the active dialog with Escape', async () => {
