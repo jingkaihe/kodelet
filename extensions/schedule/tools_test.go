@@ -400,7 +400,7 @@ func TestStructuredContentMatchesOutputSchema(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, claimed)
 	require.NoError(t, th.store.SetRunConversation(t.Context(), runID, "conv-1"))
-	require.NoError(t, th.store.FinishRun(t.Context(), runID, RunFailed, "runner offline", "", toolNow))
+	require.NoError(t, th.store.FinishRun(t.Context(), runID, RunFailed, "runner offline", runResult{}, toolNow))
 	require.NoError(t, th.store.SaveHeartbeat(t.Context(), DaemonStatus{PID: 1, StartedAt: toolNow, HeartbeatAt: toolNow, PollInterval: time.Minute}))
 
 	listed := th.call(t, "schedule_list", map[string]any{})

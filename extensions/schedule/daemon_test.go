@@ -20,24 +20,25 @@ type fakeExecutor struct {
 	mu    sync.Mutex
 	calls []Schedule
 	run   func(ctx context.Context, schedule Schedule) error
-	// response is returned by every run; it defaults to "done <name>".
-	response string
+	// output is the final output of every run; it defaults to "done <name>".
+	output string
 }
 
-func (f *fakeExecutor) Execute(ctx context.Context, schedule Schedule, started func(string)) (string, error) {
+func (f *fakeExecutor) Execute(ctx context.Context, schedule Schedule, started func(string)) (runResult, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, schedule)
 	run := f.run
-	response := f.response
+	output := f.output
 	f.mu.Unlock()
-	if response == "" {
-		response = "done " + schedule.Name
+	if output == "" {
+		output = "done " + schedule.Name
 	}
 	started("conv-" + schedule.ID)
+	result := runResult{Output: output, Stats: RunStats{ToolCalls: 2, Tools: map[string]int{"bash": 2}}}
 	if run != nil {
-		return response, run(ctx, schedule)
+		return result, run(ctx, schedule)
 	}
-	return response, nil
+	return result, nil
 }
 
 func (f *fakeExecutor) callCount() int {
@@ -123,7 +124,11 @@ func TestDaemonRunsDueSchedules(t *testing.T) {
 	assert.True(t, due.Add(24*time.Hour).Equal(*saved.NextRunAt))
 	run, err := store.GetRun(t.Context(), "runner-a", saved.LastRun.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "done daily", run.Response)
+	assert.Equal(t, "done daily", run.Output)
+	assert.Equal(t, schedule.Instruction, run.Instruction)
+	assert.Equal(t, schedule.CWD, run.CWD)
+	require.NotNil(t, run.Stats)
+	assert.Equal(t, map[string]int{"bash": 2}, run.Stats.Tools)
 
 	tickAndWait(t, d)
 	assert.Equal(t, 1, exec.callCount(), "each occurrence runs once")

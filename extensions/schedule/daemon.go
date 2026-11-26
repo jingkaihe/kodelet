@@ -18,8 +18,8 @@ import (
 const (
 	storeTimeout       = 10 * time.Second
 	maxRunErrorLength  = 2000
-	maxResponseLength  = 32 * 1024
-	truncatedResponse  = "\n\n[Response truncated by the schedule extension.]"
+	maxOutputLength    = 32 * 1024
+	truncatedOutput    = "\n\n[Output truncated by the schedule extension.]"
 	interruptedMessage = "the schedule daemon stopped before the run finished"
 )
 
@@ -58,11 +58,11 @@ func (c daemonConfig) validate() error {
 	return nil
 }
 
-// executor runs one scheduled instruction to completion and returns the
-// agent's response. It calls started with the conversation ID once the
-// conversation exists.
+// executor runs one scheduled instruction to completion. It calls started
+// with the conversation ID once the conversation exists, and reports what the
+// run did even when it fails.
 type executor interface {
-	Execute(ctx context.Context, schedule Schedule, started func(conversationID string)) (response string, err error)
+	Execute(ctx context.Context, schedule Schedule, started func(conversationID string)) (runResult, error)
 }
 
 // daemon claims due schedules from the store and runs them.
@@ -239,10 +239,10 @@ func (d *daemon) start(jobs context.Context, schedule Schedule, runID int64, log
 		}()
 		log = log.With("run", runID)
 		log.Info("starting run")
-		status, message, response := d.execute(jobs, schedule, runID, log)
+		status, message, result := d.execute(jobs, schedule, runID, log)
 		ctx, cancel := context.WithTimeout(context.Background(), storeTimeout)
 		defer cancel()
-		if err := d.store.FinishRun(ctx, runID, status, message, response, d.now()); err != nil {
+		if err := d.store.FinishRun(ctx, runID, status, message, result, d.now()); err != nil {
 			log.Error("failed to record run outcome", "error", err)
 		}
 		if message != "" {
@@ -253,7 +253,7 @@ func (d *daemon) start(jobs context.Context, schedule Schedule, runID int64, log
 	}()
 }
 
-func (d *daemon) execute(jobs context.Context, schedule Schedule, runID int64, log *slog.Logger) (status RunStatus, message, response string) {
+func (d *daemon) execute(jobs context.Context, schedule Schedule, runID int64, log *slog.Logger) (status RunStatus, message string, result runResult) {
 	ctx := jobs
 	if d.config.RunTimeout > 0 {
 		var cancel context.CancelFunc
@@ -262,10 +262,10 @@ func (d *daemon) execute(jobs context.Context, schedule Schedule, runID int64, l
 	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			status, message, response = RunFailed, fmt.Sprintf("internal error: %v", recovered), ""
+			status, message, result = RunFailed, fmt.Sprintf("internal error: %v", recovered), runResult{}
 		}
 	}()
-	response, err := d.exec.Execute(ctx, schedule, func(conversationID string) {
+	result, err := d.exec.Execute(ctx, schedule, func(conversationID string) {
 		storeCtx, cancel := context.WithTimeout(context.Background(), storeTimeout)
 		defer cancel()
 		if err := d.store.SetRunConversation(storeCtx, runID, conversationID); err != nil {
@@ -273,16 +273,16 @@ func (d *daemon) execute(jobs context.Context, schedule Schedule, runID int64, l
 		}
 		log.Info("run conversation started", "conversation", conversationID)
 	})
-	response = truncateResponse(response)
+	result.Output = truncateOutput(result.Output)
 	switch {
 	case err == nil:
-		return RunSucceeded, "", response
+		return RunSucceeded, "", result
 	case d.stopping.Load() && jobs.Err() != nil:
-		return RunCanceled, interruptedMessage, response
+		return RunCanceled, interruptedMessage, result
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		return RunFailed, fmt.Sprintf("timed out after %s", d.config.RunTimeout), response
+		return RunFailed, fmt.Sprintf("timed out after %s", d.config.RunTimeout), result
 	default:
-		return RunFailed, truncate(err.Error(), maxRunErrorLength), response
+		return RunFailed, truncate(err.Error(), maxRunErrorLength), result
 	}
 }
 
@@ -338,12 +338,12 @@ func assessDaemon(status DaemonStatus, found bool, now time.Time) daemonHealth {
 	return health
 }
 
-// truncateResponse bounds a stored response, which runs keep for history.
-func truncateResponse(response string) string {
-	if len(response) <= maxResponseLength {
-		return response
+// truncateOutput bounds a stored output, which runs keep for history.
+func truncateOutput(output string) string {
+	if len(output) <= maxOutputLength {
+		return output
 	}
-	return strings.TrimSuffix(truncate(response, maxResponseLength), "…") + truncatedResponse
+	return strings.TrimSuffix(truncate(output, maxOutputLength), "…") + truncatedOutput
 }
 
 func truncate(value string, limit int) string {

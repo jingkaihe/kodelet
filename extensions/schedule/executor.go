@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"github.com/jingkaihe/kodelet/sdk/go/agent"
@@ -11,14 +12,16 @@ import (
 const maxStderrLength = 500
 
 // agentExecutor runs a scheduled instruction as a new conversation through
-// kodelet acp, on the schedule's runner and directory, and returns the
-// assistant text of the run.
+// kodelet acp, on the schedule's runner, directory, and profile.
 type agentExecutor struct {
 	server  string
 	command string
+	log     *slog.Logger
 }
 
-func (e agentExecutor) Execute(ctx context.Context, schedule Schedule, started func(conversationID string)) (string, error) {
+// Execute runs the instruction and reports the agent's final output and run
+// stats, including for runs that fail after the conversation starts.
+func (e agentExecutor) Execute(ctx context.Context, schedule Schedule, started func(conversationID string)) (runResult, error) {
 	client := agent.NewClient(agent.ClientOptions{
 		Server:  e.server,
 		Runner:  schedule.Workspace,
@@ -30,17 +33,35 @@ func (e agentExecutor) Execute(ctx context.Context, schedule Schedule, started f
 		Profile: schedule.Profile,
 	})
 	if err != nil {
-		return "", describeAgentError(err, "failed to start the conversation")
+		return runResult{}, describeAgentError(err, "failed to start the conversation")
 	}
 	started(session.ID())
-	response, err := session.RunAndWait(ctx, agent.RunOptions{Message: schedule.Instruction})
+	collector := newRunCollector()
+	unsubscribe := session.Subscribe(collector.observe)
+	response, runErr := session.RunAndWait(ctx, agent.RunOptions{Message: schedule.Instruction})
+	unsubscribe()
+	result := collector.result()
+	if result.Output == "" && response != nil {
+		result.Output = strings.TrimSpace(response.Content)
+	}
+	// Usage is best effort and read even after a failure or timeout, so it
+	// gets its own deadline.
+	usage, err := conversationUsage(context.WithoutCancel(ctx), e.command, e.server, session.ID())
 	if err != nil {
-		return "", describeAgentError(err, "the run failed")
+		if e.log != nil {
+			e.log.Warn("failed to read run usage", "conversation", session.ID(), "error", err)
+		}
+	} else {
+		result.Stats.Usage = usage
 	}
-	if response.StopReason == "cancelled" {
-		return response.Content, errors.New("the run was cancelled")
+	switch {
+	case runErr != nil:
+		return result, describeAgentError(runErr, "the run failed")
+	case response.StopReason == "cancelled":
+		return result, errors.New("the run was cancelled")
+	default:
+		return result, nil
 	}
-	return response.Content, nil
 }
 
 // describeAgentError adds the last stderr line of an exited kodelet acp

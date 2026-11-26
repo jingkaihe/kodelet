@@ -71,8 +71,14 @@ CREATE TABLE daemon (
 		},
 		{
 			Version:     20261127090000,
-			Description: "Record the response of each run",
-			Up:          execMigration(`ALTER TABLE runs ADD COLUMN response TEXT NOT NULL DEFAULT ''`),
+			Description: "Record what each run did",
+			Up: execMigration(`
+ALTER TABLE runs ADD COLUMN instruction TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN cwd TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN profile TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN output TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN stats TEXT NOT NULL DEFAULT '';
+`),
 		},
 	}
 }

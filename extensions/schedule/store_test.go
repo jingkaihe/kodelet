@@ -119,7 +119,7 @@ func TestStoreClaimIsExclusiveAndRecordsRuns(t *testing.T) {
 	assert.False(t, claimed, "a run is claimed once")
 
 	require.NoError(t, store.SetRunConversation(t.Context(), runID, "conv-1"))
-	require.NoError(t, store.FinishRun(t.Context(), runID, RunSucceeded, "", "all good", due.Add(time.Minute)))
+	require.NoError(t, store.FinishRun(t.Context(), runID, RunSucceeded, "", runResult{Output: "all good"}, due.Add(time.Minute)))
 	saved, err := store.Get(t.Context(), "runner-a", schedule.ID)
 	require.NoError(t, err)
 	require.NotNil(t, saved.LastRun)

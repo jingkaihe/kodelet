@@ -11,7 +11,7 @@ import (
 )
 
 // recordRun claims the schedule's next run and finishes it.
-func recordRun(t *testing.T, store *Store, schedule Schedule, due time.Time, status RunStatus, response string) int64 {
+func recordRun(t *testing.T, store *Store, schedule Schedule, due time.Time, status RunStatus, output string) int64 {
 	t.Helper()
 	saved, err := store.Get(t.Context(), schedule.Workspace, schedule.ID)
 	require.NoError(t, err)
@@ -20,7 +20,8 @@ func recordRun(t *testing.T, store *Store, schedule Schedule, due time.Time, sta
 	require.NoError(t, err)
 	require.True(t, claimed)
 	require.NoError(t, store.SetRunConversation(t.Context(), runID, "conv-"+schedule.Name))
-	require.NoError(t, store.FinishRun(t.Context(), runID, status, "", response, due.Add(time.Minute)))
+	result := runResult{Output: output, Stats: RunStats{ToolCalls: 1, Tools: map[string]int{"bash": 1}, Usage: &RunUsage{InputTokens: 10, OutputTokens: 5, Cost: 0.01}}}
+	require.NoError(t, store.FinishRun(t.Context(), runID, status, "", result, due.Add(time.Minute)))
 	return runID
 }
 
@@ -43,7 +44,10 @@ func TestStoreListsAndGetsRunsInAWorkspace(t *testing.T) {
 	assert.Equal(t, daily.ID, runs[0].ScheduleID)
 	assert.Equal(t, "daily", runs[0].ScheduleName)
 	assert.Equal(t, "conv-daily", runs[0].ConversationID)
-	assert.Empty(t, runs[0].Response, "listing does not load responses")
+	assert.Empty(t, runs[0].Output, "listing does not load outputs")
+	assert.Empty(t, runs[0].Instruction, "listing does not load instructions")
+	require.NotNil(t, runs[0].Stats, "listing loads stats")
+	assert.Equal(t, 1, runs[0].Stats.ToolCalls)
 
 	runs, err = store.ListRuns(t.Context(), "runner-a", daily.ID, 1)
 	require.NoError(t, err)
@@ -54,11 +58,19 @@ func TestStoreListsAndGetsRunsInAWorkspace(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, runs, "another workspace's schedule")
 
+	// Editing the schedule does not rewrite what earlier runs used.
+	daily.Instruction = "changed later"
+	require.NoError(t, store.Update(t.Context(), &daily, false, due))
 	run, err := store.GetRun(t.Context(), "runner-a", first)
 	require.NoError(t, err)
-	assert.Equal(t, "first response", run.Response)
+	assert.Equal(t, "first response", run.Output)
+	assert.Equal(t, "Summarise yesterday's commits", run.Instruction)
+	assert.Equal(t, "/work/runner-a", run.CWD)
 	assert.Equal(t, RunSucceeded, run.Status)
 	require.NotNil(t, run.FinishedAt)
+	require.NotNil(t, run.Stats)
+	require.NotNil(t, run.Stats.Usage)
+	assert.InDelta(t, 0.01, run.Stats.Usage.Cost, 1e-9)
 
 	_, err = store.GetRun(t.Context(), "runner-a", theirs)
 	assert.ErrorIs(t, err, errRunNotFound)
@@ -66,7 +78,7 @@ func TestStoreListsAndGetsRunsInAWorkspace(t *testing.T) {
 	assert.ErrorIs(t, err, errRunNotFound)
 }
 
-func TestResponseMigrationKeepsExistingRuns(t *testing.T) {
+func TestRunDetailsMigrationKeepsExistingRuns(t *testing.T) {
 	path := t.TempDir() + "/schedule.db"
 	db := openTestDB(t, path)
 	initial := scheduleMigrations()[:1]
@@ -89,15 +101,17 @@ VALUES ('s1', 0, 0, 1, 'succeeded', 'conv-1');`)
 	run, err := store.GetRun(t.Context(), "runner-a", runs[0].ID)
 	require.NoError(t, err)
 	assert.Equal(t, "conv-1", run.ConversationID)
-	assert.Empty(t, run.Response)
+	assert.Empty(t, run.Output)
+	assert.Empty(t, run.Instruction)
+	assert.Nil(t, run.Stats)
 }
 
-func TestDaemonRecordsResponses(t *testing.T) {
+func TestDaemonTruncatesLongOutputs(t *testing.T) {
 	store, _ := newTestStore(t)
 	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
 	schedule := createTestSchedule(t, store, "runner-a", "daily", due)
-	long := strings.Repeat("é", maxResponseLength)
-	exec := &fakeExecutor{response: long, run: func(context.Context, Schedule) error { return nil }}
+	long := strings.Repeat("é", maxOutputLength)
+	exec := &fakeExecutor{output: long, run: func(context.Context, Schedule) error { return nil }}
 	d, clock := newTestDaemon(store, exec, nil)
 
 	clock.Set(due)
@@ -108,7 +122,7 @@ func TestDaemonRecordsResponses(t *testing.T) {
 	require.Len(t, runs, 1)
 	run, err := store.GetRun(t.Context(), "runner-a", runs[0].ID)
 	require.NoError(t, err)
-	assert.True(t, strings.HasSuffix(run.Response, truncatedResponse))
-	assert.LessOrEqual(t, len(run.Response), maxResponseLength+len(truncatedResponse))
-	assert.True(t, strings.HasPrefix(run.Response, "éé"))
+	assert.True(t, strings.HasSuffix(run.Output, truncatedOutput))
+	assert.LessOrEqual(t, len(run.Output), maxOutputLength+len(truncatedOutput))
+	assert.True(t, strings.HasPrefix(run.Output, "éé"))
 }
