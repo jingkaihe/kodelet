@@ -317,9 +317,6 @@ func (m model) renderShortcutsDialog() string {
 		{shortcut: "Esc", description: escapeDescription},
 		{shortcut: "Ctrl+C", description: ctrlCDescription},
 	}
-	if runtime.GOOS == "darwin" {
-		baseRows = append(baseRows, shortcutHelpRow{shortcut: "Cmd+B", description: pasteDescription})
-	}
 	overridden := make(map[string]struct{}, len(m.extensionShortcuts))
 	baseRows = append(baseRows,
 		shortcutHelpRow{shortcut: "Ctrl+Alt+V", description: "Dictate into draft"},

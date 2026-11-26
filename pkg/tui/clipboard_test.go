@@ -11,7 +11,6 @@ import (
 	"image/jpeg"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -135,11 +134,7 @@ func TestPasteTextWithoutLocalRunner(t *testing.T) {
 	m := newThemeTestModel(t, Config{Runner: &recordingRunner{}, Remote: true})
 	m.textarea.SetValue("prefix:")
 	serveClipboardResponse(t, 'T', []byte("one\ntwo"))
-	key := keyPressWithMod('v', tea.ModCtrl)
-	if runtime.GOOS == "darwin" {
-		key = keyPressWithMod('b', tea.ModSuper)
-	}
-	updated, paste := m.Update(key)
+	updated, paste := m.Update(keyPressWithMod('v', tea.ModCtrl))
 	require.NotNil(t, paste)
 	updated, _ = updated.Update(paste())
 	assert.Equal(t, "prefix:one\ntwo", updated.(model).textarea.Value())

@@ -196,7 +196,7 @@ Use `--runner` to work on another runner. Resuming preserves the runner, directo
 
 The TUI streams responses and persists conversations for later resume. Use `Ctrl+O` or click a detail header to show or hide thinking and tool details.
 
-With the optional [clipboard helper](../clipboard/README.md) and a local runner, press `Ctrl+V` or `Cmd+B` (macOS) to insert an image’s temporary path or original file paths copied in Finder. Normal terminal text paste needs no helper.
+With the optional [clipboard helper](../clipboard/README.md) and a local runner, press `Ctrl+V` to insert an image’s temporary path or original file paths copied in Finder. Normal terminal text paste needs no helper.
 
 Press `Ctrl+R` to search sent messages, then press it again to cycle matches. `Enter` copies a match into the composer; `Esc` restores your draft. History persists on the runner per Git worktree (or directory outside Git). Extensions can override this shortcut.
 

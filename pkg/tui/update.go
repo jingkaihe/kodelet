@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 	"unicode"
@@ -835,8 +834,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if shortcut, ok := m.extensionShortcutForKey(msg.Keystroke()); ok {
 			return m, m.startExtensionShortcut(shortcut)
 		}
-		stroke := msg.Keystroke()
-		if stroke == "ctrl+v" || (runtime.GOOS == "darwin" && stroke == "super+b") {
+		if msg.Keystroke() == "ctrl+v" {
 			if m.pastePending || !m.composerAcceptsPaste() {
 				return m, nil
 			}
