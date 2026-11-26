@@ -35,11 +35,16 @@ type toolHarness struct {
 // set, the host approves confirmations unless approve is cleared.
 func newToolHarness(t *testing.T, runnerID string, interactive bool) *toolHarness {
 	t.Helper()
+	return newToolHarnessWith(t, runnerID, interactive, false)
+}
+
+func newToolHarnessWith(t *testing.T, runnerID string, interactive, autoApprove bool) *toolHarness {
+	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "schedule.db")
 	stores := &storeOpener{path: dbPath}
 	t.Cleanup(func() { stores.Close() })
 	ext := extension.New(extension.Metadata{Name: "schedule", Version: "test"})
-	registerTools(ext, stores, func() time.Time { return toolNow })
+	registerTools(ext, stores, func() time.Time { return toolNow }, autoApprove)
 
 	th := &toolHarness{cwd: t.TempDir(), profile: "anthropic", approve: true}
 	var options *extensiontest.Options
@@ -429,4 +434,61 @@ func presentationOf(t *testing.T, result extension.ToolResult) (summary, body st
 	require.NoError(t, json.Unmarshal([]byte(mustJSON(t, result.Data)), &data))
 	assert.Equal(t, "markdown", data.Presentation.Format)
 	return data.Presentation.Summary, data.Presentation.Body
+}
+
+func TestAutoApproveSkipsConfirmation(t *testing.T) {
+	th := newToolHarnessWith(t, "runner-a", true, true)
+	th.mu.Lock()
+	th.approve = false // a prompt would be declined
+	th.mu.Unlock()
+
+	result := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "@daily", "instruction": "p"})
+	require.Empty(t, result.Error)
+	_, body := presentationOf(t, result)
+	assert.Contains(t, body, autoApprovedNote)
+	schedules, err := th.store.List(t.Context(), "runner-a")
+	require.NoError(t, err)
+	require.Len(t, schedules, 1)
+	id := schedules[0].ID
+
+	result = th.call(t, "schedule_update", map[string]any{"id": id, "enabled": false})
+	require.Empty(t, result.Error)
+	result = th.call(t, "schedule_delete", map[string]any{"id": id})
+	require.Empty(t, result.Error)
+	_, body = presentationOf(t, result)
+	assert.Contains(t, body, autoApprovedNote)
+
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	assert.Empty(t, th.confirms, "the user is never asked")
+}
+
+func TestAutoApproveWorksWithoutInteractiveUI(t *testing.T) {
+	th := newToolHarnessWith(t, "runner-a", false, true)
+
+	result := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "@daily", "instruction": "p"})
+
+	require.Empty(t, result.Error)
+	schedules, err := th.store.List(t.Context(), "runner-a")
+	require.NoError(t, err)
+	assert.Len(t, schedules, 1)
+}
+
+func TestToolDescriptionsReflectApproval(t *testing.T) {
+	describe := func(autoApprove bool) map[string]string {
+		th := newToolHarnessWith(t, "runner-a", true, autoApprove)
+		texts := map[string]string{}
+		for _, tool := range th.init.Tools {
+			texts[tool.Name] = tool.Description + "\n" + tool.Short
+		}
+		return texts
+	}
+	asking, automatic := describe(false), describe(true)
+
+	for _, name := range []string{"schedule_create", "schedule_update", "schedule_delete"} {
+		assert.Contains(t, asking[name], "must approve", name)
+		assert.Contains(t, asking[name], "needs user approval", name)
+		assert.NotContains(t, automatic[name], "approv", name)
+	}
+	assert.Equal(t, asking["schedule_list"], automatic["schedule_list"])
 }

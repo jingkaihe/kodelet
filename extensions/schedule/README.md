@@ -48,6 +48,8 @@ Results show users Markdown, such as a table of runs or a run's final output, wh
 
 Creating, updating, and deleting a schedule needs the user's approval in an interactive client. Without one, for example in `kodelet run` or a scheduled run, these tools refuse, so unattended agents cannot plant or alter schedules.
 
+To skip approval, set `auto_approve: true` in the schedule config file (see [settings](#run-the-daemon)) and `/reload`, or set `KODELET_SCHEDULE_AUTO_APPROVE=true` in the environment where the Kodelet server starts and restart the server. The tools then save changes without asking, including in `kodelet run` and in scheduled runs, so any agent with these tools can create schedules that keep running. Results note that a change was approved automatically. The extension reads this only from its own settings, not from Kodelet's `extensions.config`, because a repository's `kodelet-config.yaml` can set that.
+
 ### Schedule syntax
 
 Schedules use five-field cron expressions (`minute hour day-of-month month day-of-week`) or descriptors such as `@hourly`, `@daily`, `@weekly`, and `@every 6h`. Prefix `CRON_TZ=<IANA zone>` to pick a timezone, for example `CRON_TZ=Europe/London 0 9 * * 1-5`; otherwise the host's local time applies. Schedules may fire at most once a minute.

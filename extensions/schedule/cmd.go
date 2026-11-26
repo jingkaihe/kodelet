@@ -26,6 +26,7 @@ import (
 const (
 	keyConfig        = "config"
 	keyDB            = "db"
+	keyAutoApprove   = "auto_approve"
 	keyServer        = "server"
 	keyKodelet       = "kodelet"
 	keyPollInterval  = "poll_interval"
@@ -43,13 +44,14 @@ schedules of their workspace. Run "daemon" separately to start due runs.
 
 Settings come from flags, KODELET_SCHEDULE_* environment variables (for
 example KODELET_SCHEDULE_DB or KODELET_SCHEDULE_POLL_INTERVAL), and the config
-file, in that order of precedence.`
+file, in that order of precedence. Set auto_approve to true to let the
+extension create, change, and delete schedules without asking the user.`
 
 // cli holds the settings shared by commands and the entry points they run,
 // which tests replace.
 type cli struct {
 	v            *viper.Viper
-	runExtension func(ctx context.Context, dbPath string) error
+	runExtension func(ctx context.Context, settings extensionSettings) error
 	runDaemon    func(ctx context.Context, settings daemonSettings, logger *slog.Logger) error
 }
 
@@ -77,11 +79,11 @@ func (c *cli) rootCommand() *cobra.Command {
 			return loadConfigFile(v)
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			path, err := dbPathFrom(v)
+			settings, err := extensionSettingsFrom(v)
 			if err != nil {
 				return err
 			}
-			return c.runExtension(cmd.Context(), path)
+			return c.runExtension(cmd.Context(), settings)
 		},
 	}
 	root.SetVersionTemplate("kodelet-extension-schedule {{.Version}}\n")
@@ -216,6 +218,27 @@ func dbPathFrom(v *viper.Viper) (string, error) {
 	return filepath.Join(base, "schedule", "schedule.db"), nil
 }
 
+// extensionSettings are the resolved options of the extension mode.
+type extensionSettings struct {
+	DBPath string
+	// AutoApprove saves schedule changes without asking the user. It is read
+	// only from this executable's settings, never from Kodelet's
+	// extensions.config, which a repository's kodelet-config.yaml can set.
+	AutoApprove bool
+}
+
+func extensionSettingsFrom(v *viper.Viper) (extensionSettings, error) {
+	var settings extensionSettings
+	var err error
+	if settings.DBPath, err = dbPathFrom(v); err != nil {
+		return settings, err
+	}
+	if settings.AutoApprove, err = cast.ToBoolE(v.Get(keyAutoApprove)); err != nil {
+		return settings, errors.Errorf("invalid %s: %v", keyAutoApprove, v.Get(keyAutoApprove))
+	}
+	return settings, nil
+}
+
 // daemonSettings are the resolved daemon options.
 type daemonSettings struct {
 	DBPath  string
@@ -258,12 +281,12 @@ func daemonSettingsFrom(v *viper.Viper) (daemonSettings, error) {
 // runExtension serves the extension protocol on stdin and stdout. The SDK
 // redirects os.Stdout to stderr while serving, so stray output cannot corrupt
 // the protocol stream.
-func runExtension(ctx context.Context, dbPath string) error {
+func runExtension(ctx context.Context, settings extensionSettings) error {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
-	stores := &storeOpener{path: dbPath}
+	stores := &storeOpener{path: settings.DBPath}
 	defer stores.Close()
 	ext := extension.New(extension.Metadata{Name: "schedule", Version: version})
-	registerTools(ext, stores, time.Now)
+	registerTools(ext, stores, time.Now, settings.AutoApprove)
 	if err := ext.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}

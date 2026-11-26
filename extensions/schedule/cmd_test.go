@@ -17,21 +17,21 @@ import (
 // testCLI captures what commands would run instead of running it.
 type testCLI struct {
 	*cli
-	extensionDB string
-	daemon      *daemonSettings
-	out, err    bytes.Buffer
+	extension *extensionSettings
+	daemon    *daemonSettings
+	out, err  bytes.Buffer
 }
 
 func newTestCLI(t *testing.T) *testCLI {
 	t.Helper()
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
-	for _, key := range []string{"CONFIG", "DB", "SERVER", "KODELET", "POLL_INTERVAL", "CONCURRENCY", "RUN_TIMEOUT", "MISFIRE_GRACE", "SHUTDOWN_GRACE"} {
+	for _, key := range []string{"CONFIG", "DB", "AUTO_APPROVE", "SERVER", "KODELET", "POLL_INTERVAL", "CONCURRENCY", "RUN_TIMEOUT", "MISFIRE_GRACE", "SHUTDOWN_GRACE"} {
 		t.Setenv("KODELET_SCHEDULE_"+key, "")
 		os.Unsetenv("KODELET_SCHEDULE_" + key)
 	}
 	tc := &testCLI{cli: newCLI()}
-	tc.runExtension = func(_ context.Context, dbPath string) error {
-		tc.extensionDB = dbPath
+	tc.runExtension = func(_ context.Context, settings extensionSettings) error {
+		tc.extension = &settings
 		return nil
 	}
 	tc.runDaemon = func(_ context.Context, settings daemonSettings, _ *slog.Logger) error {
@@ -56,7 +56,9 @@ func TestRootServesExtensionWithDefaultDatabase(t *testing.T) {
 	require.NoError(t, tc.execute(t))
 
 	base := os.Getenv("KODELET_BASE_PATH")
-	assert.Equal(t, filepath.Join(base, "schedule", "schedule.db"), tc.extensionDB)
+	require.NotNil(t, tc.extension)
+	assert.Equal(t, filepath.Join(base, "schedule", "schedule.db"), tc.extension.DBPath)
+	assert.False(t, tc.extension.AutoApprove, "changes need approval by default")
 	assert.Empty(t, tc.out.String(), "stdout is reserved for the protocol")
 }
 
@@ -66,7 +68,7 @@ func TestRootRejectsUnknownCommands(t *testing.T) {
 	err := tc.execute(t, "bogus")
 
 	assert.ErrorContains(t, err, "unknown command")
-	assert.Empty(t, tc.extensionDB)
+	assert.Nil(t, tc.extension)
 }
 
 func TestDaemonSettingsPrecedence(t *testing.T) {
@@ -104,11 +106,13 @@ func TestDefaultConfigFileIsOptional(t *testing.T) {
 
 	base := os.Getenv("KODELET_BASE_PATH")
 	require.NoError(t, os.MkdirAll(filepath.Join(base, "schedule"), 0o700))
-	require.NoError(t, os.WriteFile(filepath.Join(base, "schedule", "config.yaml"), []byte("concurrency: 7\ndb: /tmp/x.db\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(base, "schedule", "config.yaml"), []byte("concurrency: 7\ndb: /tmp/x.db\nauto_approve: true\n"), 0o600))
 	tc = newTestCLI(t)
 	t.Setenv("KODELET_BASE_PATH", base)
 	require.NoError(t, tc.execute(t))
-	assert.Equal(t, "/tmp/x.db", tc.extensionDB, "the extension reads the default config file too")
+	require.NotNil(t, tc.extension)
+	assert.Equal(t, "/tmp/x.db", tc.extension.DBPath, "the extension reads the default config file too")
+	assert.True(t, tc.extension.AutoApprove)
 	require.NoError(t, tc.execute(t, "daemon"))
 	assert.Equal(t, 7, tc.daemon.Config.Concurrency)
 }
@@ -161,4 +165,18 @@ func TestListCommandUsesConfiguredDatabase(t *testing.T) {
 	require.NoError(t, json.Unmarshal(tc.out.Bytes(), &decoded))
 	require.Len(t, decoded.Schedules, 1)
 	assert.Equal(t, "runner-a", decoded.Schedules[0].Workspace)
+}
+
+func TestAutoApproveSetting(t *testing.T) {
+	tc := newTestCLI(t)
+	t.Setenv("KODELET_SCHEDULE_AUTO_APPROVE", "true")
+	require.NoError(t, tc.execute(t))
+	require.NotNil(t, tc.extension)
+	assert.True(t, tc.extension.AutoApprove)
+
+	tc = newTestCLI(t)
+	t.Setenv("KODELET_SCHEDULE_AUTO_APPROVE", "sometimes")
+	err := tc.execute(t)
+	assert.ErrorContains(t, err, "invalid auto_approve")
+	assert.Nil(t, tc.extension)
 }

@@ -81,10 +81,12 @@ func (o *storeOpener) Close() error {
 type toolset struct {
 	stores *storeOpener
 	now    func() time.Time
+	// autoApprove saves changes without asking the user.
+	autoApprove bool
 }
 
-func registerTools(ext *extension.Extension, stores *storeOpener, now func() time.Time) {
-	t := &toolset{stores: stores, now: now}
+func registerTools(ext *extension.Extension, stores *storeOpener, now func() time.Time, autoApprove bool) {
+	t := &toolset{stores: stores, now: now, autoApprove: autoApprove}
 	extension.RegisterTool(ext, extension.Tool[listInput]{
 		Name:         "schedule_list",
 		Description:  "List scheduled instructions with their next and most recent runs. Each run is a new agent conversation started by the kodelet-extension-schedule daemon, which must be running for schedules to fire.",
@@ -94,22 +96,22 @@ func registerTools(ext *extension.Extension, stores *storeOpener, now func() tim
 	})
 	extension.RegisterTool(ext, extension.Tool[createInput]{
 		Name:         "schedule_create",
-		Description:  "Schedule an instruction to run as a new agent conversation on a recurring cron schedule. Runs use this conversation's model profile. The user must approve the schedule before it is saved; the call fails if they decline or cannot be asked.",
-		Short:        "Schedule an instruction to run as a new conversation on a cron schedule; needs user approval.",
+		Description:  "Schedule an instruction to run as a new agent conversation on a recurring cron schedule. Runs use this conversation's model profile." + t.approvalNote("schedule before it is saved"),
+		Short:        "Schedule an instruction to run as a new conversation on a cron schedule" + t.approvalShort(),
 		OutputSchema: outputSchema[scheduleOutput](),
 		Execute:      t.create,
 	})
 	extension.RegisterTool(ext, extension.Tool[updateInput]{
 		Name:         "schedule_update",
-		Description:  "Change a schedule by ID; omitted fields keep their values, and the model profile never changes. Set enabled to pause or resume it. The user must approve the change; the call fails if they decline or cannot be asked.",
-		Short:        "Change, pause, or resume a schedule by ID; needs user approval.",
+		Description:  "Change a schedule by ID; omitted fields keep their values, and the model profile never changes. Set enabled to pause or resume it." + t.approvalNote("change"),
+		Short:        "Change, pause, or resume a schedule by ID" + t.approvalShort(),
 		OutputSchema: outputSchema[scheduleOutput](),
 		Execute:      t.update,
 	})
 	extension.RegisterTool(ext, extension.Tool[deleteInput]{
 		Name:         "schedule_delete",
-		Description:  "Delete a schedule by ID, with its run history. The user must approve the deletion; the call fails if they decline or cannot be asked.",
-		Short:        "Delete a schedule and its run history by ID; needs user approval.",
+		Description:  "Delete a schedule by ID, with its run history." + t.approvalNote("deletion"),
+		Short:        "Delete a schedule and its run history by ID" + t.approvalShort(),
 		OutputSchema: outputSchema[deleteOutput](),
 		Execute:      t.delete,
 	})
@@ -188,7 +190,7 @@ func (t *toolset) create(ctx context.Context, in createInput, tc *extension.Tool
 	if err := checkNameAvailable(ctx, store, workspace, schedule.Name, ""); err != nil {
 		return failure(err), nil
 	}
-	if err := confirm(ctx, tc, "Create schedule?", describeSchedule(schedule, runs), "Create"); err != nil {
+	if err := t.confirm(ctx, tc, "Create schedule?", describeSchedule(schedule, runs), "Create"); err != nil {
 		return failure(err), nil
 	}
 	if err := store.Create(ctx, &schedule, now); err != nil {
@@ -206,7 +208,7 @@ func (t *toolset) create(ctx context.Context, in createInput, tc *extension.Tool
 	return extension.ToolResult{
 		Content:           b.String(),
 		StructuredContent: scheduleOutput{Schedule: newScheduleView(schedule), UpcomingRuns: runs, Daemon: health},
-		Data:              createPresentation(schedule, runs, health),
+		Data:              t.noteApproval(createPresentation(schedule, runs, health)),
 	}, nil
 }
 
@@ -306,7 +308,7 @@ func (t *toolset) update(ctx context.Context, in updateInput, tc *extension.Tool
 	if runs := upcomingRunsOf(updated); resetNext && len(runs) > 0 {
 		message += "\nUpcoming runs: " + formatTimes(runs)
 	}
-	if err := confirm(ctx, tc, fmt.Sprintf("Update schedule %q?", current.Name), message, "Update"); err != nil {
+	if err := t.confirm(ctx, tc, fmt.Sprintf("Update schedule %q?", current.Name), message, "Update"); err != nil {
 		return failure(err), nil
 	}
 	if err := store.Update(ctx, &updated, resetNext, now); err != nil {
@@ -325,7 +327,7 @@ func (t *toolset) update(ctx context.Context, in updateInput, tc *extension.Tool
 	return extension.ToolResult{
 		Content:           b.String(),
 		StructuredContent: scheduleOutput{Schedule: newScheduleView(updated), UpcomingRuns: runs, Daemon: health},
-		Data:              updatePresentation(updated, changed, runs, health),
+		Data:              t.noteApproval(updatePresentation(updated, changed, runs, health)),
 	}, nil
 }
 
@@ -342,7 +344,7 @@ func (t *toolset) delete(ctx context.Context, in deleteInput, tc *extension.Tool
 	if err != nil {
 		return failure(err), nil
 	}
-	if err := confirm(ctx, tc, fmt.Sprintf("Delete schedule %q?", current.Name), describeSchedule(current, nil), "Delete"); err != nil {
+	if err := t.confirm(ctx, tc, fmt.Sprintf("Delete schedule %q?", current.Name), describeSchedule(current, nil), "Delete"); err != nil {
 		return failure(err), nil
 	}
 	if err := store.Delete(ctx, workspace, current.ID); err != nil {
@@ -351,7 +353,7 @@ func (t *toolset) delete(ctx context.Context, in deleteInput, tc *extension.Tool
 	return extension.ToolResult{
 		Content:           fmt.Sprintf("Deleted schedule %q (%s).", current.Name, current.ID),
 		StructuredContent: deleteOutput{ID: current.ID, Name: current.Name},
-		Data:              deletePresentation(current),
+		Data:              t.noteApproval(deletePresentation(current)),
 	}, nil
 }
 
@@ -450,9 +452,13 @@ func checkNameAvailable(ctx context.Context, store *Store, workspace, name, exce
 	return nil
 }
 
-// confirm asks the user to approve a change. It fails closed when the host
-// has no interactive UI, so unattended runs cannot create or alter schedules.
-func confirm(ctx context.Context, tc *extension.ToolContext, title, message, button string) error {
+// confirm asks the user to approve a change unless auto-approve is on. It
+// fails closed when the host has no interactive UI, so unattended runs cannot
+// create or alter schedules.
+func (t *toolset) confirm(ctx context.Context, tc *extension.ToolContext, title, message, button string) error {
+	if t.autoApprove {
+		return nil
+	}
 	approved, err := tc.UI.Confirm(ctx, extension.ConfirmRequest{
 		Title:             title,
 		Message:           message,
@@ -467,6 +473,36 @@ func confirm(ctx context.Context, tc *extension.ToolContext, title, message, but
 	}
 	return nil
 }
+
+// approvalNote tells the model how a change is approved; what names it.
+func (t *toolset) approvalNote(what string) string {
+	if t.autoApprove {
+		return ""
+	}
+	return " The user must approve the " + what + "; the call fails if they decline or cannot be asked."
+}
+
+// approvalShort ends a one-line tool summary.
+func (t *toolset) approvalShort() string {
+	if t.autoApprove {
+		return "."
+	}
+	return "; needs user approval."
+}
+
+// noteApproval tells users when a change was saved without asking them.
+func (t *toolset) noteApproval(data map[string]any) map[string]any {
+	if !t.autoApprove {
+		return data
+	}
+	if presentation, ok := data["presentation"].(extension.Presentation); ok {
+		presentation.Body = strings.TrimSpace(presentation.Body + "\n\n" + autoApprovedNote)
+		data["presentation"] = presentation
+	}
+	return data
+}
+
+const autoApprovedNote = "_Approved automatically by the `auto_approve` setting._"
 
 func describeSchedule(schedule Schedule, runs []time.Time) string {
 	var b strings.Builder
