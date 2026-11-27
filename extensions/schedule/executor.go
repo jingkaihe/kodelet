@@ -23,10 +23,11 @@ type agentExecutor struct {
 }
 
 // Execute runs the instruction and reports the agent's final output and run
-// stats, including for runs that fail after the conversation starts. Closing
+// stats, including for runs that fail after the conversation starts. It sends
+// the instruction only after started records the conversation. Closing
 // detach abandons the run: kodelet acp exits, and the conversation keeps
 // running on the server.
-func (e agentExecutor) Execute(ctx context.Context, schedule Schedule, started func(conversationID string), detach <-chan struct{}) (runResult, error) {
+func (e agentExecutor) Execute(ctx context.Context, schedule Schedule, started func(conversationID string) error, detach <-chan struct{}) (runResult, error) {
 	client := agent.NewClient(agent.ClientOptions{
 		Server:  e.server,
 		Runner:  schedule.Workspace,
@@ -55,7 +56,9 @@ func (e agentExecutor) Execute(ctx context.Context, schedule Schedule, started f
 	if err != nil {
 		return runResult{}, describeAgentError(err, "failed to start the conversation")
 	}
-	started(session.ID())
+	if err := started(session.ID()); err != nil {
+		return runResult{}, err
+	}
 	collector := newRunCollector()
 	unsubscribe := session.Subscribe(collector.observe)
 	response, runErr := session.RunAndWait(ctx, agent.RunOptions{Message: schedule.Instruction})

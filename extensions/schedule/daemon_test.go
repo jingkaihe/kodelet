@@ -25,9 +25,11 @@ type fakeExecutor struct {
 	run      func(ctx context.Context, schedule Schedule, detach <-chan struct{}) error
 	// output is the final output of every run; it defaults to "done <name>".
 	output string
+	// sent counts the instructions sent to started conversations.
+	sent int
 }
 
-func (f *fakeExecutor) Execute(ctx context.Context, schedule Schedule, started func(string), detach <-chan struct{}) (runResult, error) {
+func (f *fakeExecutor) Execute(ctx context.Context, schedule Schedule, started func(string) error, detach <-chan struct{}) (runResult, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, schedule)
 	run := f.run
@@ -40,7 +42,12 @@ func (f *fakeExecutor) Execute(ctx context.Context, schedule Schedule, started f
 	if output == "" {
 		output = "done " + schedule.Name
 	}
-	started("conv-" + schedule.ID)
+	if err := started("conv-" + schedule.ID); err != nil {
+		return runResult{}, err
+	}
+	f.mu.Lock()
+	f.sent++
+	f.mu.Unlock()
 	result := runResult{Output: output, Stats: RunStats{ToolCalls: 2, Tools: map[string]int{"bash": 2}}}
 	if run != nil {
 		return result, run(ctx, schedule, detach)
@@ -442,7 +449,7 @@ func TestDaemonShutdownCancelsRunsThatHaveNotStarted(t *testing.T) {
 	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
 	schedule := createTestSchedule(t, store, "runner-a", "daily", due)
 	starting := make(chan struct{})
-	exec := executorFunc(func(_ context.Context, _ Schedule, _ func(string), detach <-chan struct{}) (runResult, error) {
+	exec := executorFunc(func(_ context.Context, _ Schedule, _ func(string) error, detach <-chan struct{}) (runResult, error) {
 		close(starting)
 		<-detach
 		return runResult{}, errors.New("failed to start the conversation: context canceled")
@@ -460,9 +467,9 @@ func TestDaemonShutdownCancelsRunsThatHaveNotStarted(t *testing.T) {
 	assert.Equal(t, []string{"canceled:" + notStartedMessage}, runStatuses(t, store, schedule.ID))
 }
 
-type executorFunc func(ctx context.Context, schedule Schedule, started func(string), detach <-chan struct{}) (runResult, error)
+type executorFunc func(ctx context.Context, schedule Schedule, started func(string) error, detach <-chan struct{}) (runResult, error)
 
-func (f executorFunc) Execute(ctx context.Context, schedule Schedule, started func(string), detach <-chan struct{}) (runResult, error) {
+func (f executorFunc) Execute(ctx context.Context, schedule Schedule, started func(string) error, detach <-chan struct{}) (runResult, error) {
 	return f(ctx, schedule, started, detach)
 }
 
@@ -556,6 +563,28 @@ func TestDaemonHoldsTheSlotUntilATimedOutRunStops(t *testing.T) {
 	clock.Set(start.Add(2 * time.Hour))
 	tickAndWait(t, d)
 	assert.Equal(t, 1, exec.callCount(), "the next occurrence starts once the slot is free")
+}
+
+func TestDaemonSendsNoInstructionWithoutARecordedConversation(t *testing.T) {
+	store, _ := newTestStore(t)
+	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
+	schedule := createTestSchedule(t, store, "runner-a", "daily", due)
+	_, err := store.db.ExecContext(t.Context(), `
+CREATE TRIGGER fail_conversation BEFORE UPDATE OF conversation_id ON runs
+BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END`)
+	require.NoError(t, err)
+	exec := &fakeExecutor{}
+	d, clock, _ := newTestDaemon(store, exec, nil)
+
+	clock.Set(due)
+	tickAndWait(t, d)
+
+	assert.Equal(t, 1, exec.callCount())
+	assert.Zero(t, exec.sent, "a run whose conversation is not on record is never sent")
+	statuses := runStatuses(t, store, schedule.ID)
+	require.Len(t, statuses, 1)
+	assert.Contains(t, statuses[0], "failed:did not send the instruction: failed to record run conversation")
+	assert.Contains(t, statuses[0], "disk I/O error")
 }
 
 func TestDaemonCountsRunsLeftByAPreviousDaemonTowardConcurrency(t *testing.T) {

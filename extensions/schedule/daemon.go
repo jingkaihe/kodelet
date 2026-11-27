@@ -63,12 +63,13 @@ func (c daemonConfig) validate() error {
 	return nil
 }
 
-// executor runs one scheduled instruction as a new conversation. Before it
-// returns, it calls started with the conversation ID once the conversation
-// exists. It reports what the run did even when it fails. Closing detach
-// abandons the run without stopping its conversation.
+// executor runs one scheduled instruction as a new conversation. Once the
+// conversation exists, it calls started with the conversation ID, and sends
+// the instruction only if started succeeds. It reports what the run did even
+// when it fails. Closing detach abandons the run without stopping its
+// conversation.
 type executor interface {
-	Execute(ctx context.Context, schedule Schedule, started func(conversationID string), detach <-chan struct{}) (runResult, error)
+	Execute(ctx context.Context, schedule Schedule, started func(conversationID string) error, detach <-chan struct{}) (runResult, error)
 }
 
 // conversations reads and stops the conversations of runs on the server.
@@ -347,14 +348,17 @@ func (d *daemon) callExecutor(ctx context.Context, schedule Schedule, run *runni
 			result, panicked, err = runResult{}, true, errors.Errorf("internal error: %v", recovered)
 		}
 	}()
-	result, err = d.exec.Execute(ctx, schedule, func(conversationID string) {
-		run.ConversationID = conversationID
+	result, err = d.exec.Execute(ctx, schedule, func(conversationID string) error {
+		// Without the conversation ID on record, a daemon that crashes could
+		// never find the run, so the instruction is not sent.
 		storeCtx, cancel := context.WithTimeout(context.Background(), storeTimeout)
 		defer cancel()
 		if err := d.store.SetRunConversation(storeCtx, run.ID, conversationID); err != nil {
-			log.Error("failed to record run conversation", "error", err)
+			return errors.Wrap(err, "did not send the instruction")
 		}
+		run.ConversationID = conversationID
 		log.Info("run conversation started", "conversation", conversationID)
+		return nil
 	}, d.detached.Done())
 	return result, false, err
 }
