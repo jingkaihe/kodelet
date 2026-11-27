@@ -100,57 +100,20 @@ describe('UIInputDialog', () => {
       expect(screen.getByRole('button', { name: 'Allow' })).toHaveFocus();
     });
 
+    const dismiss = screen.getByRole('button', { name: 'Dismiss dialog' });
     fireEvent.keyDown(screen.getByRole('button', { name: 'Allow' }), { key: 'Tab' });
-    expect(screen.getByRole('button', { name: 'Dismiss dialog' })).toHaveFocus();
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Dismiss dialog' }), {
+    expect(dismiss).toHaveFocus();
+    fireEvent.keyDown(dismiss, {
       key: 'Tab',
       shiftKey: true,
     });
     expect(screen.getByRole('button', { name: 'Allow' })).toHaveFocus();
 
     fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(dismiss);
 
     expect(onSubmit).toHaveBeenCalledWith('');
     expect(onCancel).toHaveBeenCalledTimes(1);
-  });
-
-  it('uses the shared dialog header and action buttons', () => {
-    const onCancel = vi.fn();
-    render(
-      <UIInputDialog
-        mode="confirm"
-        request={{ id: 'confirm-2', title: 'Update schedule?', confirmButtonText: 'Update' }}
-        onCancel={onCancel}
-        onSubmit={vi.fn()}
-      />
-    );
-
-    expect(screen.getByRole('heading', { name: 'Update schedule?' })).toHaveClass(
-      'new-chat-context-title'
-    );
-    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveClass('new-chat-secondary-button');
-    expect(screen.getByRole('button', { name: 'Update' })).toHaveClass('new-chat-primary-button');
-    expect(document.querySelector('.panel-action-button, .primary-pill-button')).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss dialog' }));
-    expect(onCancel).toHaveBeenCalledTimes(1);
-  });
-
-  it('disables every dismissal control while a response is submitting', () => {
-    render(
-      <UIInputDialog
-        mode="confirm"
-        request={{ id: 'confirm-3', title: 'Allow bash?' }}
-        submitting
-        onCancel={vi.fn()}
-        onSubmit={vi.fn()}
-      />
-    );
-
-    expect(screen.getByRole('button', { name: 'Dismiss dialog' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Sending…' })).toBeDisabled();
   });
 
   it('dismisses the active dialog with Escape', async () => {
@@ -163,7 +126,7 @@ describe('UIInputDialog', () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it('does not send a second dismissal while a response is submitting', async () => {
+  it('disables the actions and ignores Escape while a response is submitting', async () => {
     const onCancel = vi.fn();
     const { rerender } = render(
       <UIInputDialog request={baseRequest} onCancel={onCancel} onSubmit={vi.fn()} />
@@ -173,6 +136,9 @@ describe('UIInputDialog', () => {
     rerender(
       <UIInputDialog request={baseRequest} submitting onCancel={onCancel} onSubmit={vi.fn()} />
     );
+    expect(screen.getByRole('button', { name: 'Dismiss dialog' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Sending…' })).toBeDisabled();
     fireEvent.keyDown(screen.getByTestId('ui-input-response'), { key: 'Escape' });
 
     expect(onCancel).not.toHaveBeenCalled();

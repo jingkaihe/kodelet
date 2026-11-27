@@ -188,6 +188,7 @@ func TestServer_Initialize(t *testing.T) {
 	assert.NotNil(t, result["agentInfo"])
 	assert.Equal(t, true, result["_meta"].(map[string]any)["steering"].(map[string]any)["supported"])
 	assert.Equal(t, float64(1), result["_meta"].(map[string]any)["conversationHierarchy"].(map[string]any)["version"])
+	assert.NotContains(t, result["_meta"], "conversations", "status and stop require a server-backed session")
 
 	agentInfo := result["agentInfo"].(map[string]any)
 	assert.Equal(t, "kodelet", agentInfo["name"])

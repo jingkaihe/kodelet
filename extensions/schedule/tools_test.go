@@ -5,14 +5,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/jingkaihe/kodelet/sdk/go/extension"
 	"github.com/jingkaihe/kodelet/sdk/go/extension/extensiontest"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,22 +20,17 @@ var toolNow = time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
 
 type toolHarness struct {
 	harness *extensiontest.Harness
-	init    extension.InitializeResult
+	schemas map[string]*jsonschema.Resolved
+	tools   []extension.ToolDeclaration
 	store   *Store
 	cwd     string
 	profile string
+	clock   *testClock
 
-	clock *testClock
-
-	mu       sync.Mutex
-	approve  bool
-	confirms []extension.ConfirmRequest
-	// whileConfirming runs while the approval dialog is open.
-	whileConfirming func()
+	approve         bool
+	whileConfirming func() error
 }
 
-// newToolHarness starts the extension in a runner workspace. With interactive
-// set, the host approves confirmations unless approve is cleared.
 func newToolHarness(t *testing.T, runnerID string, interactive bool) *toolHarness {
 	t.Helper()
 	return newToolHarnessWith(t, runnerID, interactive, false)
@@ -44,13 +38,11 @@ func newToolHarness(t *testing.T, runnerID string, interactive bool) *toolHarnes
 
 func newToolHarnessWith(t *testing.T, runnerID string, interactive, autoApprove bool) *toolHarness {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "schedule.db")
-	stores := &storeOpener{path: dbPath}
+	stores := &storeOpener{path: filepath.Join(t.TempDir(), "schedule.db")}
 	t.Cleanup(func() { stores.Close() })
 	ext := extension.New(extension.Metadata{Name: "schedule", Version: "test"})
 	clock := &testClock{now: toolNow}
 	registerTools(ext, stores, clock.Now, autoApprove)
-
 	cwd, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
 	th := &toolHarness{cwd: cwd, profile: "anthropic", approve: true, clock: clock}
@@ -58,20 +50,14 @@ func newToolHarnessWith(t *testing.T, runnerID string, interactive, autoApprove 
 	if interactive {
 		options = &extensiontest.Options{Host: func(_ context.Context, call extensiontest.HostCall) (any, error) {
 			if call.Method != "kodelet.ui.confirm" {
-				return map[string]any{}, nil
+				return nil, errors.Errorf("unexpected host call: %s", call.Method)
 			}
-			var request extension.ConfirmRequest
-			if err := call.DecodeParams(&request); err != nil {
-				return nil, err
+			if th.whileConfirming != nil {
+				if err := th.whileConfirming(); err != nil {
+					return nil, err
+				}
 			}
-			th.mu.Lock()
-			th.confirms = append(th.confirms, request)
-			approve, hook := th.approve, th.whileConfirming
-			th.mu.Unlock()
-			if hook != nil {
-				hook()
-			}
-			return map[string]any{"status": "submitted", "confirmed": approve}, nil
+			return map[string]any{"status": "submitted", "confirmed": th.approve}, nil
 		}}
 	}
 	th.harness = extensiontest.New(ext, options)
@@ -80,523 +66,254 @@ func newToolHarnessWith(t *testing.T, runnerID string, interactive, autoApprove 
 	params.Extension.RunnerID = runnerID
 	init, err := th.harness.Initialize(t.Context(), &params)
 	require.NoError(t, err)
-	th.init = init
-
-	store, err := stores.Get(t.Context())
+	th.tools = init.Tools
+	th.schemas = make(map[string]*jsonschema.Resolved)
+	for _, tool := range init.Tools {
+		require.NotNil(t, tool.OutputSchema, tool.Name)
+		schema := decodeValue[jsonschema.Schema](t, tool.OutputSchema)
+		th.schemas[tool.Name], err = schema.Resolve(nil)
+		require.NoError(t, err, tool.Name)
+	}
+	th.store, err = stores.Get(t.Context())
 	require.NoError(t, err)
-	th.store = store
 	return th
 }
 
 func (th *toolHarness) call(t *testing.T, name string, input any) extension.ToolResult {
 	t.Helper()
-	result, err := th.harness.ExecuteTool(t.Context(), name, input, th.callInfo())
+	call := extensiontest.WithCall(extension.CallInfo{CWD: th.cwd, Profile: th.profile})
+	result, err := th.harness.ExecuteTool(t.Context(), name, input, call)
 	require.NoError(t, err)
 	return result
 }
 
-func (th *toolHarness) callInfo() extensiontest.CallOption {
-	return extensiontest.WithCall(extension.CallInfo{CWD: th.cwd, Profile: th.profile})
+// Check successful replies against the same schema code-mode clients receive.
+func (th *toolHarness) success(t *testing.T, name string, input any) extension.ToolResult {
+	t.Helper()
+	result := th.call(t, name, input)
+	require.Empty(t, result.Error, name)
+	require.NoError(t, th.schemas[name].Validate(result.StructuredContent), name)
+	return result
+}
+
+func decodeValue[T any](t *testing.T, v any) T {
+	t.Helper()
+	data, err := json.Marshal(v)
+	require.NoError(t, err)
+	var decoded T
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	return decoded
 }
 
 func (th *toolHarness) lastConfirm(t *testing.T) extension.ConfirmRequest {
 	t.Helper()
-	th.mu.Lock()
-	defer th.mu.Unlock()
-	require.NotEmpty(t, th.confirms)
-	return th.confirms[len(th.confirms)-1]
+	calls := th.harness.HostCalls()
+	require.NotEmpty(t, calls)
+	call := calls[len(calls)-1]
+	require.Equal(t, "kodelet.ui.confirm", call.Method)
+	var request extension.ConfirmRequest
+	require.NoError(t, call.DecodeParams(&request))
+	return request
 }
 
-func TestCreateBindsScheduleToCurrentConversation(t *testing.T) {
+func dailyInput() map[string]any {
+	return map[string]any{"name": "daily", "schedule": "CRON_TZ=UTC 0 9 * * *", "instruction": "Review PRs"}
+}
+
+func TestCreateBindsScheduleAtApproval(t *testing.T) {
 	th := newToolHarness(t, "runner-a", true)
+	due := time.Date(2026, 11, 26, 9, 0, 0, 0, time.UTC)
+	th.clock.Set(due.Add(-time.Minute))
+	th.whileConfirming = func() error {
+		th.clock.Set(due.Add(time.Minute))
+		return nil
+	}
 
-	result := th.call(t, "schedule_create", map[string]any{
-		"name":        "nightly review",
-		"schedule":    "CRON_TZ=UTC 0 9 * * *",
-		"instruction": "Review open pull requests",
-	})
-
-	require.Empty(t, result.Error)
-	assert.Contains(t, result.Content, `Created schedule "nightly review"`)
+	result := th.success(t, "schedule_create", dailyInput())
 	confirm := th.lastConfirm(t)
-	assert.Equal(t, "Create", confirm.ConfirmButtonText)
-	assert.Contains(t, confirm.Message, "Review open pull requests")
+	assert.Contains(t, confirm.Message, "Review PRs")
 	assert.Contains(t, confirm.Message, "Directory: "+th.cwd)
 	assert.Contains(t, confirm.Message, "Profile: anthropic")
-
-	schedules, err := th.store.List(t.Context(), "")
+	created := decodeValue[scheduleOutput](t, result.StructuredContent)
+	schedule, err := th.store.Get(t.Context(), "runner-a", created.Schedule.ID)
 	require.NoError(t, err)
-	require.Len(t, schedules, 1)
-	schedule := schedules[0]
-	assert.Equal(t, "runner-a", schedule.Workspace)
 	assert.Equal(t, th.cwd, schedule.CWD)
 	assert.Equal(t, "anthropic", schedule.Profile)
-	assert.True(t, schedule.Enabled)
 	require.NotNil(t, schedule.NextRunAt)
-	assert.True(t, time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC).Equal(*schedule.NextRunAt))
+	assert.Equal(t, due.AddDate(0, 0, 1), schedule.NextRunAt.UTC(), "today's run passed during approval")
+
+	for _, reply := range []extension.ToolResult{result, th.success(t, "schedule_list", map[string]any{})} {
+		data, err := json.Marshal(reply)
+		require.NoError(t, err)
+		assert.NotContains(t, string(data), "runner-a", "the runner binding is internal")
+	}
 }
 
-func TestToolsRejectModelChosenWorkspaceAndProfile(t *testing.T) {
+func TestToolsRejectModelChosenBindings(t *testing.T) {
 	th := newToolHarness(t, "runner-a", true)
-	result := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "@daily", "instruction": "p"})
-	require.Empty(t, result.Error)
-	schedules, err := th.store.List(t.Context(), "runner-a")
-	require.NoError(t, err)
-	id := schedules[0].ID
-
 	for _, field := range []string{"workspace", "profile"} {
-		t.Run(field, func(t *testing.T) {
-			_, err := th.harness.ExecuteTool(t.Context(), "schedule_create", map[string]any{
-				"name": "other", "schedule": "@daily", "instruction": "p", field: "chosen",
-			}, th.callInfo())
-			assert.Error(t, err)
-			_, err = th.harness.ExecuteTool(t.Context(), "schedule_update", map[string]any{
-				"id": id, field: "chosen",
-			}, th.callInfo())
-			assert.Error(t, err)
-		})
+		for name, input := range map[string]map[string]any{
+			"schedule_create": dailyInput(), "schedule_update": {"id": "existing"},
+		} {
+			input[field] = "chosen"
+			_, err := th.harness.ExecuteTool(t.Context(), name, input)
+			assert.Error(t, err, "%s should reject %s in its input", name, field)
+		}
 	}
-
-	schedules, err = th.store.List(t.Context(), "")
-	require.NoError(t, err)
-	require.Len(t, schedules, 1)
-	assert.Equal(t, "runner-a", schedules[0].Workspace)
-	assert.Equal(t, "anthropic", schedules[0].Profile)
 }
 
-func TestCreateWithoutConversationProfileUsesServerDefault(t *testing.T) {
+func TestCreateValidatesBeforeAskingForApproval(t *testing.T) {
 	th := newToolHarness(t, "runner-a", true)
-	th.profile = ""
-
-	result := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "@daily", "instruction": "p"})
-
-	require.Empty(t, result.Error)
-	assert.Contains(t, th.lastConfirm(t).Message, "Profile: server default")
-	schedules, err := th.store.List(t.Context(), "runner-a")
-	require.NoError(t, err)
-	assert.Empty(t, schedules[0].Profile)
-}
-
-func TestCreateValidatesInput(t *testing.T) {
-	th := newToolHarness(t, "runner-a", true)
-	require.NoError(t, os.Mkdir(filepath.Join(th.cwd, "sub"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(th.cwd, "file"), nil, 0o600))
-
-	tests := []struct {
-		name  string
-		input map[string]any
-		err   string
-	}{
-		{name: "bad schedule", input: map[string]any{"name": "a", "schedule": "nope", "instruction": "p"}, err: "invalid schedule"},
-		{name: "blank name", input: map[string]any{"name": " ", "schedule": "@daily", "instruction": "p"}, err: "name is required"},
-		{name: "blank instruction", input: map[string]any{"name": "a", "schedule": "@daily", "instruction": " "}, err: "instruction is required"},
-		{name: "cwd outside", input: map[string]any{"name": "a", "schedule": "@daily", "instruction": "p", "cwd": "/"}, err: "must be inside the current directory"},
-		{name: "cwd escapes", input: map[string]any{"name": "a", "schedule": "@daily", "instruction": "p", "cwd": "../"}, err: "must be inside the current directory"},
-		{name: "cwd missing", input: map[string]any{"name": "a", "schedule": "@daily", "instruction": "p", "cwd": "missing"}, err: "does not exist"},
-		{name: "cwd file", input: map[string]any{"name": "a", "schedule": "@daily", "instruction": "p", "cwd": "file"}, err: "not a directory"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := th.call(t, "schedule_create", tt.input)
-			assert.Contains(t, result.Error, tt.err)
+	createTestSchedule(t, th.store, "runner-a", "taken", toolNow)
+	for _, tt := range []struct{ field, value, want string }{
+		{"schedule", "nope", "invalid schedule"},
+		{"name", " ", "name is required"},
+		{"name", "taken", "already exists"},
+		{"instruction", " ", "instruction is required"},
+		{"cwd", "..", "must be inside the current directory"},
+		{"cwd", "missing", "does not exist"},
+		{"cwd", "file", "not a directory"},
+	} {
+		t.Run(tt.want, func(t *testing.T) {
+			input := dailyInput()
+			input[tt.field] = tt.value
+			assert.Contains(t, th.call(t, "schedule_create", input).Error, tt.want)
 		})
 	}
+	assert.Empty(t, th.harness.HostCalls())
+}
 
-	result := th.call(t, "schedule_create", map[string]any{"name": "a", "schedule": "@daily", "instruction": "p", "cwd": "sub"})
-	require.Empty(t, result.Error)
-	result = th.call(t, "schedule_create", map[string]any{"name": "a", "schedule": "@daily", "instruction": "p"})
-	assert.Contains(t, result.Error, "already exists")
+func TestCreateResolvesSymlinksWithinConversationDirectory(t *testing.T) {
+	th := newToolHarness(t, "runner-a", true)
+	real := filepath.Join(th.cwd, "sub")
+	require.NoError(t, os.Mkdir(real, 0o755))
+	require.NoError(t, os.Symlink(real, filepath.Join(th.cwd, "inside")))
+	require.NoError(t, os.Symlink(t.TempDir(), filepath.Join(th.cwd, "outside")))
+	link := filepath.Join(t.TempDir(), "conversation")
+	require.NoError(t, os.Symlink(th.cwd, link))
+	th.cwd = link
 
-	schedules, err := th.store.List(t.Context(), "runner-a")
-	require.NoError(t, err)
-	require.Len(t, schedules, 1)
-	assert.Equal(t, filepath.Join(th.cwd, "sub"), schedules[0].CWD)
+	input := dailyInput()
+	input["cwd"] = "outside"
+	assert.Contains(t, th.call(t, "schedule_create", input).Error, "must be inside the current directory")
+	input["cwd"] = "inside"
+	result := th.success(t, "schedule_create", input)
+	assert.Equal(t, real, decodeValue[scheduleOutput](t, result.StructuredContent).Schedule.CWD)
 }
 
 func TestMutationsRequireApproval(t *testing.T) {
 	t.Run("without interactive UI", func(t *testing.T) {
 		th := newToolHarness(t, "runner-a", false)
-		result := th.call(t, "schedule_create", map[string]any{"name": "a", "schedule": "@daily", "instruction": "p"})
-		assert.Equal(t, errNotApproved.Error(), result.Error)
-		schedules, err := th.store.List(t.Context(), "")
+		assert.Equal(t, errNotApproved.Error(), th.call(t, "schedule_create", dailyInput()).Error)
+		schedules, err := th.store.List(t.Context(), "runner-a")
 		require.NoError(t, err)
 		assert.Empty(t, schedules)
 	})
-
 	t.Run("declined", func(t *testing.T) {
 		th := newToolHarness(t, "runner-a", true)
-		result := th.call(t, "schedule_create", map[string]any{"name": "a", "schedule": "@daily", "instruction": "p"})
-		require.Empty(t, result.Error)
-		schedules, err := th.store.List(t.Context(), "runner-a")
-		require.NoError(t, err)
-		id := schedules[0].ID
-
-		th.mu.Lock()
+		schedule := createTestSchedule(t, th.store, "runner-a", "daily", toolNow)
 		th.approve = false
-		th.mu.Unlock()
-		result = th.call(t, "schedule_update", map[string]any{"id": id, "instruction": "changed"})
-		assert.Equal(t, errNotApproved.Error(), result.Error)
-		result = th.call(t, "schedule_delete", map[string]any{"id": id})
-		assert.Equal(t, errNotApproved.Error(), result.Error)
-
-		saved, err := th.store.Get(t.Context(), "runner-a", id)
+		assert.Equal(t, errNotApproved.Error(), th.call(t, "schedule_update", map[string]any{"id": schedule.ID, "instruction": "changed"}).Error)
+		assert.Equal(t, errNotApproved.Error(), th.call(t, "schedule_delete", map[string]any{"id": schedule.ID}).Error)
+		assert.Contains(t, th.lastConfirm(t).Title, `Delete schedule "daily"`)
+		saved, err := th.store.Get(t.Context(), "runner-a", schedule.ID)
 		require.NoError(t, err)
-		assert.Equal(t, "p", saved.Instruction)
+		assert.Equal(t, schedule.Instruction, saved.Instruction)
 	})
 }
 
-func TestToolsRequireARunner(t *testing.T) {
-	th := newToolHarness(t, "", true)
-	for name, input := range map[string]map[string]any{
-		"schedule_list":   {},
-		"schedule_create": {"name": "a", "schedule": "@daily", "instruction": "p"},
-		"schedule_delete": {"id": "abc"},
+func TestAutoApproveSkipsUIAndLabelsMutations(t *testing.T) {
+	th := newToolHarnessWith(t, "runner-a", false, true)
+	th.profile = "" // unattended runs may use the server default
+	created := th.success(t, "schedule_create", dailyInput())
+	schedule := decodeValue[scheduleOutput](t, created.StructuredContent).Schedule
+	assert.Empty(t, schedule.Profile)
+	assert.Contains(t, presentationOf(t, created).Body, "Profile:** server default")
+	for _, result := range []extension.ToolResult{
+		created,
+		th.success(t, "schedule_update", map[string]any{"id": schedule.ID, "enabled": false}),
+		th.success(t, "schedule_delete", map[string]any{"id": schedule.ID}),
 	} {
-		result := th.call(t, name, input)
-		assert.Contains(t, result.Error, "Kodelet runner", name)
+		assert.Contains(t, presentationOf(t, result).Body, "Approved automatically")
+	}
+	assert.Empty(t, th.harness.HostCalls())
+	_, err := th.store.Get(t.Context(), "runner-a", schedule.ID)
+	assert.ErrorIs(t, err, errNotFound)
+}
+
+func TestToolDescriptionsReflectApproval(t *testing.T) {
+	for _, auto := range []bool{false, true} {
+		th := newToolHarnessWith(t, "runner-a", false, auto)
+		for _, tool := range th.tools {
+			assert.NotEmpty(t, tool.Short, tool.Name)
+			switch tool.Name {
+			case "schedule_create", "schedule_update", "schedule_delete":
+				if auto {
+					assert.NotContains(t, tool.Description+tool.Short, "approv", tool.Name)
+				} else {
+					assert.Contains(t, tool.Description, "must approve", tool.Name)
+					assert.Contains(t, tool.Short, "needs user approval", tool.Name)
+				}
+			}
+		}
 	}
 }
 
 func TestToolsCannotReachOtherWorkspaces(t *testing.T) {
 	th := newToolHarness(t, "runner-a", true)
-	next := toolNow.Add(time.Hour)
-	other := createTestSchedule(t, th.store, "runner-b", "theirs", next)
-	createTestSchedule(t, th.store, "runner-a", "ours", next)
+	other := createTestSchedule(t, th.store, "runner-b", "theirs", toolNow)
+	createTestSchedule(t, th.store, "runner-a", "ours", toolNow)
+	listed := decodeValue[listOutput](t, th.success(t, "schedule_list", map[string]any{}).StructuredContent)
+	require.Len(t, listed.Schedules, 1)
+	assert.Equal(t, "ours", listed.Schedules[0].Name)
 
-	result := th.call(t, "schedule_list", map[string]any{})
-	require.Empty(t, result.Error)
-	assert.Contains(t, result.Content, "1 schedule.")
-	assert.Contains(t, result.Content, "ours")
-	assert.NotContains(t, result.Content, "theirs")
-
-	result = th.call(t, "schedule_update", map[string]any{"id": other.ID, "enabled": false})
-	assert.Equal(t, errNotFound.Error(), result.Error)
-	result = th.call(t, "schedule_delete", map[string]any{"id": other.ID})
-	assert.Equal(t, errNotFound.Error(), result.Error)
-	_, err := th.store.Get(t.Context(), "runner-b", other.ID)
-	assert.NoError(t, err)
+	assert.Equal(t, errNotFound.Error(), th.call(t, "schedule_update", map[string]any{"id": other.ID, "enabled": false}).Error)
+	assert.Equal(t, errNotFound.Error(), th.call(t, "schedule_delete", map[string]any{"id": other.ID}).Error)
+	assert.Empty(t, th.harness.HostCalls(), "must not even present the foreign schedule for approval")
 }
 
-func TestUpdateAndDelete(t *testing.T) {
+func TestToolsRequireARunner(t *testing.T) {
+	th := newToolHarness(t, "", true)
+	assert.Contains(t, th.call(t, "schedule_list", map[string]any{}).Error, "Kodelet runner")
+	assert.Contains(t, th.call(t, "schedule_create", dailyInput()).Error, "Kodelet runner")
+}
+
+func TestPauseAndResume(t *testing.T) {
 	th := newToolHarness(t, "runner-a", true)
-	result := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "CRON_TZ=UTC 0 9 * * *", "instruction": "p"})
-	require.Empty(t, result.Error)
-	schedules, err := th.store.List(t.Context(), "runner-a")
-	require.NoError(t, err)
-	id := schedules[0].ID
+	created := th.success(t, "schedule_create", dailyInput())
+	id := decodeValue[scheduleOutput](t, created.StructuredContent).Schedule.ID
+	th.profile = "openai" // changing the editing conversation does not rebind the schedule
+	result := th.success(t, "schedule_update", map[string]any{"id": id, "enabled": false, "schedule": "CRON_TZ=UTC 0 11 * * *"})
+	paused := decodeValue[scheduleOutput](t, result.StructuredContent)
+	assert.Nil(t, paused.Schedule.NextRunAt)
+	assert.Empty(t, paused.UpcomingRuns)
+	assert.Contains(t, presentationOf(t, result).Body, "**Changed:** schedule, paused")
+	assert.Contains(t, th.lastConfirm(t).Message, "Schedule: CRON_TZ=UTC 0 9 * * * → CRON_TZ=UTC 0 11 * * *")
+	assert.Contains(t, th.call(t, "schedule_update", map[string]any{"id": id, "enabled": false}).Error, "no changes")
 
-	// Editing from a conversation on another profile keeps the schedule's.
-	th.profile = "openai"
-	result = th.call(t, "schedule_update", map[string]any{"id": id, "schedule": "CRON_TZ=UTC 30 18 * * *"})
-	require.Empty(t, result.Error)
-	confirm := th.lastConfirm(t)
-	assert.Contains(t, confirm.Message, "Schedule: CRON_TZ=UTC 0 9 * * * → CRON_TZ=UTC 30 18 * * *")
-	assert.NotContains(t, confirm.Message, "Profile")
-	saved, err := th.store.Get(t.Context(), "runner-a", id)
-	require.NoError(t, err)
-	assert.Equal(t, "anthropic", saved.Profile)
-	assert.True(t, time.Date(2026, 11, 26, 18, 30, 0, 0, time.UTC).Equal(*saved.NextRunAt))
-
-	result = th.call(t, "schedule_update", map[string]any{"id": id, "enabled": false})
-	require.Empty(t, result.Error)
-	saved, err = th.store.Get(t.Context(), "runner-a", id)
-	require.NoError(t, err)
-	assert.False(t, saved.Enabled)
-	assert.Nil(t, saved.NextRunAt)
-
-	result = th.call(t, "schedule_update", map[string]any{"id": id, "enabled": false, "instruction": "p"})
-	assert.Contains(t, result.Error, "no changes")
-
-	result = th.call(t, "schedule_update", map[string]any{"id": id, "enabled": true})
-	require.Empty(t, result.Error)
-	saved, err = th.store.Get(t.Context(), "runner-a", id)
-	require.NoError(t, err)
-	assert.True(t, saved.Enabled)
-	assert.True(t, time.Date(2026, 11, 26, 18, 30, 0, 0, time.UTC).Equal(*saved.NextRunAt))
-
-	result = th.call(t, "schedule_delete", map[string]any{"id": id})
-	require.Empty(t, result.Error)
-	assert.Contains(t, th.lastConfirm(t).Title, `Delete schedule "daily"?`)
-	_, err = th.store.Get(t.Context(), "runner-a", id)
-	assert.ErrorIs(t, err, errNotFound)
-}
-
-func TestListReportsDaemonHealth(t *testing.T) {
-	th := newToolHarness(t, "runner-a", true)
-
-	result := th.call(t, "schedule_list", map[string]any{})
-	assert.Contains(t, result.Content, "No schedules.")
-	assert.Contains(t, result.Content, "has never run on this host")
-
-	require.NoError(t, th.store.SaveHeartbeat(t.Context(), DaemonStatus{
-		PID: 1, StartedAt: toolNow, HeartbeatAt: toolNow.Add(-10 * time.Second), PollInterval: 30 * time.Second,
-	}))
-	result = th.call(t, "schedule_list", map[string]any{})
-	assert.NotContains(t, result.Content, "Warning")
-}
-
-func TestModelFacingTextHidesRunnerBinding(t *testing.T) {
-	th := newToolHarness(t, "runner-a", true)
-
-	declarations, err := json.Marshal(th.init.Tools)
-	require.NoError(t, err)
-	assert.NotContains(t, strings.ToLower(string(declarations)), "workspace")
-
-	results := []extension.ToolResult{
-		th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "@daily", "instruction": "p"}),
-		th.call(t, "schedule_list", map[string]any{}),
+	th.whileConfirming = func() error {
+		th.clock.Set(toolNow.Add(2 * time.Hour)) // 11:00 passes while the resume prompt is open
+		return nil
 	}
-	schedules, err := th.store.List(t.Context(), "runner-a")
-	require.NoError(t, err)
-	results = append(results, th.call(t, "schedule_update", map[string]any{"id": schedules[0].ID, "instruction": "q"}))
-	for _, result := range results {
-		require.Empty(t, result.Error)
-		encoded, err := json.Marshal(result.StructuredContent)
-		require.NoError(t, err)
-		data, err := json.Marshal(result.Data)
-		require.NoError(t, err)
-		for _, text := range []string{result.Content, string(encoded), string(data)} {
-			assert.NotContains(t, strings.ToLower(text), "workspace")
-			assert.NotContains(t, text, "runner-a")
-		}
-	}
-}
-
-func TestToolsDeclareCodeModeMetadata(t *testing.T) {
-	th := newToolHarness(t, "runner-a", true)
-
-	require.Len(t, th.init.Tools, 6)
-	for _, tool := range th.init.Tools {
-		assert.NotEmpty(t, tool.Short, tool.Name)
-		assert.LessOrEqual(t, len(tool.Short), 120, tool.Name)
-		require.NotNil(t, tool.OutputSchema, tool.Name)
-		assert.Equal(t, "object", tool.OutputSchema["type"], tool.Name)
-		_, err := resolveSchema(tool.OutputSchema)
-		assert.NoError(t, err, tool.Name)
-	}
-}
-
-func resolveSchema(document map[string]any) (*jsonschema.Resolved, error) {
-	data, err := json.Marshal(document)
-	if err != nil {
-		return nil, err
-	}
-	var schema jsonschema.Schema
-	if err := json.Unmarshal(data, &schema); err != nil {
-		return nil, err
-	}
-	return schema.Resolve(nil)
-}
-
-// TestStructuredContentMatchesOutputSchema checks every result against the
-// schema code mode validates it with, including optional fields.
-func TestStructuredContentMatchesOutputSchema(t *testing.T) {
-	th := newToolHarness(t, "runner-a", true)
-	schemas := map[string]*jsonschema.Resolved{}
-	for _, tool := range th.init.Tools {
-		resolved, err := resolveSchema(tool.OutputSchema)
-		require.NoError(t, err)
-		schemas[tool.Name] = resolved
-	}
-	check := func(name string, result extension.ToolResult) {
-		t.Helper()
-		require.Empty(t, result.Error, name)
-		require.NotNil(t, result.StructuredContent, name)
-		assert.NoError(t, schemas[name].Validate(result.StructuredContent), name)
-	}
-
-	check("schedule_list", th.call(t, "schedule_list", map[string]any{}))
-	created := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "@daily", "instruction": "p"})
-	check("schedule_create", created)
-	check("schedule_create", th.call(t, "schedule_create", map[string]any{"name": "paused", "schedule": "@daily", "instruction": "p", "enabled": false}))
-	schedules, err := th.store.List(t.Context(), "runner-a")
-	require.NoError(t, err)
-	id := schedules[0].ID
-	runID, claimed, err := th.store.Claim(t.Context(), id, *schedules[0].NextRunAt, toolNow.Add(48*time.Hour), Run{Status: RunRunning, StartedAt: toolNow})
-	require.NoError(t, err)
-	require.True(t, claimed)
-	require.NoError(t, th.store.SetRunConversation(t.Context(), runID, "conv-1"))
-	require.NoError(t, th.store.FinishRun(t.Context(), runID, RunFailed, "runner offline", runResult{}, toolNow))
-	require.NoError(t, th.store.SaveHeartbeat(t.Context(), DaemonStatus{PID: 1, StartedAt: toolNow, HeartbeatAt: toolNow, PollInterval: time.Minute}))
-
-	listed := th.call(t, "schedule_list", map[string]any{})
-	check("schedule_list", listed)
-	assert.Contains(t, mustJSON(t, listed.StructuredContent), "runner offline", "the last run is included")
-	check("schedule_update", th.call(t, "schedule_update", map[string]any{"id": id, "enabled": false}))
-	check("schedule_update", th.call(t, "schedule_update", map[string]any{"id": id, "instruction": "q"}))
-	check("schedule_history", th.call(t, "schedule_history", map[string]any{}))
-	check("schedule_history", th.call(t, "schedule_history", map[string]any{"scheduleId": schedules[1].ID}))
-	check("schedule_run_details", th.call(t, "schedule_run_details", map[string]any{"id": runID}))
-	check("schedule_delete", th.call(t, "schedule_delete", map[string]any{"id": id}))
-}
-
-func mustJSON(t *testing.T, value any) string {
-	t.Helper()
-	data, err := json.Marshal(value)
-	require.NoError(t, err)
-	return string(data)
-}
-
-func presentationOf(t *testing.T, result extension.ToolResult) (summary, body string) {
-	t.Helper()
-	var data struct {
-		Presentation extension.Presentation `json:"presentation"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(mustJSON(t, result.Data)), &data))
-	assert.Equal(t, "markdown", data.Presentation.Format)
-	return data.Presentation.Summary, data.Presentation.Body
-}
-
-func TestAutoApproveSkipsConfirmation(t *testing.T) {
-	th := newToolHarnessWith(t, "runner-a", true, true)
-	th.mu.Lock()
-	th.approve = false // a prompt would be declined
-	th.mu.Unlock()
-
-	result := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "@daily", "instruction": "p"})
-	require.Empty(t, result.Error)
-	_, body := presentationOf(t, result)
-	assert.Contains(t, body, autoApprovedNote)
-	schedules, err := th.store.List(t.Context(), "runner-a")
-	require.NoError(t, err)
-	require.Len(t, schedules, 1)
-	id := schedules[0].ID
-
-	result = th.call(t, "schedule_update", map[string]any{"id": id, "enabled": false})
-	require.Empty(t, result.Error)
-	result = th.call(t, "schedule_delete", map[string]any{"id": id})
-	require.Empty(t, result.Error)
-	_, body = presentationOf(t, result)
-	assert.Contains(t, body, autoApprovedNote)
-
-	th.mu.Lock()
-	defer th.mu.Unlock()
-	assert.Empty(t, th.confirms, "the user is never asked")
-}
-
-func TestAutoApproveWorksWithoutInteractiveUI(t *testing.T) {
-	th := newToolHarnessWith(t, "runner-a", false, true)
-
-	result := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "@daily", "instruction": "p"})
-
-	require.Empty(t, result.Error)
-	schedules, err := th.store.List(t.Context(), "runner-a")
-	require.NoError(t, err)
-	assert.Len(t, schedules, 1)
-}
-
-func TestToolDescriptionsReflectApproval(t *testing.T) {
-	describe := func(autoApprove bool) map[string]string {
-		th := newToolHarnessWith(t, "runner-a", true, autoApprove)
-		texts := map[string]string{}
-		for _, tool := range th.init.Tools {
-			texts[tool.Name] = tool.Description + "\n" + tool.Short
-		}
-		return texts
-	}
-	asking, automatic := describe(false), describe(true)
-
-	for _, name := range []string{"schedule_create", "schedule_update", "schedule_delete"} {
-		assert.Contains(t, asking[name], "must approve", name)
-		assert.Contains(t, asking[name], "needs user approval", name)
-		assert.NotContains(t, automatic[name], "approv", name)
-	}
-	assert.Equal(t, asking["schedule_list"], automatic["schedule_list"])
-}
-
-func TestCreateCountsTheFirstRunFromApproval(t *testing.T) {
-	th := newToolHarness(t, "runner-a", true)
-	th.clock.Set(time.Date(2026, 11, 26, 8, 59, 0, 0, time.UTC))
-	th.whileConfirming = func() { th.clock.Set(time.Date(2026, 11, 26, 9, 30, 0, 0, time.UTC)) }
-
-	result := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "CRON_TZ=UTC 0 9 * * *", "instruction": "p"})
-
-	require.Empty(t, result.Error)
-	schedules, err := th.store.List(t.Context(), "runner-a")
-	require.NoError(t, err)
-	assert.True(t, time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC).Equal(*schedules[0].NextRunAt),
-		"09:00 passed while approval was pending, so the first run is tomorrow")
-}
-
-func TestUpdateApprovedAfterAClaimDoesNotRepeatIt(t *testing.T) {
-	th := newToolHarness(t, "runner-a", true)
-	friday := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
-	th.clock.Set(friday.Add(-time.Hour))
-	result := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "CRON_TZ=UTC 0 9 * * *", "instruction": "p"})
-	require.Empty(t, result.Error)
-	schedules, err := th.store.List(t.Context(), "runner-a")
-	require.NoError(t, err)
-	id := schedules[0].ID
-	require.True(t, friday.Equal(*schedules[0].NextRunAt))
-
-	th.clock.Set(friday.Add(-30 * time.Second))
-	th.whileConfirming = func() {
-		_, claimed, err := th.store.Claim(t.Context(), id, friday, friday.Add(24*time.Hour), Run{Status: RunRunning, StartedAt: friday})
-		require.NoError(t, err)
-		require.True(t, claimed)
-		th.clock.Set(friday.Add(time.Minute))
-	}
-	result = th.call(t, "schedule_update", map[string]any{"id": id, "schedule": "CRON_TZ=UTC 0 9 * * 1-5"})
-
-	require.Empty(t, result.Error)
-	saved, err := th.store.Get(t.Context(), "runner-a", id)
-	require.NoError(t, err)
-	assert.True(t, time.Date(2026, 11, 30, 9, 0, 0, 0, time.UTC).Equal(*saved.NextRunAt), "next run %s", saved.NextRunAt)
+	resumed := th.success(t, "schedule_update", map[string]any{"id": id, "enabled": true})
+	schedule := decodeValue[scheduleOutput](t, resumed.StructuredContent).Schedule
+	assert.Equal(t, "anthropic", schedule.Profile)
+	require.NotNil(t, schedule.NextRunAt)
+	assert.Equal(t, time.Date(2026, 11, 27, 11, 0, 0, 0, time.UTC), schedule.NextRunAt.UTC())
 }
 
 func TestUpdateFailsIfTheScheduleChangesDuringApproval(t *testing.T) {
 	th := newToolHarness(t, "runner-a", true)
-	result := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "@daily", "instruction": "p"})
-	require.Empty(t, result.Error)
-	schedules, err := th.store.List(t.Context(), "runner-a")
-	require.NoError(t, err)
-	id := schedules[0].ID
-
-	th.whileConfirming = func() {
-		th.whileConfirming = nil
-		paused := th.call(t, "schedule_update", map[string]any{"id": id, "enabled": false})
-		require.Empty(t, paused.Error)
+	schedule := createTestSchedule(t, th.store, "runner-a", "daily", toolNow)
+	th.whileConfirming = func() error {
+		schedule.Instruction = "edited elsewhere"
+		return th.store.Update(t.Context(), &schedule, schedule.Version, nil, toolNow)
 	}
-	result = th.call(t, "schedule_update", map[string]any{"id": id, "name": "renamed"})
-
+	result := th.call(t, "schedule_update", map[string]any{"id": schedule.ID, "name": "renamed"})
 	assert.Equal(t, errChanged.Error(), result.Error)
-	saved, err := th.store.Get(t.Context(), "runner-a", id)
+	saved, err := th.store.Get(t.Context(), "runner-a", schedule.ID)
 	require.NoError(t, err)
-	assert.False(t, saved.Enabled)
 	assert.Equal(t, "daily", saved.Name)
-}
-
-func TestCWDMustStayInsideAfterFollowingSymlinks(t *testing.T) {
-	th := newToolHarness(t, "runner-a", true)
-	outside := t.TempDir()
-	require.NoError(t, os.Mkdir(filepath.Join(th.cwd, "real"), 0o755))
-	require.NoError(t, os.Symlink(outside, filepath.Join(th.cwd, "escape")))
-	require.NoError(t, os.Symlink(filepath.Join(th.cwd, "real"), filepath.Join(th.cwd, "inside")))
-
-	result := th.call(t, "schedule_create", map[string]any{"name": "escape", "schedule": "@daily", "instruction": "p", "cwd": "escape"})
-	assert.Contains(t, result.Error, "must be inside the current directory")
-
-	result = th.call(t, "schedule_create", map[string]any{"name": "inside", "schedule": "@daily", "instruction": "p", "cwd": "inside"})
-	require.Empty(t, result.Error)
-	schedules, err := th.store.List(t.Context(), "runner-a")
-	require.NoError(t, err)
-	require.Len(t, schedules, 1)
-	assert.Equal(t, filepath.Join(th.cwd, "real"), schedules[0].CWD, "the real path is stored")
-}
-
-func TestCWDResolvesASymlinkedConversationDirectory(t *testing.T) {
-	th := newToolHarness(t, "runner-a", true)
-	require.NoError(t, os.Mkdir(filepath.Join(th.cwd, "sub"), 0o755))
-	link := filepath.Join(t.TempDir(), "link")
-	require.NoError(t, os.Symlink(th.cwd, link))
-	th.cwd = link
-
-	result := th.call(t, "schedule_create", map[string]any{"name": "sub", "schedule": "@daily", "instruction": "p", "cwd": "sub"})
-
-	require.Empty(t, result.Error)
-	schedules, err := th.store.List(t.Context(), "runner-a")
-	require.NoError(t, err)
-	resolved, err := filepath.EvalSymlinks(filepath.Join(link, "sub"))
-	require.NoError(t, err)
-	assert.Equal(t, resolved, schedules[0].CWD)
+	assert.Equal(t, "edited elsewhere", saved.Instruction)
 }

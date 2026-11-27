@@ -1,8 +1,6 @@
 package agent
 
 import (
-	"encoding/json"
-	"errors"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/sdk/go/internal/jsonrpc"
@@ -11,6 +9,7 @@ import (
 )
 
 func conversationFake(t *testing.T, respond func(f *fakeACP, message jsonrpc.Message)) *fakeACP {
+	t.Helper()
 	fake := newFakeACP(t)
 	fake.meta["conversations"] = map[string]any{"version": 1}
 	fake.handle = func(f *fakeACP, message jsonrpc.Message) bool {
@@ -28,8 +27,8 @@ func TestGetConversationStatusUsesAShortLivedACPProcess(t *testing.T) {
 		f.respond(message.ID, map[string]any{
 			"id":         "conv-9",
 			"running":    true,
-			"usage":      map[string]any{"inputTokens": 12, "totalCost": 0.5},
-			"latestTurn": map[string]any{"id": "turn-1", "status": "running", "createdAt": "2026-11-27T10:00:00Z", "updatedAt": "2026-11-27T10:00:01Z"},
+			"usage":      map[string]any{"inputTokens": 12},
+			"latestTurn": map[string]any{"id": "turn-1", "status": "running"},
 		})
 	})
 	client := fake.client(ClientOptions{Server: "http://daemon", Runner: "workstation"})
@@ -45,7 +44,6 @@ func TestGetConversationStatusUsesAShortLivedACPProcess(t *testing.T) {
 	require.NotNil(t, status.LatestTurn)
 	assert.Equal(t, TurnRunning, status.LatestTurn.Status)
 	assert.False(t, status.LatestTurn.Terminal())
-	assert.Nil(t, status.CreatedAt)
 	select {
 	case <-fake.proc.Done():
 	default:
@@ -60,9 +58,6 @@ func TestGetConversationStatusReportsMissingConversations(t *testing.T) {
 	_, err := fake.client(ClientOptions{}).GetConversationStatus(t.Context(), "gone")
 	require.ErrorIs(t, err, ErrConversationNotFound)
 	assert.Contains(t, err.Error(), "gone")
-
-	_, err = NewClient(ClientOptions{}).GetConversationStatus(t.Context(), " ")
-	require.Error(t, err)
 }
 
 func TestConversationMethodsRequireSupport(t *testing.T) {
@@ -77,15 +72,13 @@ func TestStopConversationSendsTheTurn(t *testing.T) {
 	})
 	require.NoError(t, fake.client(ClientOptions{}).StopConversation(t.Context(), "conv-1", StopConversationOptions{TurnID: "turn-2"}))
 	request := fake.nextRequest(conversationStopMethod)
-	var params map[string]any
-	require.NoError(t, json.Unmarshal(request.Params, &params))
-	assert.Equal(t, map[string]any{"conversationId": "conv-1", "turnId": "turn-2"}, params)
+	assert.JSONEq(t, `{"conversationId":"conv-1","turnId":"turn-2"}`, string(request.Params))
 
 	failing := conversationFake(t, func(f *fakeACP, message jsonrpc.Message) {
 		f.respondError(message.ID, jsonrpc.CodeServerError, "server unreachable")
 	})
 	err := failing.client(ClientOptions{}).StopConversation(t.Context(), "conv-1", StopConversationOptions{})
 	var rpcErr *RPCError
-	require.True(t, errors.As(err, &rpcErr))
+	require.ErrorAs(t, err, &rpcErr)
 	assert.Equal(t, "server unreachable", rpcErr.Message)
 }

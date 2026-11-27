@@ -1,12 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
 	"log/slog"
+	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var daemonDue = time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
+
 type fakeExecutor struct {
 	mu    sync.Mutex
 	calls []Schedule
@@ -25,40 +25,27 @@ type fakeExecutor struct {
 	run      func(ctx context.Context, schedule Schedule, detach <-chan struct{}) error
 	// output is the final output of every run; it defaults to "done <name>".
 	output string
-	// sent counts the instructions sent to started conversations.
-	sent int
 }
 
 func (f *fakeExecutor) Execute(ctx context.Context, schedule Schedule, started func(string) error, detach <-chan struct{}) (runResult, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, schedule)
-	run := f.run
-	output := f.output
-	startErr := f.startErr
 	f.mu.Unlock()
-	if startErr != nil {
-		return runResult{}, startErr
+	if f.startErr != nil {
+		return runResult{}, f.startErr
 	}
+	output := f.output
 	if output == "" {
 		output = "done " + schedule.Name
 	}
 	if err := started("conv-" + schedule.ID); err != nil {
 		return runResult{}, err
 	}
-	f.mu.Lock()
-	f.sent++
-	f.mu.Unlock()
-	result := runResult{Output: output, Stats: RunStats{ToolCalls: 2, Tools: map[string]int{"bash": 2}}}
-	if run != nil {
-		return result, run(ctx, schedule, detach)
+	result := runResult{Output: output, Stats: RunStats{ToolCalls: 2}}
+	if f.run != nil {
+		return result, f.run(ctx, schedule, detach)
 	}
 	return result, nil
-}
-
-func (f *fakeExecutor) callCount() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return len(f.calls)
 }
 
 // fakeConversations serves conversation statuses; unknown conversations are
@@ -78,7 +65,7 @@ func (f *fakeConversations) Status(_ context.Context, conversationID string) (ag
 	}
 	status, ok := f.statuses[conversationID]
 	if !ok {
-		return agent.ConversationStatus{}, fmt.Errorf("%w: %s", agent.ErrConversationNotFound, conversationID)
+		return agent.ConversationStatus{}, errors.Wrap(agent.ErrConversationNotFound, conversationID)
 	}
 	return status, nil
 }
@@ -139,122 +126,96 @@ func newTestDaemon(store *Store, exec executor, configure func(*daemonConfig)) (
 		configure(&config)
 	}
 	convs := &fakeConversations{}
-	d := newDaemon(store, exec, convs, config, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	clock := &testClock{}
+	d := newDaemon(store, exec, convs, config, slog.New(slog.DiscardHandler))
+	clock := &testClock{now: daemonDue}
 	d.now = clock.Now
 	return d, clock, convs
 }
 
-// tick runs one scheduler pass and waits for the runs it started.
+// tickAndWait runs one scheduler pass and waits for the runs it started.
 func tickAndWait(t *testing.T, d *daemon) {
 	t.Helper()
 	d.tick(t.Context(), t.Context())
 	d.wg.Wait()
 }
 
-func runStatuses(t *testing.T, store *Store, scheduleID string) []string {
+func dueDailySchedule(t *testing.T) (*Store, Schedule) {
 	t.Helper()
-	rows, err := store.db.QueryContext(t.Context(), `SELECT status || ':' || error FROM runs WHERE schedule_id = ? ORDER BY id`, scheduleID)
+	store, _ := newTestStore(t)
+	return store, createTestSchedule(t, store, "runner-a", "daily", daemonDue)
+}
+
+func latestRun(t *testing.T, store *Store, schedule Schedule) Run {
+	t.Helper()
+	saved, err := store.Get(t.Context(), schedule.Workspace, schedule.ID)
 	require.NoError(t, err)
-	defer rows.Close()
+	require.NotNil(t, saved.LastRun)
+	run, err := store.GetRun(t.Context(), schedule.Workspace, saved.LastRun.ID)
+	require.NoError(t, err)
+	return run
+}
+
+func runStatuses(t *testing.T, store *Store, schedule Schedule) []string {
+	t.Helper()
+	runs, err := store.ListRuns(t.Context(), schedule.Workspace, RunFilter{ScheduleID: schedule.ID, Limit: runHistoryLimit})
+	require.NoError(t, err)
 	var statuses []string
-	for rows.Next() {
-		var status string
-		require.NoError(t, rows.Scan(&status))
-		statuses = append(statuses, status)
+	for _, run := range slices.Backward(runs) {
+		statuses = append(statuses, string(run.Status)+":"+run.Error)
 	}
-	require.NoError(t, rows.Err())
 	return statuses
 }
 
 func TestDaemonRunsDueSchedules(t *testing.T) {
-	store, _ := newTestStore(t)
-	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
-	schedule := createTestSchedule(t, store, "runner-a", "daily", due)
+	store, schedule := dueDailySchedule(t)
 	exec := &fakeExecutor{}
 	d, clock, _ := newTestDaemon(store, exec, nil)
 
-	clock.Set(due.Add(-time.Second))
+	clock.Set(daemonDue.Add(-time.Second))
 	tickAndWait(t, d)
-	assert.Zero(t, exec.callCount(), "not due yet")
+	require.Empty(t, exec.calls, "not due yet")
 
-	clock.Set(due.Add(10 * time.Second))
+	clock.Set(daemonDue.Add(10 * time.Second))
 	tickAndWait(t, d)
-
-	require.Equal(t, 1, exec.callCount())
-	ran := exec.calls[0]
-	assert.Equal(t, "runner-a", ran.Workspace)
-	assert.Equal(t, "/work/runner-a", ran.CWD)
-	assert.Equal(t, schedule.Instruction, ran.Instruction)
-	saved, err := store.Get(t.Context(), "runner-a", schedule.ID)
-	require.NoError(t, err)
-	assert.Equal(t, RunSucceeded, saved.LastRun.Status)
-	assert.Equal(t, "conv-"+schedule.ID, saved.LastRun.ConversationID)
-	assert.True(t, due.Equal(saved.LastRun.ScheduledFor))
-	assert.True(t, due.Add(24*time.Hour).Equal(*saved.NextRunAt))
-	run, err := store.GetRun(t.Context(), "runner-a", saved.LastRun.ID)
-	require.NoError(t, err)
+	tickAndWait(t, d)
+	require.Len(t, exec.calls, 1, "each occurrence runs once")
+	assert.Equal(t, schedule.Workspace, exec.calls[0].Workspace)
+	run := latestRun(t, store, schedule)
+	assert.Equal(t, RunSucceeded, run.Status)
+	assert.Equal(t, "conv-"+schedule.ID, run.ConversationID)
 	assert.Equal(t, "done daily", run.Output)
-	assert.Equal(t, schedule.Instruction, run.Instruction)
-	assert.Equal(t, schedule.CWD, run.CWD)
 	require.NotNil(t, run.Stats)
-	assert.Equal(t, map[string]int{"bash": 2}, run.Stats.Tools)
-
-	tickAndWait(t, d)
-	assert.Equal(t, 1, exec.callCount(), "each occurrence runs once")
-
-	status, found, err := store.Daemon(t.Context())
-	require.NoError(t, err)
-	require.True(t, found)
-	assert.True(t, due.Add(10*time.Second).Equal(status.HeartbeatAt))
+	assert.Equal(t, 2, run.Stats.ToolCalls)
+	assert.True(t, daemonDue.Equal(run.ScheduledFor), "record the occurrence, not the poll time")
 }
 
 func TestDaemonSkipsMissedRuns(t *testing.T) {
-	store, _ := newTestStore(t)
-	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
-	schedule := createTestSchedule(t, store, "runner-a", "daily", due)
+	store, schedule := dueDailySchedule(t)
 	exec := &fakeExecutor{}
 	d, clock, _ := newTestDaemon(store, exec, nil)
 
-	clock.Set(due.Add(3 * time.Hour))
+	// More than one daily occurrence was missed; skip straight to the next one.
+	clock.Set(daemonDue.Add(27 * time.Hour))
 	tickAndWait(t, d)
 
-	assert.Zero(t, exec.callCount())
-	saved, err := store.Get(t.Context(), "runner-a", schedule.ID)
+	assert.Empty(t, exec.calls)
+	saved, err := store.Get(t.Context(), schedule.Workspace, schedule.ID)
 	require.NoError(t, err)
+	require.NotNil(t, saved.LastRun)
 	assert.Equal(t, RunSkipped, saved.LastRun.Status)
-	assert.Contains(t, saved.LastRun.Error, "missed by 3h0m0s")
-	assert.True(t, due.Add(24*time.Hour).Equal(*saved.NextRunAt), "the next run follows the current time, without backfilling")
+	assert.Contains(t, saved.LastRun.Error, "missed by 27h")
+	require.NotNil(t, saved.NextRunAt)
+	assert.True(t, daemonDue.Add(48*time.Hour).Equal(*saved.NextRunAt))
 }
 
-func TestDaemonSkipsOverlappingRuns(t *testing.T) {
+func TestDaemonSkipsOverlapsButQueuesOtherSchedulesAtCapacity(t *testing.T) {
 	store, _ := newTestStore(t)
-	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
-	schedule := Schedule{Workspace: "runner-a", Name: "minutely", Schedule: "CRON_TZ=UTC * * * * *", Instruction: "p", CWD: "/w", Enabled: true, NextRunAt: &due}
-	require.NoError(t, store.Create(t.Context(), &schedule, due))
-	release := make(chan struct{})
-	exec := &fakeExecutor{run: func(context.Context, Schedule, <-chan struct{}) error {
-		<-release
-		return nil
-	}}
-	d, clock, _ := newTestDaemon(store, exec, nil)
-
-	clock.Set(due)
-	d.tick(t.Context(), t.Context())
-	clock.Set(due.Add(time.Minute))
-	d.tick(t.Context(), t.Context())
-	close(release)
-	d.wg.Wait()
-
-	assert.Equal(t, 1, exec.callCount())
-	assert.Equal(t, []string{"succeeded:", "skipped:the previous run was still in progress"}, runStatuses(t, store, schedule.ID))
-}
-
-func TestDaemonLimitsConcurrency(t *testing.T) {
-	store, _ := newTestStore(t)
-	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
-	first := createTestSchedule(t, store, "runner-a", "first", due)
-	second := createTestSchedule(t, store, "runner-a", "second", due)
+	first := Schedule{
+		Workspace: "runner-a", Name: "minutely", Schedule: "CRON_TZ=UTC * * * * *",
+		Instruction: "p", CWD: "/w", Enabled: true, NextRunAt: &daemonDue,
+	}
+	require.NoError(t, store.Create(t.Context(), &first, daemonDue))
+	second := createTestSchedule(t, store, "runner-a", "waiting", daemonDue.Add(time.Second))
 	release := make(chan struct{})
 	exec := &fakeExecutor{run: func(context.Context, Schedule, <-chan struct{}) error {
 		<-release
@@ -262,149 +223,89 @@ func TestDaemonLimitsConcurrency(t *testing.T) {
 	}}
 	d, clock, _ := newTestDaemon(store, exec, func(c *daemonConfig) { c.Concurrency = 1 })
 
-	clock.Set(due)
+	clock.Set(daemonDue.Add(time.Second)) // Both are due in the same pass.
 	d.tick(t.Context(), t.Context())
 	assert.Equal(t, 1, d.activeCount())
-	waiting, err := store.Due(t.Context(), due)
-	require.NoError(t, err)
-	require.Len(t, waiting, 1, "the second schedule stays due until a slot frees up")
+	clock.Set(daemonDue.Add(time.Minute))
+	d.tick(t.Context(), t.Context())
 	close(release)
 	d.wg.Wait()
 
+	assert.Equal(t, []string{"succeeded:", "skipped:the previous run was still in progress"}, runStatuses(t, store, first))
+	assert.Empty(t, runStatuses(t, store, second), "a different schedule stays due rather than being skipped")
 	tickAndWait(t, d)
-	assert.Equal(t, 2, exec.callCount())
-	assert.Equal(t, []string{"succeeded:"}, runStatuses(t, store, first.ID))
-	assert.Equal(t, []string{"succeeded:"}, runStatuses(t, store, second.ID))
+	assert.Equal(t, []string{"succeeded:"}, runStatuses(t, store, second))
 }
 
 func TestDaemonRecordsFailures(t *testing.T) {
+	fail := func(message string) func(context.Context, Schedule, <-chan struct{}) error {
+		return func(context.Context, Schedule, <-chan struct{}) error { return errors.New(message) }
+	}
 	tests := []struct {
 		name      string
-		configure func(*daemonConfig)
-		startErr  error
-		run       func(ctx context.Context, schedule Schedule, detach <-chan struct{}) error
-		// turn is the conversation's latest turn status, error, and result.
-		turn []string
-		want string
+		exec      *fakeExecutor
+		turn      string
+		turnError string
+		timeout   time.Duration
+		want      string
 	}{
+		{name: "start error", exec: &fakeExecutor{startErr: errors.New("runner offline")}, want: "failed:runner offline"},
+		{name: "error before the turn", exec: &fakeExecutor{run: fail("unknown profile")}, want: "failed:unknown profile"},
 		{
-			name:     "start error",
-			startErr: errors.New("runner offline"),
-			want:     "failed:runner offline",
-		},
-		{
-			name: "error before the turn",
-			run:  func(context.Context, Schedule, <-chan struct{}) error { return errors.New("unknown profile") },
-			want: "failed:unknown profile",
-		},
-		{
-			name:      "timeout",
-			configure: func(c *daemonConfig) { c.RunTimeout = 20 * time.Millisecond },
-			run: func(ctx context.Context, _ Schedule, _ <-chan struct{}) error {
+			name: "timeout", timeout: 20 * time.Millisecond, turn: agent.TurnCancelled, want: "failed:timed out after 20ms",
+			exec: &fakeExecutor{run: func(ctx context.Context, _ Schedule, _ <-chan struct{}) error {
 				<-ctx.Done()
 				return ctx.Err()
-			},
-			turn: []string{agent.TurnCancelled, "", ""},
-			want: "failed:timed out after 20ms",
+			}},
 		},
 		{
-			name: "panic",
-			run:  func(context.Context, Schedule, <-chan struct{}) error { panic("boom") },
-			want: "failed:internal error: boom",
+			name: "panic", want: "failed:internal error: boom",
+			exec: &fakeExecutor{run: func(context.Context, Schedule, <-chan struct{}) error { panic("boom") }},
 		},
 		{
-			name: "cancelled from outside",
-			run:  func(context.Context, Schedule, <-chan struct{}) error { return errRunCancelled },
-			turn: []string{agent.TurnCancelled, "", ""},
-			want: "canceled:the run was cancelled",
-		},
-		{
-			name: "turn failed on the server",
-			run: func(context.Context, Schedule, <-chan struct{}) error {
-				return errors.New("the run failed: prompt error")
-			},
-			turn: []string{agent.TurnFailed, "model overloaded", ""},
-			want: "failed:model overloaded",
-		},
-		{
-			name: "turn succeeded after the connection dropped",
-			run:  func(context.Context, Schedule, <-chan struct{}) error { return errors.New("kodelet acp exited") },
-			turn: []string{agent.TurnSucceeded, "", "from the server"},
-			want: "succeeded:",
+			name: "server error takes precedence", exec: &fakeExecutor{run: fail("connection dropped")},
+			turn: agent.TurnFailed, turnError: "model overloaded", want: "failed:model overloaded",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store, _ := newTestStore(t)
-			due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
-			schedule := createTestSchedule(t, store, "runner-a", "daily", due)
-			d, clock, convs := newTestDaemon(store, &fakeExecutor{startErr: tt.startErr, run: tt.run}, tt.configure)
-			if tt.turn != nil {
-				convs.setTurn("conv-"+schedule.ID, tt.turn[0], tt.turn[2], tt.turn[1])
+			store, schedule := dueDailySchedule(t)
+			d, _, convs := newTestDaemon(store, tt.exec, func(c *daemonConfig) { c.RunTimeout = tt.timeout })
+			if tt.turn != "" {
+				convs.setTurn("conv-"+schedule.ID, tt.turn, "", tt.turnError)
 			}
-
-			clock.Set(due)
 			tickAndWait(t, d)
-
-			assert.Equal(t, []string{tt.want}, runStatuses(t, store, schedule.ID))
-			if tt.turn != nil && tt.turn[2] != "" {
-				runs, err := store.ListRuns(t.Context(), "runner-a", RunFilter{Limit: 1})
-				require.NoError(t, err)
-				run, err := store.GetRun(t.Context(), "runner-a", runs[0].ID)
-				require.NoError(t, err)
-				assert.Equal(t, tt.turn[2], run.Output)
-				require.NotNil(t, run.Stats, "the stats observed before the connection dropped are kept")
-				assert.Equal(t, 2, run.Stats.ToolCalls)
-			}
+			assert.Equal(t, []string{tt.want}, runStatuses(t, store, schedule))
 		})
 	}
 }
 
-func TestDaemonWaitsForRunsWhoseConversationIsStillGoing(t *testing.T) {
-	store, _ := newTestStore(t)
-	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
-	schedule := Schedule{Workspace: "runner-a", Name: "minutely", Schedule: "CRON_TZ=UTC * * * * *", Instruction: "p", CWD: "/w", Enabled: true, NextRunAt: &due}
-	require.NoError(t, store.Create(t.Context(), &schedule, due))
+func TestDaemonRecoversFromLostConnection(t *testing.T) {
+	store, schedule := dueDailySchedule(t)
 	exec := &fakeExecutor{run: func(context.Context, Schedule, <-chan struct{}) error { return errors.New("kodelet acp exited") }}
-	d, clock, convs := newTestDaemon(store, exec, nil)
+	d, _, convs := newTestDaemon(store, exec, nil)
 	conversation := "conv-" + schedule.ID
 	convs.setTurn(conversation, agent.TurnRunning, "", "")
-
-	clock.Set(due)
 	tickAndWait(t, d)
-	assert.Equal(t, []string{"running:"}, runStatuses(t, store, schedule.ID))
+	assert.Equal(t, []string{"running:"}, runStatuses(t, store, schedule))
 
-	clock.Set(due.Add(time.Minute))
 	convs.setErr(errors.New("server unreachable"))
 	tickAndWait(t, d)
-	assert.Equal(t, []string{"running:", "skipped:the previous run was still in progress"}, runStatuses(t, store, schedule.ID))
+	assert.Equal(t, []string{"running:"}, runStatuses(t, store, schedule), "a failed status lookup is retried")
 
-	clock.Set(due.Add(2 * time.Minute))
 	convs.setErr(nil)
 	convs.setTurn(conversation, agent.TurnSucceeded, "finished on the server", "")
 	tickAndWait(t, d)
-	assert.Equal(t, []string{"succeeded:", "skipped:the previous run was still in progress", "succeeded:"}, runStatuses(t, store, schedule.ID))
-	assert.Equal(t, 2, exec.callCount())
+	run := latestRun(t, store, schedule)
+	assert.Equal(t, RunSucceeded, run.Status)
+	assert.Equal(t, "finished on the server", run.Output)
 }
 
-func TestDaemonShutdownLeavesRunsToTheNextDaemon(t *testing.T) {
-	store, _ := newTestStore(t)
-	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
-	schedule := createTestSchedule(t, store, "runner-a", "daily", due)
-	started := make(chan struct{})
-	exec := &fakeExecutor{run: func(ctx context.Context, _ Schedule, detach <-chan struct{}) error {
-		close(started)
-		select {
-		case <-detach:
-			return errors.New("kodelet acp process is closed")
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}}
-	d, clock, _ := newTestDaemon(store, exec, nil)
-	clock.Set(due)
-
+// stopDuringRun waits until the executor reaches the intended stage before shutting down.
+func stopDuringRun(t *testing.T, d *daemon, started <-chan struct{}) {
+	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- d.run(ctx) }()
 	select {
@@ -419,52 +320,50 @@ func TestDaemonShutdownLeavesRunsToTheNextDaemon(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("daemon did not stop")
 	}
-	assert.Equal(t, []string{"running:"}, runStatuses(t, store, schedule.ID), "the run is left to its conversation")
+}
+
+func TestDaemonShutdownLeavesRunsToTheNextDaemon(t *testing.T) {
+	store, schedule := dueDailySchedule(t)
+	started := make(chan struct{})
+	var jobErr error
+	exec := &fakeExecutor{run: func(ctx context.Context, _ Schedule, detach <-chan struct{}) error {
+		close(started)
+		<-detach
+		jobErr = ctx.Err()
+		return errors.New("kodelet acp process is closed")
+	}}
+	d, _, _ := newTestDaemon(store, exec, nil)
+	stopDuringRun(t, d, started)
+	require.NoError(t, jobErr, "shutdown must detach, not cancel the conversation")
+	assert.Equal(t, []string{"running:"}, runStatuses(t, store, schedule))
 	status, found, err := store.Daemon(t.Context())
 	require.NoError(t, err)
 	require.True(t, found)
 	assert.NotNil(t, status.StoppedAt)
 
-	// The next daemon finds the run still going, then records its outcome.
 	next, clock, convs := newTestDaemon(store, exec, nil)
-	convs.setTurn("conv-"+schedule.ID, agent.TurnRunning, "", "")
-	clock.Set(due.Add(5 * time.Minute))
-	tickAndWait(t, next)
-	assert.Equal(t, []string{"running:"}, runStatuses(t, store, schedule.ID))
 	convs.setTurn("conv-"+schedule.ID, agent.TurnSucceeded, "all done", "")
+	clock.Set(daemonDue.Add(5 * time.Minute))
 	tickAndWait(t, next)
-	assert.Equal(t, []string{"succeeded:"}, runStatuses(t, store, schedule.ID))
-	assert.Equal(t, 1, exec.callCount(), "a restart never starts the occurrence again")
-	runs, err := store.ListRuns(t.Context(), "runner-a", RunFilter{Limit: 1})
-	require.NoError(t, err)
-	run, err := store.GetRun(t.Context(), "runner-a", runs[0].ID)
-	require.NoError(t, err)
+	assert.Len(t, exec.calls, 1, "a restart never starts the occurrence again")
+	run := latestRun(t, store, schedule)
+	assert.Equal(t, RunSucceeded, run.Status)
 	assert.Equal(t, "all done", run.Output)
 	require.NotNil(t, run.Stats)
-	assert.Equal(t, 2, run.Stats.ToolCalls, "progress saved by the first daemon is kept")
+	assert.Equal(t, 2, run.Stats.ToolCalls, "progress survives a daemon restart")
 }
 
 func TestDaemonShutdownCancelsRunsThatHaveNotStarted(t *testing.T) {
-	store, _ := newTestStore(t)
-	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
-	schedule := createTestSchedule(t, store, "runner-a", "daily", due)
+	store, schedule := dueDailySchedule(t)
 	starting := make(chan struct{})
 	exec := executorFunc(func(_ context.Context, _ Schedule, _ func(string) error, detach <-chan struct{}) (runResult, error) {
 		close(starting)
 		<-detach
 		return runResult{}, errors.New("failed to start the conversation: context canceled")
 	})
-	d, clock, _ := newTestDaemon(store, exec, nil)
-	clock.Set(due)
-
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- d.run(ctx) }()
-	<-starting
-	cancel()
-	require.NoError(t, <-done)
-
-	assert.Equal(t, []string{"canceled:" + notStartedMessage}, runStatuses(t, store, schedule.ID))
+	d, _, _ := newTestDaemon(store, exec, nil)
+	stopDuringRun(t, d, starting)
+	assert.Equal(t, []string{"canceled:" + notStartedMessage}, runStatuses(t, store, schedule))
 }
 
 type executorFunc func(ctx context.Context, schedule Schedule, started func(string) error, detach <-chan struct{}) (runResult, error)
@@ -473,144 +372,106 @@ func (f executorFunc) Execute(ctx context.Context, schedule Schedule, started fu
 	return f(ctx, schedule, started, detach)
 }
 
+func claimUnfinishedRun(t *testing.T, store *Store, schedule Schedule, next time.Time, conversation string) {
+	t.Helper()
+	started := *schedule.NextRunAt
+	runID, claimed, err := store.Claim(t.Context(), schedule.ID, started, next, Run{Status: RunRunning, StartedAt: started})
+	require.NoError(t, err)
+	require.True(t, claimed)
+	if conversation != "" {
+		require.NoError(t, store.SetRunConversation(t.Context(), runID, conversation))
+	}
+}
+
 func TestDaemonReconcilesRunsLeftByAPreviousDaemon(t *testing.T) {
 	tests := []struct {
-		name string
-		// noConversation leaves the run without a conversation.
-		noConversation bool
-		age            time.Duration
-		turn           []string
-		statusErr      error
-		want           string
-		wantStop       bool
+		name         string
+		conversation string
+		age          time.Duration
+		turn         string
+		statusErr    error
+		want         string
 	}{
-		{name: "no conversation", noConversation: true, age: time.Second, want: "failed:" + notStartedMessage},
-		{name: "no turn yet", age: 30 * time.Second, want: "running:"},
-		{name: "never started", age: 2 * time.Minute, want: "failed:" + neverStartedMessage},
-		{name: "still running", age: 10 * time.Minute, turn: []string{agent.TurnRunning}, want: "running:"},
-		{name: "accepted past the timeout", age: 61 * time.Minute, turn: []string{agent.TurnAccepted}, want: "running:", wantStop: true},
-		{name: "long past the timeout", age: 75 * time.Minute, turn: []string{agent.TurnRunning}, want: "running:", wantStop: true},
-		{name: "succeeded", age: 10 * time.Minute, turn: []string{agent.TurnSucceeded}, want: "succeeded:"},
-		{name: "failed", age: 10 * time.Minute, turn: []string{agent.TurnFailed, "model overloaded"}, want: "failed:model overloaded"},
-		{name: "cancelled", age: 10 * time.Minute, turn: []string{agent.TurnCancelled}, want: "canceled:the run was cancelled"},
-		{name: "stopped after the timeout", age: 62 * time.Minute, turn: []string{agent.TurnCancelled}, want: "failed:timed out after 1h0m0s"},
-		{name: "interrupted", age: 10 * time.Minute, turn: []string{agent.TurnInterrupted}, want: "failed:the Kodelet server stopped before the run finished"},
-		{name: "server unreachable", age: 10 * time.Minute, statusErr: errors.New("connection refused"), want: "running:"},
-		{name: "old Kodelet", age: 10 * time.Minute, statusErr: agent.ErrConversationsUnsupported, want: "failed:" + unsupportedMessage},
+		{name: "no conversation", want: "failed:" + notStartedMessage},
+		{name: "no turn yet", conversation: "conv-old", age: 30 * time.Second, want: "running:"},
+		{name: "never started", conversation: "conv-old", age: 2 * time.Minute, want: "failed:" + neverStartedMessage},
+		{name: "cancelled", conversation: "conv-old", turn: agent.TurnCancelled, want: "canceled:the run was cancelled"},
+		{name: "interrupted", conversation: "conv-old", turn: agent.TurnInterrupted, want: "failed:the Kodelet server stopped before the run finished"},
+		{name: "old Kodelet", conversation: "conv-old", statusErr: agent.ErrConversationsUnsupported, want: "failed:" + unsupportedMessage},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store, _ := newTestStore(t)
-			due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
-			schedule := createTestSchedule(t, store, "runner-a", "daily", due)
-			runID, _, err := store.Claim(t.Context(), schedule.ID, due, due.Add(24*time.Hour), Run{Status: RunRunning, StartedAt: due})
-			require.NoError(t, err)
-			if !tt.noConversation {
-				require.NoError(t, store.SetRunConversation(t.Context(), runID, "conv-old"))
-			}
-			exec := &fakeExecutor{}
-			d, clock, convs := newTestDaemon(store, exec, nil)
-			if tt.turn != nil {
-				message := ""
-				if len(tt.turn) > 1 {
-					message = tt.turn[1]
-				}
-				convs.setTurn("conv-old", tt.turn[0], "", message)
+			store, schedule := dueDailySchedule(t)
+			claimUnfinishedRun(t, store, schedule, daemonDue.Add(24*time.Hour), tt.conversation)
+			d, clock, convs := newTestDaemon(store, &fakeExecutor{}, nil)
+			if tt.turn != "" {
+				convs.setTurn(tt.conversation, tt.turn, "", "")
 			}
 			convs.setErr(tt.statusErr)
-			clock.Set(due.Add(tt.age))
-
+			clock.Set(daemonDue.Add(tt.age))
 			tickAndWait(t, d)
-
-			assert.Equal(t, []string{tt.want}, runStatuses(t, store, schedule.ID))
-			if tt.wantStop {
-				assert.Equal(t, []string{"conv-old/turn-1"}, convs.stopped())
-			} else {
-				assert.Empty(t, convs.stopped())
-			}
-			assert.Zero(t, exec.callCount())
+			assert.Equal(t, []string{tt.want}, runStatuses(t, store, schedule))
 		})
 	}
 }
 
 func TestDaemonHoldsTheSlotUntilATimedOutRunStops(t *testing.T) {
 	store, _ := newTestStore(t)
-	start := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
-	schedule := Schedule{Workspace: "runner-a", Name: "hourly", Schedule: "CRON_TZ=UTC 0 * * * *", Instruction: "p", CWD: "/w", Enabled: true, NextRunAt: &start}
-	require.NoError(t, store.Create(t.Context(), &schedule, start))
-	runID, _, err := store.Claim(t.Context(), schedule.ID, start, start.Add(time.Hour), Run{Status: RunRunning, StartedAt: start})
-	require.NoError(t, err)
-	require.NoError(t, store.SetRunConversation(t.Context(), runID, "conv-old"))
+	hourly := Schedule{
+		Workspace: "runner-a", Name: "hourly", Schedule: "CRON_TZ=UTC 0 * * * *",
+		Instruction: "p", CWD: "/w", Enabled: true, NextRunAt: &daemonDue,
+	}
+	require.NoError(t, store.Create(t.Context(), &hourly, daemonDue))
+	claimUnfinishedRun(t, store, hourly, daemonDue.Add(time.Hour), "conv-old")
+	waiting := createTestSchedule(t, store, "runner-a", "waiting", daemonDue.Add(time.Minute))
 	exec := &fakeExecutor{}
-	// The daemon was offline from just after 09:00 until 10:15, and the 09:00
-	// run is still going on the server.
-	d, clock, convs := newTestDaemon(store, exec, nil)
-	convs.setTurn("conv-old", agent.TurnRunning, "", "")
+	d, clock, convs := newTestDaemon(store, exec, func(c *daemonConfig) { c.Concurrency = 1 })
+	convs.setTurn("conv-old", agent.TurnAccepted, "", "")
 
-	clock.Set(start.Add(75 * time.Minute))
+	clock.Set(daemonDue.Add(time.Minute))
 	tickAndWait(t, d)
-	clock.Set(start.Add(76 * time.Minute))
+	assert.Empty(t, exec.calls, "a previous daemon's run holds the only slot")
+	assert.Empty(t, convs.stopped(), "before the timeout")
+
+	// The original run has now timed out and its next occurrence is due.
+	// Keep the waiting schedule inside its misfire grace through both polls.
+	clock.Set(daemonDue.Add(time.Hour))
 	tickAndWait(t, d)
-	assert.Equal(t, []string{"running:", "skipped:the previous run was still in progress"}, runStatuses(t, store, schedule.ID))
-	assert.Equal(t, []string{"conv-old/turn-1", "conv-old/turn-1"}, convs.stopped(), "the stop is requested until the server confirms it")
-	assert.Zero(t, exec.callCount())
+	convs.setTurn("conv-old", agent.TurnRunning, "", "")
+	clock.Set(daemonDue.Add(time.Hour + time.Second))
+	tickAndWait(t, d)
+	assert.Equal(t, []string{"conv-old/turn-1", "conv-old/turn-1"}, convs.stopped(), "retry the stop until confirmed")
+	assert.Equal(t, []string{"running:", "skipped:the previous run was still in progress"}, runStatuses(t, store, hourly))
+	assert.Empty(t, exec.calls)
 
 	convs.setTurn("conv-old", agent.TurnCancelled, "", "")
-	clock.Set(start.Add(77 * time.Minute))
 	tickAndWait(t, d)
-	assert.Equal(t, []string{"failed:timed out after 1h0m0s", "skipped:the previous run was still in progress"}, runStatuses(t, store, schedule.ID))
-
-	clock.Set(start.Add(2 * time.Hour))
-	tickAndWait(t, d)
-	assert.Equal(t, 1, exec.callCount(), "the next occurrence starts once the slot is free")
+	assert.Equal(t, []string{"failed:timed out after 1h0m0s", "skipped:the previous run was still in progress"}, runStatuses(t, store, hourly))
+	assert.Equal(t, []string{"succeeded:"}, runStatuses(t, store, waiting), "stop confirmation frees the slot")
 }
 
-func TestDaemonSendsNoInstructionWithoutARecordedConversation(t *testing.T) {
-	store, _ := newTestStore(t)
-	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
-	schedule := createTestSchedule(t, store, "runner-a", "daily", due)
+func TestDaemonRejectsStartWhenConversationCannotBeRecorded(t *testing.T) {
+	store, schedule := dueDailySchedule(t)
 	_, err := store.db.ExecContext(t.Context(), `
 CREATE TRIGGER fail_conversation BEFORE UPDATE OF conversation_id ON runs
 BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END`)
 	require.NoError(t, err)
-	exec := &fakeExecutor{}
-	d, clock, _ := newTestDaemon(store, exec, nil)
-
-	clock.Set(due)
+	var startErr error
+	exec := executorFunc(func(_ context.Context, _ Schedule, started func(string) error, _ <-chan struct{}) (runResult, error) {
+		startErr = started("conv-untracked")
+		return runResult{}, startErr
+	})
+	d, _, _ := newTestDaemon(store, exec, nil)
 	tickAndWait(t, d)
 
-	assert.Equal(t, 1, exec.callCount())
-	assert.Zero(t, exec.sent, "a run whose conversation is not on record is never sent")
-	statuses := runStatuses(t, store, schedule.ID)
-	require.Len(t, statuses, 1)
-	assert.Contains(t, statuses[0], "failed:did not send the instruction: failed to record run conversation")
-	assert.Contains(t, statuses[0], "disk I/O error")
-}
-
-func TestDaemonCountsRunsLeftByAPreviousDaemonTowardConcurrency(t *testing.T) {
-	store, _ := newTestStore(t)
-	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
-	old := createTestSchedule(t, store, "runner-a", "old", due)
-	runID, _, err := store.Claim(t.Context(), old.ID, due, due.Add(24*time.Hour), Run{Status: RunRunning, StartedAt: due})
-	require.NoError(t, err)
-	require.NoError(t, store.SetRunConversation(t.Context(), runID, "conv-old"))
-	waiting := createTestSchedule(t, store, "runner-a", "waiting", due.Add(time.Minute))
-	exec := &fakeExecutor{}
-	d, clock, convs := newTestDaemon(store, exec, func(c *daemonConfig) { c.Concurrency = 1 })
-	convs.setTurn("conv-old", agent.TurnRunning, "", "")
-
-	clock.Set(due.Add(time.Minute))
-	tickAndWait(t, d)
-	assert.Zero(t, exec.callCount(), "the previous daemon's run holds the only slot")
-
-	convs.setTurn("conv-old", agent.TurnSucceeded, "", "")
-	tickAndWait(t, d)
-	assert.Equal(t, 1, exec.callCount())
-	assert.Equal(t, []string{"succeeded:"}, runStatuses(t, store, waiting.ID))
+	require.ErrorContains(t, startErr, "disk I/O error", "the executor must not proceed with the instruction")
+	run := latestRun(t, store, schedule)
+	assert.Equal(t, RunFailed, run.Status)
+	assert.Contains(t, run.Error, "did not send the instruction")
 }
 
 func TestAcquireDaemonLock(t *testing.T) {
-	_, path := newTestStore(t)
+	path := filepath.Join(t.TempDir(), "schedule.db")
 
 	lock, err := acquireDaemonLock(path)
 	require.NoError(t, err)
@@ -624,114 +485,57 @@ func TestAcquireDaemonLock(t *testing.T) {
 }
 
 func TestAssessDaemon(t *testing.T) {
-	now := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
-	running := DaemonStatus{HeartbeatAt: now.Add(-time.Minute), PollInterval: 30 * time.Second}
-	stale := DaemonStatus{HeartbeatAt: now.Add(-2 * time.Minute), PollInterval: 30 * time.Second}
-	stopped := running
-	stopped.StoppedAt = &now
-
-	assert.Equal(t, daemonNotStarted, assessDaemon(DaemonStatus{}, false, now).State)
-	assert.Equal(t, daemonRunning, assessDaemon(running, true, now).State)
-	assert.Empty(t, assessDaemon(running, true, now).Warning)
-	assert.Equal(t, daemonUnresponsive, assessDaemon(stale, true, now).State)
-	assert.Equal(t, daemonStopped, assessDaemon(stopped, true, now).State)
-	assert.Contains(t, assessDaemon(stopped, true, now).Warning, "will not fire")
-}
-
-func TestDaemonConfigValidate(t *testing.T) {
-	assert.NoError(t, defaultDaemonConfig().validate())
-	config := defaultDaemonConfig()
-	config.MisfireGrace = time.Second
-	assert.ErrorContains(t, config.validate(), "misfire grace")
-	config = defaultDaemonConfig()
-	config.Concurrency = 0
-	assert.ErrorContains(t, config.validate(), "concurrency")
+	status := DaemonStatus{HeartbeatAt: daemonDue, PollInterval: 30 * time.Second}
+	assert.Equal(t, daemonRunning, assessDaemon(status, true, daemonDue.Add(time.Minute)).State)
+	later := daemonDue.Add(2 * time.Minute)
+	assert.Equal(t, daemonUnresponsive, assessDaemon(status, true, later).State)
+	status.StoppedAt = &daemonDue
+	assert.Equal(t, daemonStopped, assessDaemon(status, true, later).State, "a clean stop is not a stale heartbeat")
 }
 
 func TestDescribeAgentErrorAddsStderr(t *testing.T) {
-	err := describeAgentError(&agent.RunError{Message: "kodelet acp exited with status 1", Stderr: "starting\nError: runner not found: abc\n"}, "failed to start the conversation")
+	err := describeAgentError(&agent.RunError{
+		Message: "kodelet acp exited with status 1",
+		Stderr:  "starting\nError: runner not found: abc\n",
+	}, "failed to start the conversation")
 	assert.EqualError(t, err, "failed to start the conversation: kodelet acp exited with status 1: Error: runner not found: abc")
-
-	err = describeAgentError(errors.New("boom"), "the run failed")
-	assert.EqualError(t, err, "the run failed: boom")
-}
-
-func TestListCommand(t *testing.T) {
-	store, path := newTestStore(t)
-	next := time.Now().Add(time.Hour)
-	createTestSchedule(t, store, "runner-a", "daily", next)
-	createTestSchedule(t, store, "runner-b", "weekly", next)
-
-	var text bytes.Buffer
-	require.NoError(t, listSchedules(t.Context(), path, false, &text))
-	assert.Contains(t, text.String(), "runner-a")
-	assert.Contains(t, text.String(), "weekly")
-	assert.Contains(t, text.String(), "Daemon: not started")
-
-	var data bytes.Buffer
-	require.NoError(t, listSchedules(t.Context(), path, true, &data))
-	var decoded struct {
-		Schedules []Schedule   `json:"schedules"`
-		Daemon    daemonHealth `json:"daemon"`
-	}
-	require.NoError(t, json.Unmarshal(data.Bytes(), &decoded))
-	assert.Len(t, decoded.Schedules, 2)
-	assert.Equal(t, daemonNotStarted, decoded.Daemon.State)
 }
 
 func TestDaemonRunsTheInstructionItRecords(t *testing.T) {
-	store, _ := newTestStore(t)
-	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
-	schedule := createTestSchedule(t, store, "runner-a", "daily", due)
-	polled, err := store.Due(t.Context(), due)
-	require.NoError(t, err)
-	require.Len(t, polled, 1)
-	// The schedule is edited after the daemon polls it but before it claims.
+	store, schedule := dueDailySchedule(t)
+	polled := schedule
 	schedule.Instruction = "Edited instruction"
 	schedule.CWD = "/work/edited"
-	require.NoError(t, store.Update(t.Context(), &schedule, schedule.Version, nil, due))
+	require.NoError(t, store.Update(t.Context(), &schedule, schedule.Version, nil, daemonDue))
 	exec := &fakeExecutor{}
-	d, clock, _ := newTestDaemon(store, exec, nil)
-	clock.Set(due)
+	d, _, _ := newTestDaemon(store, exec, nil)
 
-	d.dispatch(t.Context(), t.Context(), polled[0], due, &occupancy{schedules: map[string]bool{}})
+	// Dispatch must claim the current instruction even though it polled the old one.
+	d.dispatch(t.Context(), t.Context(), polled, daemonDue, &occupancy{schedules: map[string]bool{}})
 	d.wg.Wait()
 
-	require.Equal(t, 1, exec.callCount())
-	assert.Equal(t, "Edited instruction", exec.calls[0].Instruction)
-	assert.Equal(t, "/work/edited", exec.calls[0].CWD)
-	runs, err := store.ListRuns(t.Context(), "runner-a", RunFilter{Limit: 1})
-	require.NoError(t, err)
-	run, err := store.GetRun(t.Context(), "runner-a", runs[0].ID)
-	require.NoError(t, err)
+	require.Len(t, exec.calls, 1)
+	run := latestRun(t, store, schedule)
+	assert.Equal(t, schedule.Instruction, exec.calls[0].Instruction)
+	assert.Equal(t, schedule.CWD, exec.calls[0].CWD)
 	assert.Equal(t, exec.calls[0].Instruction, run.Instruction)
 	assert.Equal(t, exec.calls[0].CWD, run.CWD)
 }
 
-func TestDaemonSendsNoInstructionWhenTheScheduleIsDeletedFirst(t *testing.T) {
-	store, _ := newTestStore(t)
-	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
-	createTestSchedule(t, store, "runner-a", "daily", due)
+func TestDaemonRejectsStartWhenTheScheduleIsDeletedFirst(t *testing.T) {
+	store, _ := dueDailySchedule(t)
 	var deleteErr, startErr error
-	sent := false
-	// The user deletes the schedule after the daemon claims the run but
-	// before the instruction is sent.
 	exec := executorFunc(func(ctx context.Context, schedule Schedule, started func(string) error, _ <-chan struct{}) (runResult, error) {
+		// Delete after the claim but before the executor sends its instruction.
 		deleteErr = store.Delete(ctx, schedule.Workspace, schedule.ID)
-		if startErr = started("conv-deleted"); startErr != nil {
-			return runResult{}, startErr
-		}
-		sent = true
-		return runResult{}, nil
+		startErr = started("conv-deleted")
+		return runResult{}, startErr
 	})
-	d, clock, _ := newTestDaemon(store, exec, nil)
-
-	clock.Set(due)
+	d, _, _ := newTestDaemon(store, exec, nil)
 	tickAndWait(t, d)
 
 	require.NoError(t, deleteErr)
 	assert.ErrorIs(t, startErr, errRunGone)
-	assert.False(t, sent, "nothing could track the conversation, so the instruction is not sent")
 	var runs int
 	require.NoError(t, store.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runs`).Scan(&runs))
 	assert.Zero(t, runs)

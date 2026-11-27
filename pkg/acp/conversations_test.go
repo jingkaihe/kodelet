@@ -20,47 +20,33 @@ func TestConversationMethodsUseTheServerWithoutASession(t *testing.T) {
 			if id != "known" {
 				return chat.ConversationStatus{}, errors.Wrapf(convtypes.ErrConversationNotFound, "%s", id)
 			}
-			return chat.ConversationStatus{
-				ID:         id,
-				Running:    true,
-				LatestTurn: &chat.ConversationTurn{ID: "turn-1", Status: "running"},
-			}, nil
+			return chat.ConversationStatus{ID: id, Running: true}, nil
 		},
 		stopTurn: func(id, turnID string) { stops = append(stops, id+"/"+turnID) },
 	}
-	output := bytes.NewBuffer(nil)
-	server := newRemoteACPTestServer(t, t.TempDir(), client, output)
-	request := func(method string, params any) map[string]any {
+	output := new(bytes.Buffer)
+	server := newRemoteACPTestServer(t, "", client, output)
+	request := func(method, params string) map[string]any {
 		t.Helper()
-		data, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 7, "method": method, "params": params})
-		require.NoError(t, err)
-		require.NoError(t, server.handleRequest(data))
-		messages := readJSONRPCMessages(t, output)
-		require.Len(t, messages, 1)
-		return messages[0]
+		require.NoError(t, server.handleRequest(mustJSONRawMessage(t, acptypes.Request{
+			JSONRPC: "2.0", ID: json.RawMessage("7"), Method: method, Params: json.RawMessage(params),
+		})))
+		return readJSONRPCMessage(t, output)
 	}
 
-	response := request(acptypes.ConversationStatusMethod, acptypes.ConversationStatusRequest{ConversationID: " known "})
+	init := request("initialize", `{"protocolVersion":1}`)
+	meta := init["result"].(map[string]any)["_meta"].(map[string]any)
+	assert.Equal(t, map[string]any{"version": float64(1)}, meta["conversations"])
+	response := request("_conversation/status", `{"conversationId":" known "}`)
 	status := response["result"].(map[string]any)
 	assert.Equal(t, "known", status["id"])
 	assert.Equal(t, true, status["running"])
-	assert.Equal(t, "running", status["latestTurn"].(map[string]any)["status"])
 
-	assertRPCErrorCode(t, request(acptypes.ConversationStatusMethod, acptypes.ConversationStatusRequest{ConversationID: "missing"}), acptypes.ErrCodeResourceNotFound)
-	assertRPCErrorCode(t, request(acptypes.ConversationStatusMethod, acptypes.ConversationStatusRequest{}), acptypes.ErrCodeInvalidParams)
+	assertRPCErrorCode(t, request("_conversation/status", `{"conversationId":"missing"}`), acptypes.ErrCodeResourceNotFound)
+	assertRPCErrorCode(t, request("_conversation/status", `{}`), acptypes.ErrCodeInvalidParams)
 
-	response = request(acptypes.ConversationStopMethod, acptypes.ConversationStopRequest{ConversationID: "known", TurnID: "turn-1"})
+	response = request("_conversation/stop", `{"conversationId":"known","turnId":"turn-1"}`)
 	assert.Equal(t, map[string]any{}, response["result"])
-	request(acptypes.ConversationStopMethod, acptypes.ConversationStopRequest{ConversationID: "known"})
+	request("_conversation/stop", `{"conversationId":"known"}`)
 	assert.Equal(t, []string{"known/turn-1", "known/"}, stops)
-}
-
-func TestConversationMethodsAreAdvertisedOnlyForServerSessions(t *testing.T) {
-	output := bytes.NewBuffer(nil)
-	server := newRemoteACPTestServer(t, t.TempDir(), &fakeRemoteChatClient{}, output)
-	require.NoError(t, server.handleInitialize(&acptypes.Request{ID: json.RawMessage("1"), Params: json.RawMessage(`{"protocolVersion":1}`)}))
-	messages := readJSONRPCMessages(t, output)
-	require.Len(t, messages, 1)
-	meta := messages[0]["result"].(map[string]any)["_meta"].(map[string]any)
-	assert.Equal(t, map[string]any{"version": float64(1)}, meta["conversations"])
 }

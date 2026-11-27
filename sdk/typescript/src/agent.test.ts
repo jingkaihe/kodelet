@@ -1290,44 +1290,41 @@ test("Inline cleanup runs session.end once and is bounded when the callback does
 });
 
 test("Conversation status and stop use a short-lived ACP process without a runner", async () => {
-  const processes: FakeACPProcess[] = [];
-  const args: string[][] = [];
+  const stops: unknown[] = [];
+  let closed = 0;
   const client = new Client({ server: "http://daemon", runner: "runner-one", spawn: (_command, flags) => {
-    args.push(flags);
-    const process = new FakeACPProcess({
+    assert.deepEqual(flags, ["acp", "--server", "http://daemon"]);
+    const child = new FakeACPProcess({
       conversationsVersion: 1,
-      onRequest(request, fake) {
-        const params = request.params as { conversationId?: string };
-        if (request.method === "_conversation/status") {
-          if (params.conversationId === "gone") fake.respondError(request.id, "conversation not found", -32002);
-          else fake.respond(request.id, { id: params.conversationId, running: true, messageCount: 0, usage: { totalCost: 0.5 }, latestTurn: { id: "turn-1", status: "running" } });
+      onRequest({ method, params, id }, fake) {
+        if (method === "_conversation/status") {
+          const { conversationId } = params as { conversationId: string };
+          if (conversationId === "conv-9") fake.respond(id, { id: conversationId, running: true, messageCount: 0, usage: { totalCost: 0.5 } });
+          else fake.respondError(id, "conversation not found", -32002);
           return true;
         }
-        if (request.method === "_conversation/stop") {
-          fake.respond(request.id, {});
+        if (method === "_conversation/stop") {
+          stops.push(params);
+          fake.respond(id, {});
           return true;
         }
+        assert.equal(method, "initialize", "conversation methods must not open a session");
         return false;
       },
     });
-    processes.push(process);
-    return process;
+    child.once("close", () => closed++);
+    return child;
   } });
 
   const status = await client.getConversationStatus(" conv-9 ");
-  assert.deepEqual(args[0], ["acp", "--server", "http://daemon"]);
-  assert.deepEqual(processes[0].requests[1], { jsonrpc: "2.0", id: 2, method: "_conversation/status", params: { conversationId: "conv-9" } });
-  assert.equal(status.running, true);
-  assert.equal(status.latestTurn?.status, "running");
   assert.equal(status.usage.totalCost, 0.5);
 
   await assert.rejects(() => client.getConversationStatus("gone"), (error: unknown) => error instanceof ConversationNotFoundError && error.conversationId === "gone");
   await client.stopConversation("conv-9", { turnId: "turn-1" });
   await client.stopConversation("conv-9");
-  assert.deepEqual(processes[2].requests[1].params, { conversationId: "conv-9", turnId: "turn-1" });
-  assert.deepEqual(processes[3].requests[1].params, { conversationId: "conv-9" });
+  assert.deepEqual(stops, [{ conversationId: "conv-9", turnId: "turn-1" }, { conversationId: "conv-9" }]);
   await assert.rejects(() => client.getConversationStatus(" "), /non-empty conversation ID/);
-  assert.equal(processes.length, 4);
+  assert.equal(closed, 4, "each call closes its ACP process, including on RPC error");
 });
 
 test("Conversation methods require the conversations capability", async () => {

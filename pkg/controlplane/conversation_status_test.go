@@ -1,8 +1,6 @@
 package controlplane
 
 import (
-	"context"
-	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -11,7 +9,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/conversations/sqlite"
-	"github.com/jingkaihe/kodelet/pkg/db/dbtest"
 	conversationtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
@@ -19,52 +16,37 @@ import (
 )
 
 func TestConversationStatusReportsTurnsAndSavedConversation(t *testing.T) {
-	database := dbtest.Open(t, filepath.Join(t.TempDir(), "storage.db"))
-	turns, err := newTurnStore(t.Context(), database)
-	require.NoError(t, err)
-	store := sqlite.NewStore(database)
-	started, release := make(chan struct{}), make(chan struct{})
-	runner := &mockChatRunner{runFunc: func(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
-		close(started)
-		<-release
-		return req.ConversationID, sink.Send(ChatEvent{Kind: "result", Result: new("all done")})
-	}}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx := t.Context()
+	turns := openTurnTestStore(t, filepath.Join(t.TempDir(), "storage.db"))
+	store := sqlite.NewStore(turns.db)
 	s := &Server{
+		router:              mux.NewRouter(),
 		turns:               turns,
-		chatRunner:          runner,
 		conversationService: conversations.NewConversationService(store),
-		runCtx:              ctx,
-		runCancel:           cancel,
-		config:              &ServerConfig{AuthToken: "status-token"},
 	}
-	router := mux.NewRouter()
-	router.HandleFunc("/api/chat", s.handleChat).Methods(http.MethodPost)
-	router.HandleFunc("/api/conversations/{id}/status", s.handleGetConversationStatus).Methods(http.MethodGet)
-	server := httptest.NewServer(s.authMiddleware(router))
-	t.Cleanup(func() { cancel(); server.Close() })
-	client, err := chat.NewClient(server.URL, "status-token", "")
+	s.setupRoutes()
+	server := httptest.NewServer(s)
+	t.Cleanup(server.Close)
+	client, err := chat.NewClient(server.URL, "", "")
 	require.NoError(t, err)
 
-	_, err = client.GetConversationStatus(t.Context(), "missing")
+	_, err = client.GetConversationStatus(ctx, "missing")
 	require.ErrorIs(t, err, conversationtypes.ErrConversationNotFound)
-	_, err = client.GetConversationStatus(t.Context(), "../escape")
+	_, err = client.GetConversationStatus(ctx, "../escape")
 	require.Error(t, err)
 
-	done := make(chan error, 1)
-	go func() {
-		_, err := client.Run(t.Context(), chat.ChatRequest{ConversationID: "conversation", TurnID: "turn", Message: "work"}, &recordingChatSink{})
-		done <- err
-	}()
-	<-started
-	status, err := client.GetConversationStatus(t.Context(), "conversation")
+	_, err = turns.stop(ctx, "conversation", "older-turn")
+	require.NoError(t, err)
+	_, _, err = turns.admit(ctx, chat.ChatRequest{ConversationID: "conversation", TurnID: "turn", Message: "work"})
+	require.NoError(t, err)
+	status, err := client.GetConversationStatus(ctx, "conversation")
 	require.NoError(t, err)
 	assert.Equal(t, "conversation", status.ID)
 	assert.True(t, status.Running)
 	assert.Nil(t, status.CreatedAt, "the conversation has not been saved yet")
 	require.NotNil(t, status.LatestTurn)
 	assert.Equal(t, "turn", status.LatestTurn.ID)
-	assert.Equal(t, "running", status.LatestTurn.Status)
+	assert.Equal(t, "accepted", status.LatestTurn.Status)
 
 	record := conversationtypes.NewConversationRecord("conversation")
 	record.CWD = "/work"
@@ -72,11 +54,13 @@ func TestConversationStatusReportsTurnsAndSavedConversation(t *testing.T) {
 	record.Metadata["profile"] = "nightly"
 	record.Metadata["model"] = "claude"
 	record.Usage = llmtypes.Usage{InputTokens: 10, OutputTokens: 5, InputCost: 0.5, OutputCost: 0.25, MaxContextWindow: 1000}
-	require.NoError(t, store.Save(t.Context(), record))
-	close(release)
-	require.NoError(t, <-done)
+	require.NoError(t, store.Save(ctx, record))
+	// Polling status must not decode the conversation's message history.
+	_, err = turns.db.Writer.ExecContext(ctx, "UPDATE conversations SET raw_messages = 'unreadable' WHERE id = ?", record.ID)
+	require.NoError(t, err)
+	require.NoError(t, turns.finish(ctx, record.ID, "turn", "succeeded", new("all done"), nil))
 
-	status, err = client.GetConversationStatus(t.Context(), "conversation")
+	status, err = client.GetConversationStatus(ctx, record.ID)
 	require.NoError(t, err)
 	assert.False(t, status.Running)
 	assert.Equal(t, "/work", status.CWD)

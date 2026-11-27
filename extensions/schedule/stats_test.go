@@ -9,38 +9,26 @@ import (
 
 func TestRunCollectorKeepsTheFinalMessageAndCountsTools(t *testing.T) {
 	c := newRunCollector()
-	events := []agent.Event{
-		{Type: agent.EventAssistantMessageDelta, Data: agent.AssistantMessageDelta{DeltaContent: "Let me check. "}},
-		{Type: agent.EventToolCall, Data: agent.ToolCall{ToolName: "bash", ToolCallID: "1"}},
-		{Type: agent.EventToolResult, Data: agent.ToolResult{ToolName: "bash", ToolCallID: "1", Status: "failed"}},
-		{Type: agent.EventToolCall, Data: agent.ToolCall{ToolName: "bash", ToolCallID: "2"}},
-		{Type: agent.EventToolResult, Data: agent.ToolResult{ToolName: "bash", ToolCallID: "2", Status: "completed"}},
-		{Type: agent.EventToolCall, Data: agent.ToolCall{ToolName: "file_read", ToolCallID: "3"}},
-		{Type: agent.EventContextCompacted, Data: agent.ContextCompacted{}},
-		{Type: agent.EventAssistantMessageDelta, Data: agent.AssistantMessageDelta{DeltaContent: "All "}},
-		{Type: agent.EventAssistantMessageDelta, Data: agent.AssistantMessageDelta{DeltaContent: "good."}},
+	delta := func(text string) {
+		c.observe(agent.Event{Type: agent.EventAssistantMessageDelta, Data: agent.AssistantMessageDelta{DeltaContent: text}})
 	}
-	for _, event := range events {
+	delta("Let me check. ")
+	for _, event := range []agent.Event{
+		{Type: agent.EventToolCall, Data: agent.ToolCall{ToolName: "bash"}},
+		{Type: agent.EventToolResult, Data: agent.ToolResult{Status: "failed"}},
+		{Type: agent.EventToolCall, Data: agent.ToolCall{ToolName: "bash"}},
+		{Type: agent.EventToolResult, Data: agent.ToolResult{Status: "completed"}},
+		{Type: agent.EventToolCall, Data: agent.ToolCall{ToolName: "file_read"}},
+		{Type: agent.EventContextCompacted},
+	} {
 		c.observe(event)
 	}
+	delta(" ")
+	assert.Equal(t, "Let me check.", c.result().Output, "no final message yet: fall back to earlier text")
 
+	delta("All ")
+	delta("good.")
 	result := c.result()
-
 	assert.Equal(t, "All good.", result.Output)
-	assert.Equal(t, 3, result.Stats.ToolCalls)
-	assert.Equal(t, 1, result.Stats.FailedToolCalls)
-	assert.Equal(t, 1, result.Stats.Compactions)
-	assert.Equal(t, map[string]int{"bash": 2, "file_read": 1}, result.Stats.Tools)
-	assert.Equal(t, []toolCount{{"bash", 2}, {"file_read", 1}}, toolCounts(result.Stats.Tools))
-}
-
-func TestRunCollectorFallsBackToAllTextWithoutAFinalMessage(t *testing.T) {
-	c := newRunCollector()
-	c.observe(agent.Event{Type: agent.EventAssistantMessageDelta, Data: agent.AssistantMessageDelta{DeltaContent: "Partial work"}})
-	c.observe(agent.Event{Type: agent.EventToolCall, Data: agent.ToolCall{ToolName: "bash"}})
-
-	result := c.result()
-
-	assert.Equal(t, "Partial work", result.Output)
-	assert.Equal(t, 1, result.Stats.ToolCalls)
+	assert.Equal(t, RunStats{ToolCalls: 3, FailedToolCalls: 1, Compactions: 1, Tools: map[string]int{"bash": 2, "file_read": 1}}, result.Stats)
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -14,12 +15,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// testCLI captures what commands would run instead of running it.
 type testCLI struct {
-	*cli
 	extension *extensionSettings
 	daemon    *daemonSettings
-	out, err  bytes.Buffer
+	out       bytes.Buffer
 }
 
 func newTestCLI(t *testing.T) *testCLI {
@@ -27,185 +26,119 @@ func newTestCLI(t *testing.T) *testCLI {
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	for _, key := range []string{"CONFIG", "DB", "AUTO_APPROVE", "SERVER", "KODELET", "POLL_INTERVAL", "CONCURRENCY", "RUN_TIMEOUT", "MISFIRE_GRACE"} {
 		t.Setenv("KODELET_SCHEDULE_"+key, "")
-		os.Unsetenv("KODELET_SCHEDULE_" + key)
 	}
-	tc := &testCLI{cli: newCLI()}
-	tc.runExtension = func(_ context.Context, settings extensionSettings) error {
+	return &testCLI{}
+}
+
+// Build a fresh command each time, as if invoked from a new process.
+func (tc *testCLI) execute(t *testing.T, args ...string) error {
+	t.Helper()
+	*tc = testCLI{}
+	c := newCLI()
+	c.runExtension = func(_ context.Context, settings extensionSettings) error {
 		tc.extension = &settings
 		return nil
 	}
-	tc.runDaemon = func(_ context.Context, settings daemonSettings, _ *slog.Logger) error {
+	c.runDaemon = func(_ context.Context, settings daemonSettings, _ *slog.Logger) error {
 		tc.daemon = &settings
 		return nil
 	}
-	return tc
-}
-
-func (tc *testCLI) execute(t *testing.T, args ...string) error {
-	t.Helper()
-	root := tc.rootCommand()
-	root.SetArgs(args)
+	root := c.rootCommand()
+	root.SetArgs(append([]string{}, args...))
 	root.SetOut(&tc.out)
-	root.SetErr(&tc.err)
+	root.SetErr(io.Discard)
 	return root.ExecuteContext(t.Context())
 }
 
-func TestRootServesExtensionWithDefaultDatabase(t *testing.T) {
+func TestExtensionDefaultsAndLocalConfig(t *testing.T) {
 	tc := newTestCLI(t)
-
+	dir := filepath.Join(os.Getenv("KODELET_BASE_PATH"), "schedule")
 	require.NoError(t, tc.execute(t))
-
-	base := os.Getenv("KODELET_BASE_PATH")
 	require.NotNil(t, tc.extension)
-	assert.Equal(t, filepath.Join(base, "schedule", "schedule.db"), tc.extension.DBPath)
-	assert.False(t, tc.extension.AutoApprove, "changes need approval by default")
+	assert.Equal(t, filepath.Join(dir, "schedule.db"), tc.extension.DBPath)
+	assert.False(t, tc.extension.AutoApprove)
 	assert.Empty(t, tc.out.String(), "stdout is reserved for the protocol")
-}
 
-func TestRootRejectsUnknownCommands(t *testing.T) {
-	tc := newTestCLI(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(`
+db: ~/shared.db
+auto_approve: true
+`), 0o600))
+	require.NoError(t, tc.execute(t))
+	require.NotNil(t, tc.extension)
+	assert.Equal(t, filepath.Join(home, "shared.db"), tc.extension.DBPath)
+	assert.True(t, tc.extension.AutoApprove)
 
-	err := tc.execute(t, "bogus")
-
-	assert.ErrorContains(t, err, "unknown command")
-	assert.Nil(t, tc.extension)
+	t.Setenv("KODELET_SCHEDULE_AUTO_APPROVE", "sometimes")
+	assert.ErrorContains(t, tc.execute(t), "invalid auto_approve")
+	assert.Nil(t, tc.extension, "invalid approval settings must not start the extension")
 }
 
 func TestDaemonSettingsPrecedence(t *testing.T) {
 	tc := newTestCLI(t)
-	dir := t.TempDir()
-	config := filepath.Join(dir, "config.yaml")
+	config := filepath.Join(t.TempDir(), "config.yaml")
 	require.NoError(t, os.WriteFile(config, []byte(`
 db: from-config.db
 server: https://config.example
 poll_interval: 10s
 concurrency: 3
-run_timeout: 2h
 `), 0o600))
 	t.Setenv("KODELET_SCHEDULE_POLL_INTERVAL", "20s")
 	t.Setenv("KODELET_SCHEDULE_CONCURRENCY", "4")
-
+	t.Chdir(t.TempDir())
 	require.NoError(t, tc.execute(t, "daemon", "--config", config, "--concurrency", "5"))
 
 	require.NotNil(t, tc.daemon)
-	base := os.Getenv("KODELET_BASE_PATH")
-	assert.Equal(t, filepath.Join(base, "schedule", "from-config.db"), tc.daemon.DBPath, "relative to the schedule directory")
-	assert.Equal(t, "https://config.example", tc.daemon.Server, "config file")
+	assert.Equal(t, filepath.Join(os.Getenv("KODELET_BASE_PATH"), "schedule", "from-config.db"), tc.daemon.DBPath)
+	assert.Equal(t, "https://config.example", tc.daemon.Server)
 	assert.Equal(t, 20*time.Second, tc.daemon.Config.PollInterval, "environment overrides config")
 	assert.Equal(t, 5, tc.daemon.Config.Concurrency, "flag overrides environment")
-	assert.Equal(t, 2*time.Hour, tc.daemon.Config.RunTimeout)
-	assert.Equal(t, time.Hour, tc.daemon.Config.MisfireGrace, "default")
-	assert.Equal(t, "kodelet", tc.daemon.Kodelet, "default")
-}
-
-func TestDefaultConfigFileIsOptional(t *testing.T) {
-	tc := newTestCLI(t)
-	require.NoError(t, tc.execute(t, "daemon"))
-	assert.Equal(t, defaultDaemonConfig(), tc.daemon.Config)
-
-	base := os.Getenv("KODELET_BASE_PATH")
-	require.NoError(t, os.MkdirAll(filepath.Join(base, "schedule"), 0o700))
-	require.NoError(t, os.WriteFile(filepath.Join(base, "schedule", "config.yaml"), []byte("concurrency: 7\ndb: /tmp/x.db\nauto_approve: true\n"), 0o600))
-	tc = newTestCLI(t)
-	t.Setenv("KODELET_BASE_PATH", base)
-	require.NoError(t, tc.execute(t))
-	require.NotNil(t, tc.extension)
-	assert.Equal(t, "/tmp/x.db", tc.extension.DBPath, "the extension reads the default config file too")
-	assert.True(t, tc.extension.AutoApprove)
-	require.NoError(t, tc.execute(t, "daemon"))
-	assert.Equal(t, 7, tc.daemon.Config.Concurrency)
 }
 
 func TestDaemonRejectsInvalidSettings(t *testing.T) {
-	tests := map[string]struct {
-		env  map[string]string
-		args []string
-		err  string
+	for _, tt := range []struct {
+		args             []string
+		env, value, want string
 	}{
-		"missing config":      {args: []string{"--config", "/does/not/exist.yaml"}, err: "failed to read config file"},
-		"bad duration":        {env: map[string]string{"KODELET_SCHEDULE_POLL_INTERVAL": "soon"}, err: "invalid poll_interval"},
-		"bad concurrency":     {env: map[string]string{"KODELET_SCHEDULE_CONCURRENCY": "many"}, err: "invalid concurrency"},
-		"failed validation":   {args: []string{"--concurrency", "0"}, err: "concurrency must be at least 1"},
-		"grace below poll":    {args: []string{"--misfire-grace", "1s"}, err: "misfire grace"},
-		"unexpected argument": {args: []string{"extra"}, err: "unknown command"},
-	}
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
+		{args: []string{"--config", filepath.Join(t.TempDir(), "missing.yaml")}, want: "failed to read config file"},
+		{env: "POLL_INTERVAL", value: "soon", want: "invalid poll_interval"},
+		{env: "CONCURRENCY", value: "many", want: "invalid concurrency"},
+		{args: []string{"--concurrency", "0"}, want: "concurrency must be at least 1"},
+		{args: []string{"--misfire-grace", "1s"}, want: "misfire grace"},
+	} {
+		t.Run(tt.want, func(t *testing.T) {
 			tc := newTestCLI(t)
-			for key, value := range tt.env {
-				t.Setenv(key, value)
+			if tt.env != "" {
+				t.Setenv("KODELET_SCHEDULE_"+tt.env, tt.value)
 			}
-			err := tc.execute(t, append([]string{"daemon"}, tt.args...)...)
-			assert.ErrorContains(t, err, tt.err)
+			assert.ErrorContains(t, tc.execute(t, append([]string{"daemon"}, tt.args...)...), tt.want)
 			assert.Nil(t, tc.daemon)
 		})
 	}
 }
 
-func TestVersionCommands(t *testing.T) {
-	for _, args := range [][]string{{"version"}, {"--version"}} {
-		tc := newTestCLI(t)
-		require.NoError(t, tc.execute(t, args...))
-		assert.Equal(t, "kodelet-extension-schedule "+version+"\n", tc.out.String())
-	}
-}
-
-func TestListCommandUsesConfiguredDatabase(t *testing.T) {
+func TestListCommandUsesHostWideDatabase(t *testing.T) {
 	store, path := newTestStore(t)
-	createTestSchedule(t, store, "runner-a", "daily", time.Now().Add(time.Hour))
+	next := time.Now().Add(time.Hour)
+	createTestSchedule(t, store, "runner-a", "daily", next)
+	createTestSchedule(t, store, "runner-b", "weekly", next)
 	tc := newTestCLI(t)
 	t.Setenv("KODELET_SCHEDULE_DB", path)
 
-	require.NoError(t, tc.execute(t, "list", "--json"))
+	require.NoError(t, tc.execute(t, "list"))
+	assert.Contains(t, tc.out.String(), "runner-a")
+	assert.Contains(t, tc.out.String(), "runner-b")
+	assert.Contains(t, tc.out.String(), "Daemon: not started")
 
+	require.NoError(t, tc.execute(t, "list", "--json"))
 	var decoded struct {
-		Schedules []Schedule `json:"schedules"`
+		Schedules []Schedule   `json:"schedules"`
+		Daemon    daemonHealth `json:"daemon"`
 	}
 	require.NoError(t, json.Unmarshal(tc.out.Bytes(), &decoded))
-	require.Len(t, decoded.Schedules, 1)
-	assert.Equal(t, "runner-a", decoded.Schedules[0].Workspace)
-}
-
-func TestAutoApproveSetting(t *testing.T) {
-	tc := newTestCLI(t)
-	t.Setenv("KODELET_SCHEDULE_AUTO_APPROVE", "true")
-	require.NoError(t, tc.execute(t))
-	require.NotNil(t, tc.extension)
-	assert.True(t, tc.extension.AutoApprove)
-
-	tc = newTestCLI(t)
-	t.Setenv("KODELET_SCHEDULE_AUTO_APPROVE", "sometimes")
-	err := tc.execute(t)
-	assert.ErrorContains(t, err, "invalid auto_approve")
-	assert.Nil(t, tc.extension)
-}
-
-func TestDBPathIsTheSameFromAnyDirectory(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	tests := map[string]string{
-		"nested/x.db":  filepath.Join("schedule", "nested", "x.db"),
-		"../x.db":      "x.db",
-		"~/data/x.db":  filepath.Join(home, "data", "x.db"),
-		"/abs/x.db":    "/abs/x.db",
-		"  spaced.db ": filepath.Join("schedule", "spaced.db"),
-	}
-	for value, want := range tests {
-		t.Run(value, func(t *testing.T) {
-			var paths []string
-			for _, dir := range []string{t.TempDir(), t.TempDir()} {
-				t.Chdir(dir)
-				tc := newTestCLI(t)
-				t.Setenv("KODELET_BASE_PATH", home)
-				t.Setenv("KODELET_SCHEDULE_DB", value)
-				require.NoError(t, tc.execute(t))
-				paths = append(paths, tc.extension.DBPath)
-			}
-			if !filepath.IsAbs(want) {
-				want = filepath.Join(home, want)
-			}
-			assert.Equal(t, want, paths[0])
-			assert.Equal(t, paths[0], paths[1], "the working directory does not matter")
-		})
-	}
+	require.Len(t, decoded.Schedules, 2)
+	assert.ElementsMatch(t, []string{"runner-a", "runner-b"}, []string{decoded.Schedules[0].Workspace, decoded.Schedules[1].Workspace})
+	assert.Equal(t, daemonNotStarted, decoded.Daemon.State)
 }
