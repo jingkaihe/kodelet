@@ -150,7 +150,7 @@ Service managers start with a minimal environment. If the daemon starts the loca
 
 ## Storage
 
-Schedules, the latest 20 runs of each schedule, and the daemon heartbeat live in the `db` setting, or `schedule/schedule.db` under `$KODELET_BASE_PATH` (default `~/.kodelet`). The extension and daemon must resolve the same path; set it in the config file or `KODELET_SCHEDULE_DB` rather than with `--db`, which only the command you run sees.
+Schedules, the latest 20 runs of each schedule, and the daemon heartbeat live in the `db` setting, or `schedule/schedule.db` under `$KODELET_BASE_PATH` (default `~/.kodelet`). A relative `db` path is resolved under that `schedule` directory, and a leading `~` expands to your home directory. The extension and daemon must resolve the same path; set it in the config file or `KODELET_SCHEDULE_DB` rather than with `--db`, which only the command you run sees.
 
 The extension and daemon apply pending schema migrations when they open the database, recording them in its `schema_migrations` table. An older executable refuses a database migrated by a newer one, so upgrade the extension and daemon together. To change the schema, append a migration to `scheduleMigrations` in `migrations.go`; never edit a released one.
 

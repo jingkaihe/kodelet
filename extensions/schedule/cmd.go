@@ -89,7 +89,7 @@ func (c *cli) rootCommand() *cobra.Command {
 	root.SetVersionTemplate("kodelet-extension-schedule {{.Version}}\n")
 	flags := root.PersistentFlags()
 	flags.String("config", "", "config file (default <base>/schedule/config.yaml when present)")
-	flags.String("db", "", "schedule database (default <base>/schedule/schedule.db)")
+	flags.String("db", "", "schedule database (default <base>/schedule/schedule.db; relative paths are under <base>/schedule)")
 	mustBind(v, keyConfig, flags.Lookup("config"))
 	mustBind(v, keyDB, flags.Lookup("db"))
 
@@ -206,16 +206,38 @@ func loadConfigFile(v *viper.Viper) error {
 }
 
 // dbPathFrom returns the configured database, or schedule/schedule.db under
-// the Kodelet base path.
+// the Kodelet base path. It expands a leading ~ and resolves a relative path
+// under <base>/schedule, never the working directory, which differs between
+// the extension (started in its executable's directory) and the daemon.
 func dbPathFrom(v *viper.Viper) (string, error) {
-	if path := strings.TrimSpace(v.GetString(keyDB)); path != "" {
-		return filepath.Abs(path)
-	}
 	base, err := basePath()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "schedule", "schedule.db"), nil
+	dir := filepath.Join(base, "schedule")
+	path := strings.TrimSpace(v.GetString(keyDB))
+	if path == "" {
+		return filepath.Join(dir, "schedule.db"), nil
+	}
+	if path, err = expandHome(path); err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(dir, path)
+	}
+	return filepath.Clean(path), nil
+}
+
+// expandHome replaces a leading ~ or ~/ with the home directory.
+func expandHome(path string) (string, error) {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to resolve home directory")
+	}
+	return filepath.Join(home, strings.TrimPrefix(path, "~")), nil
 }
 
 // extensionSettings are the resolved options of the extension mode.

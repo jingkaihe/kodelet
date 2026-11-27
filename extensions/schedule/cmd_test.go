@@ -88,9 +88,8 @@ run_timeout: 2h
 	require.NoError(t, tc.execute(t, "daemon", "--config", config, "--concurrency", "5"))
 
 	require.NotNil(t, tc.daemon)
-	wd, err := os.Getwd()
-	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(wd, "from-config.db"), tc.daemon.DBPath)
+	base := os.Getenv("KODELET_BASE_PATH")
+	assert.Equal(t, filepath.Join(base, "schedule", "from-config.db"), tc.daemon.DBPath, "relative to the schedule directory")
 	assert.Equal(t, "https://config.example", tc.daemon.Server, "config file")
 	assert.Equal(t, 20*time.Second, tc.daemon.Config.PollInterval, "environment overrides config")
 	assert.Equal(t, 5, tc.daemon.Config.Concurrency, "flag overrides environment")
@@ -179,4 +178,34 @@ func TestAutoApproveSetting(t *testing.T) {
 	err := tc.execute(t)
 	assert.ErrorContains(t, err, "invalid auto_approve")
 	assert.Nil(t, tc.extension)
+}
+
+func TestDBPathIsTheSameFromAnyDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	tests := map[string]string{
+		"nested/x.db":  filepath.Join("schedule", "nested", "x.db"),
+		"../x.db":      "x.db",
+		"~/data/x.db":  filepath.Join(home, "data", "x.db"),
+		"/abs/x.db":    "/abs/x.db",
+		"  spaced.db ": filepath.Join("schedule", "spaced.db"),
+	}
+	for value, want := range tests {
+		t.Run(value, func(t *testing.T) {
+			var paths []string
+			for _, dir := range []string{t.TempDir(), t.TempDir()} {
+				t.Chdir(dir)
+				tc := newTestCLI(t)
+				t.Setenv("KODELET_BASE_PATH", home)
+				t.Setenv("KODELET_SCHEDULE_DB", value)
+				require.NoError(t, tc.execute(t))
+				paths = append(paths, tc.extension.DBPath)
+			}
+			if !filepath.IsAbs(want) {
+				want = filepath.Join(home, want)
+			}
+			assert.Equal(t, want, paths[0])
+			assert.Equal(t, paths[0], paths[1], "the working directory does not matter")
+		})
+	}
 }
