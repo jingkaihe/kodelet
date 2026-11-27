@@ -118,6 +118,8 @@ Kodelet does not supervise the daemon. The examples below use `~/.local/bin`; us
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>ExitTimeOut</key>
+  <integer>60</integer>
   <key>StandardErrorPath</key>
   <string>/Users/you/.kodelet/logs/schedule-daemon.log</string>
 </dict>
@@ -127,6 +129,8 @@ Kodelet does not supervise the daemon. The examples below use `~/.local/bin`; us
 ```bash
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.kodelet.schedule.plist
 ```
+
+`ExitTimeOut` gives the daemon time to stop cleanly: on `SIGTERM` it waits `--shutdown-grace` (30 seconds by default) for runs to finish, then cancels the rest, which takes a few more seconds. Without it, launchd may kill the daemon first, leaving those runs' conversations running. Keep it above the shutdown grace plus about 10 seconds.
 
 On Linux, use a systemd user unit such as `~/.config/systemd/user/kodelet-schedule.service`:
 
