@@ -415,10 +415,12 @@ RETURNING id, instruction, cwd, profile`,
 	if err != nil {
 		return claimedRun{}, false, errors.Wrap(err, "failed to record run")
 	}
+	// Keep running runs even when newer occurrences push them out of the
+	// history, so their outcome can still be recorded.
 	if _, err := tx.ExecContext(ctx, `
-DELETE FROM runs WHERE schedule_id = ? AND id NOT IN (
+DELETE FROM runs WHERE schedule_id = ? AND status != ? AND id NOT IN (
 	SELECT id FROM runs WHERE schedule_id = ? ORDER BY id DESC LIMIT ?
-)`, scheduleID, scheduleID, runHistoryLimit); err != nil {
+)`, scheduleID, string(RunRunning), scheduleID, runHistoryLimit); err != nil {
 		return claimedRun{}, false, errors.Wrap(err, "failed to prune run history")
 	}
 	if err := tx.Commit(); err != nil {

@@ -281,3 +281,29 @@ func TestStoreDisableCountsAsAnEdit(t *testing.T) {
 	read.Instruction = "changed"
 	assert.ErrorIs(t, store.Update(t.Context(), &read, read.Version, nil, due), errChanged)
 }
+
+func TestStorePruningKeepsRunningRuns(t *testing.T) {
+	store, _ := newTestStore(t)
+	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
+	schedule := createTestSchedule(t, store, "runner-a", "minutely", due)
+	running, claimed, err := store.Claim(t.Context(), schedule.ID, due, due.Add(time.Minute), Run{Status: RunRunning, StartedAt: due})
+	require.NoError(t, err)
+	require.True(t, claimed)
+	// A long run makes the following occurrences skip.
+	for i := 1; i <= runHistoryLimit+5; i++ {
+		at := due.Add(time.Duration(i) * time.Minute)
+		_, claimed, err := store.Claim(t.Context(), schedule.ID, at, at.Add(time.Minute), Run{Status: RunSkipped, StartedAt: at, FinishedAt: &at})
+		require.NoError(t, err)
+		require.True(t, claimed)
+	}
+
+	require.NoError(t, store.FinishRun(t.Context(), running, RunSucceeded, "", runResult{Output: "finally"}, due.Add(time.Hour)))
+
+	run, err := store.GetRun(t.Context(), "runner-a", running)
+	require.NoError(t, err)
+	assert.Equal(t, RunSucceeded, run.Status)
+	assert.Equal(t, "finally", run.Output)
+	var count int
+	require.NoError(t, store.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runs WHERE schedule_id = ?`, schedule.ID).Scan(&count))
+	assert.Equal(t, runHistoryLimit+1, count, "the latest runs plus the long one")
+}
