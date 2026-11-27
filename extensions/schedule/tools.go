@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -411,21 +413,43 @@ func currentProfile(tc *extension.ToolContext) string {
 	return strings.TrimSpace(tc.Profile)
 }
 
-// resolveCWD resolves requested against the conversation directory, which it
-// must not escape, and checks that it is a directory.
+// resolveCWD resolves requested against the conversation directory and
+// returns its real path, which must be a directory inside the conversation
+// directory after following symlinks. Storing the real path means a symlink
+// changed later cannot move runs elsewhere.
 func resolveCWD(tc *extension.ToolContext, requested string) (string, error) {
 	path, err := tc.ResolveWorkspacePath(strings.TrimSpace(requested))
 	if err != nil {
 		return "", errors.Errorf("cwd %q must be inside the current directory %s", requested, tc.CWD)
 	}
-	info, err := os.Stat(path)
-	if err != nil {
+	resolved, err := filepath.EvalSymlinks(path)
+	if errors.Is(err, fs.ErrNotExist) {
 		return "", errors.Errorf("cwd %s does not exist", path)
+	}
+	if err != nil {
+		return "", errors.Errorf("cwd %s is not accessible", path)
+	}
+	root, err := filepath.EvalSymlinks(tc.CWD)
+	if err != nil {
+		return "", errors.Errorf("the current directory %s is not accessible", tc.CWD)
+	}
+	if !pathInside(resolved, root) {
+		return "", errors.Errorf("cwd %q must be inside the current directory %s, including after following symlinks", requested, tc.CWD)
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", errors.Errorf("cwd %s is not accessible", path)
 	}
 	if !info.IsDir() {
 		return "", errors.Errorf("cwd %s is not a directory", path)
 	}
-	return path, nil
+	return resolved, nil
+}
+
+// pathInside reports whether path is root or below it.
+func pathInside(path, root string) bool {
+	relative, err := filepath.Rel(root, path)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 func normalizeName(name string) (string, error) {

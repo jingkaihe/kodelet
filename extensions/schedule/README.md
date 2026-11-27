@@ -35,7 +35,7 @@ Kodelet discovers extensions on the runner's `PATH` unless `extensions.discover_
 A schedule has a `name` (unique in its workspace), a `schedule`, an `instruction` for each run, a `cwd`, and an `enabled` flag. The agent cannot choose where or how a schedule runs:
 
 - The workspace is the runner hosting the conversation that creates the schedule. Tools only see and change schedules of that runner.
-- `cwd` defaults to the conversation's directory and must stay inside it.
+- `cwd` defaults to the conversation's directory and must stay inside it, including after following symlinks.
 - The model profile is the conversation's profile, including profiles provided by extensions. Updates never change it; to use another profile, recreate the schedule from a conversation using that profile. Kodelet resolves the profile again on the schedule's runner and directory at the start of every run.
 
 Each run records the instruction, directory, and profile it used, when it was due, started, and finished, its outcome, its conversation, the agent's final message (up to 32 KiB), and stats: tool calls by tool, failed tool calls, and context compactions. Editing a schedule does not change the record of earlier runs.

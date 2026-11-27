@@ -51,7 +51,9 @@ func newToolHarnessWith(t *testing.T, runnerID string, interactive, autoApprove 
 	clock := &testClock{now: toolNow}
 	registerTools(ext, stores, clock.Now, autoApprove)
 
-	th := &toolHarness{cwd: t.TempDir(), profile: "anthropic", approve: true, clock: clock}
+	cwd, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	th := &toolHarness{cwd: cwd, profile: "anthropic", approve: true, clock: clock}
 	var options *extensiontest.Options
 	if interactive {
 		options = &extensiontest.Options{Host: func(_ context.Context, call extensiontest.HostCall) (any, error) {
@@ -562,4 +564,39 @@ func TestUpdateFailsIfTheScheduleChangesDuringApproval(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, saved.Enabled)
 	assert.Equal(t, "daily", saved.Name)
+}
+
+func TestCWDMustStayInsideAfterFollowingSymlinks(t *testing.T) {
+	th := newToolHarness(t, "runner-a", true)
+	outside := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(th.cwd, "real"), 0o755))
+	require.NoError(t, os.Symlink(outside, filepath.Join(th.cwd, "escape")))
+	require.NoError(t, os.Symlink(filepath.Join(th.cwd, "real"), filepath.Join(th.cwd, "inside")))
+
+	result := th.call(t, "schedule_create", map[string]any{"name": "escape", "schedule": "@daily", "instruction": "p", "cwd": "escape"})
+	assert.Contains(t, result.Error, "must be inside the current directory")
+
+	result = th.call(t, "schedule_create", map[string]any{"name": "inside", "schedule": "@daily", "instruction": "p", "cwd": "inside"})
+	require.Empty(t, result.Error)
+	schedules, err := th.store.List(t.Context(), "runner-a")
+	require.NoError(t, err)
+	require.Len(t, schedules, 1)
+	assert.Equal(t, filepath.Join(th.cwd, "real"), schedules[0].CWD, "the real path is stored")
+}
+
+func TestCWDResolvesASymlinkedConversationDirectory(t *testing.T) {
+	th := newToolHarness(t, "runner-a", true)
+	require.NoError(t, os.Mkdir(filepath.Join(th.cwd, "sub"), 0o755))
+	link := filepath.Join(t.TempDir(), "link")
+	require.NoError(t, os.Symlink(th.cwd, link))
+	th.cwd = link
+
+	result := th.call(t, "schedule_create", map[string]any{"name": "sub", "schedule": "@daily", "instruction": "p", "cwd": "sub"})
+
+	require.Empty(t, result.Error)
+	schedules, err := th.store.List(t.Context(), "runner-a")
+	require.NoError(t, err)
+	resolved, err := filepath.EvalSymlinks(filepath.Join(link, "sub"))
+	require.NoError(t, err)
+	assert.Equal(t, resolved, schedules[0].CWD)
 }
