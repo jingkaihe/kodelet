@@ -92,6 +92,12 @@ func TestStoreHierarchyMetadataSurvivesSaveAndFork(t *testing.T) {
 	assert.Empty(t, metadata)
 	_, err = store.LoadMetadata(t.Context(), "missing")
 	require.ErrorIs(t, err, conversations.ErrConversationNotFound)
+	summary, err := store.LoadSummary(t.Context(), fresh.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "continued", summary.Summary)
+	assert.Equal(t, parent.ID, summary.ParentConversationID)
+	_, err = store.LoadSummary(t.Context(), "missing")
+	require.ErrorIs(t, err, conversations.ErrConversationNotFound)
 	_, err = store.Load(t.Context(), parent.ID)
 	require.Error(t, err)
 }

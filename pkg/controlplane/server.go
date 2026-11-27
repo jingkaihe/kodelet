@@ -482,6 +482,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/conversations/{id}/move", s.handleMoveConversation).Methods("POST")
 	api.HandleFunc("/conversations/{id}/steer", s.handleGetPendingSteer).Methods("GET")
 	api.HandleFunc("/conversations/{id}/steer", s.handleSteerConversation).Methods("POST")
+	api.HandleFunc("/conversations/{id}/status", s.handleGetConversationStatus).Methods("GET")
 	api.HandleFunc("/conversations/{id}/stop", s.handleStopConversation).Methods("POST")
 	api.HandleFunc("/conversations/{id}/turns/{turnId}", s.handleGetTurnReceipt).Methods("GET")
 	api.HandleFunc("/conversations/{id}/ui-input/{requestId}", s.handleRespondUIInput).Methods("POST")

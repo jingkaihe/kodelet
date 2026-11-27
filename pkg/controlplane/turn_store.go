@@ -72,6 +72,14 @@ func (s *turnStore) get(ctx context.Context, conversationID, turnID string) (cha
 	return row.TurnReceipt, err
 }
 
+// latest returns a conversation's most recently submitted turn, or
+// sql.ErrNoRows when it has none.
+func (s *turnStore) latest(ctx context.Context, conversationID string) (chat.TurnReceipt, error) {
+	var row turnRow
+	err := s.db.Reader.GetContext(ctx, &row, `SELECT * FROM chat_turns WHERE conversation_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`, conversationID)
+	return row.TurnReceipt, err
+}
+
 func (s *turnStore) admit(ctx context.Context, req chat.ChatRequest) (chat.TurnReceipt, bool, error) {
 	hash, err := turnRequestHash(req)
 	if err != nil {

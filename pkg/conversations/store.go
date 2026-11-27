@@ -21,6 +21,12 @@ type ConversationStore interface {
 	Close() error // Close doesn't need context
 }
 
+// ConversationSummaryStore optionally loads one conversation's summary without
+// reading message or tool history.
+type ConversationSummaryStore interface {
+	LoadSummary(ctx context.Context, id string) (conversations.ConversationSummary, error)
+}
+
 // ConversationMetadataStore optionally loads metadata without reading message or tool history.
 type ConversationMetadataStore interface {
 	LoadMetadata(ctx context.Context, id string) (map[string]any, error)

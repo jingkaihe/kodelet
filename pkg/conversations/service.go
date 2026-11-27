@@ -246,6 +246,19 @@ func getConversationMetadata(ctx context.Context, service ConversationServiceInt
 	return record.Metadata, nil
 }
 
+// GetConversationSummary returns a conversation's summary, avoiding message
+// history when the store supports it.
+func (s *ConversationService) GetConversationSummary(ctx context.Context, id string) (conversations.ConversationSummary, error) {
+	if store, ok := s.store.(ConversationSummaryStore); ok {
+		return store.LoadSummary(ctx, id)
+	}
+	record, err := s.store.Load(ctx, id)
+	if err != nil {
+		return conversations.ConversationSummary{}, err
+	}
+	return record.ToSummary(), nil
+}
+
 // GetConversationMetadata avoids loading message history when supported by the store.
 func (s *ConversationService) GetConversationMetadata(ctx context.Context, id string) (map[string]any, error) {
 	if store, ok := s.store.(ConversationMetadataStore); ok {

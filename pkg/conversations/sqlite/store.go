@@ -167,6 +167,20 @@ func (s *Store) LoadMetadata(ctx context.Context, id string) (map[string]any, er
 	return metadata.Data, nil
 }
 
+// LoadSummary reads one conversation's summary row without its messages.
+func (s *Store) LoadSummary(ctx context.Context, id string) (conversations.ConversationSummary, error) {
+	var summary dbConversationSummary
+	err := s.db.Reader.GetContext(ctx, &summary, `SELECT id, cwd, message_count, first_message, summary, provider,
+		metadata, usage, created_at, updated_at FROM conversation_summaries WHERE id = ?`, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return conversations.ConversationSummary{}, errors.Wrapf(conversations.ErrConversationNotFound, "%s", id)
+	}
+	if err != nil {
+		return conversations.ConversationSummary{}, errors.Wrap(err, "failed to load conversation summary")
+	}
+	return summary.ToConversationSummary(), nil
+}
+
 // Load retrieves a conversation record by ID
 func (s *Store) Load(ctx context.Context, id string) (conversations.ConversationRecord, error) {
 	var dbRecord dbConversationRecord
