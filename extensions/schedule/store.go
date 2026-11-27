@@ -296,23 +296,52 @@ func (s *Store) Due(ctx context.Context, now time.Time) ([]Schedule, error) {
 // changes when the schedule was edited, disabled, deleted, or claimed since it
 // was read.
 func (s *Store) Claim(ctx context.Context, scheduleID string, due, next time.Time, run Run) (int64, bool, error) {
-	var nextRunAt *time.Time
-	if !next.IsZero() {
-		nextRunAt = &next
+	claimed, ok, err := s.claim(ctx, scheduleID, due, nextPtr(next), true, run)
+	return claimed.ID, ok, err
+}
+
+// ClaimRun claims a due run of schedule like Claim and returns schedule with
+// the instruction, directory, and profile recorded for the run. Those are
+// read in the claim's transaction, so the daemon runs exactly what the run's
+// history shows, even if the schedule was edited since it was polled.
+func (s *Store) ClaimRun(ctx context.Context, schedule Schedule, due, next time.Time, run Run) (Schedule, int64, bool, error) {
+	claimed, ok, err := s.claim(ctx, schedule.ID, due, nextPtr(next), true, run)
+	if err != nil || !ok {
+		return Schedule{}, 0, ok, err
 	}
-	return s.claim(ctx, scheduleID, due, nextRunAt, true, run)
+	schedule.Instruction = claimed.Instruction
+	schedule.CWD = claimed.CWD
+	schedule.Profile = claimed.Profile
+	return schedule, claimed.ID, true, nil
 }
 
 // Disable claims a due schedule like Claim but also disables it, for
 // schedules that can no longer run.
-func (s *Store) Disable(ctx context.Context, scheduleID string, due time.Time, run Run) (int64, bool, error) {
-	return s.claim(ctx, scheduleID, due, nil, false, run)
+func (s *Store) Disable(ctx context.Context, scheduleID string, due time.Time, run Run) (bool, error) {
+	_, ok, err := s.claim(ctx, scheduleID, due, nil, false, run)
+	return ok, err
 }
 
-func (s *Store) claim(ctx context.Context, scheduleID string, due time.Time, next *time.Time, enabled bool, run Run) (int64, bool, error) {
+// claimedRun is a claimed run and the snapshot of the schedule it recorded.
+type claimedRun struct {
+	ID          int64
+	Instruction string
+	CWD         string
+	Profile     string
+}
+
+func nextPtr(next time.Time) *time.Time {
+	if next.IsZero() {
+		return nil
+	}
+	return &next
+}
+
+func (s *Store) claim(ctx context.Context, scheduleID string, due time.Time, next *time.Time, enabled bool, run Run) (claimedRun, bool, error) {
+	var claimed claimedRun
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, false, errors.Wrap(err, "failed to claim schedule")
+		return claimed, false, errors.Wrap(err, "failed to claim schedule")
 	}
 	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx,
@@ -320,39 +349,36 @@ func (s *Store) claim(ctx context.Context, scheduleID string, due time.Time, nex
 		millisPtr(next), enabled, scheduleID, due.UnixMilli(),
 	)
 	if err != nil {
-		return 0, false, errors.Wrap(err, "failed to claim schedule")
+		return claimed, false, errors.Wrap(err, "failed to claim schedule")
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return 0, false, errors.Wrap(err, "failed to claim schedule")
+		return claimed, false, errors.Wrap(err, "failed to claim schedule")
 	}
 	if affected == 0 {
-		return 0, false, nil
+		return claimed, false, nil
 	}
 	// Snapshot what the run uses, so later edits do not rewrite its history.
-	inserted, err := tx.ExecContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 INSERT INTO runs (schedule_id, scheduled_for, started_at, finished_at, status, conversation_id, error, instruction, cwd, profile)
-SELECT ?, ?, ?, ?, ?, ?, ?, instruction, cwd, profile FROM schedules WHERE id = ?`,
+SELECT ?, ?, ?, ?, ?, ?, ?, instruction, cwd, profile FROM schedules WHERE id = ?
+RETURNING id, instruction, cwd, profile`,
 		scheduleID, due.UnixMilli(), run.StartedAt.UnixMilli(), millisPtr(run.FinishedAt),
 		string(run.Status), run.ConversationID, run.Error, scheduleID,
-	)
+	).Scan(&claimed.ID, &claimed.Instruction, &claimed.CWD, &claimed.Profile)
 	if err != nil {
-		return 0, false, errors.Wrap(err, "failed to record run")
-	}
-	runID, err := inserted.LastInsertId()
-	if err != nil {
-		return 0, false, errors.Wrap(err, "failed to record run")
+		return claimedRun{}, false, errors.Wrap(err, "failed to record run")
 	}
 	if _, err := tx.ExecContext(ctx, `
 DELETE FROM runs WHERE schedule_id = ? AND id NOT IN (
 	SELECT id FROM runs WHERE schedule_id = ? ORDER BY id DESC LIMIT ?
 )`, scheduleID, scheduleID, runHistoryLimit); err != nil {
-		return 0, false, errors.Wrap(err, "failed to prune run history")
+		return claimedRun{}, false, errors.Wrap(err, "failed to prune run history")
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, false, errors.Wrap(err, "failed to claim schedule")
+		return claimedRun{}, false, errors.Wrap(err, "failed to claim schedule")
 	}
-	return runID, true, nil
+	return claimed, true, nil
 }
 
 // SetRunConversation records the conversation a run created.

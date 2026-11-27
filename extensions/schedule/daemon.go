@@ -173,7 +173,7 @@ func (d *daemon) dispatch(ctx, jobs context.Context, schedule Schedule, now time
 	spec, err := parseSpec(schedule.Schedule)
 	if err != nil {
 		run := Run{Status: RunFailed, StartedAt: now, FinishedAt: &now, Error: err.Error() + "; the schedule was disabled"}
-		if _, _, err := d.store.Disable(ctx, schedule.ID, due, run); err != nil {
+		if _, err := d.store.Disable(ctx, schedule.ID, due, run); err != nil {
 			log.Error("failed to disable invalid schedule", "error", err)
 		}
 		log.Error("disabled invalid schedule", "error", run.Error)
@@ -190,13 +190,15 @@ func (d *daemon) dispatch(ctx, jobs context.Context, schedule Schedule, now time
 	case d.inFlightCount() >= d.config.Concurrency:
 		// Leave it due; a later tick starts it once a slot frees up.
 	default:
-		runID, claimed, err := d.store.Claim(ctx, schedule.ID, due, next, Run{Status: RunRunning, StartedAt: now})
+		// Run the schedule as claimed, not as polled, so an edit in between
+		// cannot make the run differ from its recorded history.
+		claimed, runID, ok, err := d.store.ClaimRun(ctx, schedule, due, next, Run{Status: RunRunning, StartedAt: now})
 		if err != nil {
 			log.Error("failed to claim schedule", "error", err)
 			return
 		}
-		if claimed {
-			d.start(jobs, schedule, runID, log)
+		if ok {
+			d.start(jobs, claimed, runID, log)
 		}
 	}
 }

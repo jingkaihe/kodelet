@@ -395,3 +395,32 @@ func TestListCommand(t *testing.T) {
 	assert.Len(t, decoded.Schedules, 2)
 	assert.Equal(t, daemonNotStarted, decoded.Daemon.State)
 }
+
+func TestDaemonRunsTheInstructionItRecords(t *testing.T) {
+	store, _ := newTestStore(t)
+	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
+	schedule := createTestSchedule(t, store, "runner-a", "daily", due)
+	polled, err := store.Due(t.Context(), due)
+	require.NoError(t, err)
+	require.Len(t, polled, 1)
+	// The schedule is edited after the daemon polls it but before it claims.
+	schedule.Instruction = "Edited instruction"
+	schedule.CWD = "/work/edited"
+	require.NoError(t, store.Update(t.Context(), &schedule, false, due))
+	exec := &fakeExecutor{}
+	d, clock := newTestDaemon(store, exec, nil)
+	clock.Set(due)
+
+	d.dispatch(t.Context(), t.Context(), polled[0], due)
+	d.wg.Wait()
+
+	require.Equal(t, 1, exec.callCount())
+	assert.Equal(t, "Edited instruction", exec.calls[0].Instruction)
+	assert.Equal(t, "/work/edited", exec.calls[0].CWD)
+	runs, err := store.ListRuns(t.Context(), "runner-a", RunFilter{Limit: 1})
+	require.NoError(t, err)
+	run, err := store.GetRun(t.Context(), "runner-a", runs[0].ID)
+	require.NoError(t, err)
+	assert.Equal(t, exec.calls[0].Instruction, run.Instruction)
+	assert.Equal(t, exec.calls[0].CWD, run.CWD)
+}

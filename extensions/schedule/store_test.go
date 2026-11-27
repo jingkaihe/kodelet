@@ -150,7 +150,7 @@ func TestStoreDisableAndPruneRuns(t *testing.T) {
 	assert.Equal(t, runHistoryLimit, runs)
 
 	last := due.Add(time.Duration(runHistoryLimit+5) * time.Minute)
-	_, disabled, err := store.Disable(t.Context(), schedule.ID, last, Run{Status: RunFailed, StartedAt: last, FinishedAt: &last, Error: "bad"})
+	disabled, err := store.Disable(t.Context(), schedule.ID, last, Run{Status: RunFailed, StartedAt: last, FinishedAt: &last, Error: "bad"})
 	require.NoError(t, err)
 	require.True(t, disabled)
 	saved, err := store.Get(t.Context(), "runner-a", schedule.ID)
