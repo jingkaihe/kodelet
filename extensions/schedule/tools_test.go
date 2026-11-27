@@ -26,9 +26,13 @@ type toolHarness struct {
 	cwd     string
 	profile string
 
+	clock *testClock
+
 	mu       sync.Mutex
 	approve  bool
 	confirms []extension.ConfirmRequest
+	// whileConfirming runs while the approval dialog is open.
+	whileConfirming func()
 }
 
 // newToolHarness starts the extension in a runner workspace. With interactive
@@ -44,9 +48,10 @@ func newToolHarnessWith(t *testing.T, runnerID string, interactive, autoApprove 
 	stores := &storeOpener{path: dbPath}
 	t.Cleanup(func() { stores.Close() })
 	ext := extension.New(extension.Metadata{Name: "schedule", Version: "test"})
-	registerTools(ext, stores, func() time.Time { return toolNow }, autoApprove)
+	clock := &testClock{now: toolNow}
+	registerTools(ext, stores, clock.Now, autoApprove)
 
-	th := &toolHarness{cwd: t.TempDir(), profile: "anthropic", approve: true}
+	th := &toolHarness{cwd: t.TempDir(), profile: "anthropic", approve: true, clock: clock}
 	var options *extensiontest.Options
 	if interactive {
 		options = &extensiontest.Options{Host: func(_ context.Context, call extensiontest.HostCall) (any, error) {
@@ -58,9 +63,13 @@ func newToolHarnessWith(t *testing.T, runnerID string, interactive, autoApprove 
 				return nil, err
 			}
 			th.mu.Lock()
-			defer th.mu.Unlock()
 			th.confirms = append(th.confirms, request)
-			return map[string]any{"status": "submitted", "confirmed": th.approve}, nil
+			approve, hook := th.approve, th.whileConfirming
+			th.mu.Unlock()
+			if hook != nil {
+				hook()
+			}
+			return map[string]any{"status": "submitted", "confirmed": approve}, nil
 		}}
 	}
 	th.harness = extensiontest.New(ext, options)
@@ -491,4 +500,66 @@ func TestToolDescriptionsReflectApproval(t *testing.T) {
 		assert.NotContains(t, automatic[name], "approv", name)
 	}
 	assert.Equal(t, asking["schedule_list"], automatic["schedule_list"])
+}
+
+func TestCreateCountsTheFirstRunFromApproval(t *testing.T) {
+	th := newToolHarness(t, "runner-a", true)
+	th.clock.Set(time.Date(2026, 11, 26, 8, 59, 0, 0, time.UTC))
+	th.whileConfirming = func() { th.clock.Set(time.Date(2026, 11, 26, 9, 30, 0, 0, time.UTC)) }
+
+	result := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "CRON_TZ=UTC 0 9 * * *", "instruction": "p"})
+
+	require.Empty(t, result.Error)
+	schedules, err := th.store.List(t.Context(), "runner-a")
+	require.NoError(t, err)
+	assert.True(t, time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC).Equal(*schedules[0].NextRunAt),
+		"09:00 passed while approval was pending, so the first run is tomorrow")
+}
+
+func TestUpdateApprovedAfterAClaimDoesNotRepeatIt(t *testing.T) {
+	th := newToolHarness(t, "runner-a", true)
+	friday := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
+	th.clock.Set(friday.Add(-time.Hour))
+	result := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "CRON_TZ=UTC 0 9 * * *", "instruction": "p"})
+	require.Empty(t, result.Error)
+	schedules, err := th.store.List(t.Context(), "runner-a")
+	require.NoError(t, err)
+	id := schedules[0].ID
+	require.True(t, friday.Equal(*schedules[0].NextRunAt))
+
+	th.clock.Set(friday.Add(-30 * time.Second))
+	th.whileConfirming = func() {
+		_, claimed, err := th.store.Claim(t.Context(), id, friday, friday.Add(24*time.Hour), Run{Status: RunRunning, StartedAt: friday})
+		require.NoError(t, err)
+		require.True(t, claimed)
+		th.clock.Set(friday.Add(time.Minute))
+	}
+	result = th.call(t, "schedule_update", map[string]any{"id": id, "schedule": "CRON_TZ=UTC 0 9 * * 1-5"})
+
+	require.Empty(t, result.Error)
+	saved, err := th.store.Get(t.Context(), "runner-a", id)
+	require.NoError(t, err)
+	assert.True(t, time.Date(2026, 11, 30, 9, 0, 0, 0, time.UTC).Equal(*saved.NextRunAt), "next run %s", saved.NextRunAt)
+}
+
+func TestUpdateFailsIfTheScheduleChangesDuringApproval(t *testing.T) {
+	th := newToolHarness(t, "runner-a", true)
+	result := th.call(t, "schedule_create", map[string]any{"name": "daily", "schedule": "@daily", "instruction": "p"})
+	require.Empty(t, result.Error)
+	schedules, err := th.store.List(t.Context(), "runner-a")
+	require.NoError(t, err)
+	id := schedules[0].ID
+
+	th.whileConfirming = func() {
+		th.whileConfirming = nil
+		paused := th.call(t, "schedule_update", map[string]any{"id": id, "enabled": false})
+		require.Empty(t, paused.Error)
+	}
+	result = th.call(t, "schedule_update", map[string]any{"id": id, "name": "renamed"})
+
+	assert.Equal(t, errChanged.Error(), result.Error)
+	saved, err := th.store.Get(t.Context(), "runner-a", id)
+	require.NoError(t, err)
+	assert.False(t, saved.Enabled)
+	assert.Equal(t, "daily", saved.Name)
 }

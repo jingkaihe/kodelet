@@ -53,7 +53,7 @@ func TestStoreScopesSchedulesByWorkspace(t *testing.T) {
 	_, err = store.Get(t.Context(), "runner-a", b.ID)
 	assert.ErrorIs(t, err, errNotFound)
 	b.Workspace = "runner-a"
-	assert.ErrorIs(t, store.Update(t.Context(), &b, false, next), errNotFound)
+	assert.ErrorIs(t, store.Update(t.Context(), &b, b.Version, nil, next), errNotFound)
 	assert.ErrorIs(t, store.Delete(t.Context(), "runner-a", b.ID), errNotFound)
 
 	require.NoError(t, store.Delete(t.Context(), "runner-b", b.ID))
@@ -83,15 +83,15 @@ func TestStoreUpdateKeepsClaimedNextRunUnlessReset(t *testing.T) {
 	require.True(t, claimed)
 
 	schedule.Instruction = "New instruction"
-	require.NoError(t, store.Update(t.Context(), &schedule, false, due))
+	require.NoError(t, store.Update(t.Context(), &schedule, schedule.Version, nil, due))
 	saved, err := store.Get(t.Context(), "runner-a", schedule.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "New instruction", saved.Instruction)
 	assert.True(t, claimedNext.Equal(*saved.NextRunAt), "the stale next run must not undo the claim")
 
 	schedule.Enabled = false
-	schedule.NextRunAt = nil
-	require.NoError(t, store.Update(t.Context(), &schedule, true, due))
+	pause := func(time.Time) *time.Time { return nil }
+	require.NoError(t, store.Update(t.Context(), &schedule, schedule.Version, pause, due))
 	saved, err = store.Get(t.Context(), "runner-a", schedule.ID)
 	require.NoError(t, err)
 	assert.False(t, saved.Enabled)
@@ -215,4 +215,69 @@ func TestOpenStoreIsIdempotentAndSharedAcrossHandles(t *testing.T) {
 	schedules, err := other.List(t.Context(), "runner-a")
 	require.NoError(t, err)
 	assert.Len(t, schedules, 1)
+}
+
+func TestStoreRescheduleSkipsClaimedOccurrences(t *testing.T) {
+	store, _ := newTestStore(t)
+	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC) // A Friday.
+	schedule := createTestSchedule(t, store, "runner-a", "daily", due)
+	read, err := store.Get(t.Context(), "runner-a", schedule.ID)
+	require.NoError(t, err)
+
+	// The daemon claims 09:00 while an edit read before 09:00 awaits approval.
+	_, claimed, err := store.Claim(t.Context(), schedule.ID, due, due.Add(24*time.Hour), Run{Status: RunRunning, StartedAt: due})
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	read.Schedule = "CRON_TZ=UTC 0 9 * * 1-5"
+	spec, err := parseSpec(read.Schedule)
+	require.NoError(t, err)
+	weekdays := func(after time.Time) *time.Time {
+		next := spec.Next(after)
+		return &next
+	}
+	// Even with a clock from before 09:00, the claimed occurrence is not
+	// queued again.
+	require.NoError(t, store.Update(t.Context(), &read, read.Version, weekdays, due.Add(-time.Second)))
+
+	monday := time.Date(2026, 11, 30, 9, 0, 0, 0, time.UTC)
+	assert.True(t, monday.Equal(*read.NextRunAt), "next run %s", read.NextRunAt)
+	again, err := store.Due(t.Context(), due.Add(time.Minute))
+	require.NoError(t, err)
+	assert.Empty(t, again)
+}
+
+func TestStoreUpdateRejectsStaleEdits(t *testing.T) {
+	store, _ := newTestStore(t)
+	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
+	schedule := createTestSchedule(t, store, "runner-a", "daily", due)
+	pausing, err := store.Get(t.Context(), "runner-a", schedule.ID)
+	require.NoError(t, err)
+	renaming := pausing
+
+	pausing.Enabled = false
+	require.NoError(t, store.Update(t.Context(), &pausing, pausing.Version, func(time.Time) *time.Time { return nil }, due))
+	renaming.Name = "renamed"
+	assert.ErrorIs(t, store.Update(t.Context(), &renaming, renaming.Version, nil, due), errChanged)
+
+	saved, err := store.Get(t.Context(), "runner-a", schedule.ID)
+	require.NoError(t, err)
+	assert.False(t, saved.Enabled, "the stale rename must not undo the pause")
+	assert.Nil(t, saved.NextRunAt)
+	assert.Equal(t, "daily", saved.Name)
+}
+
+func TestStoreDisableCountsAsAnEdit(t *testing.T) {
+	store, _ := newTestStore(t)
+	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
+	schedule := createTestSchedule(t, store, "runner-a", "daily", due)
+	read, err := store.Get(t.Context(), "runner-a", schedule.ID)
+	require.NoError(t, err)
+
+	disabled, err := store.Disable(t.Context(), schedule.ID, due, Run{Status: RunFailed, StartedAt: due, FinishedAt: &due})
+	require.NoError(t, err)
+	require.True(t, disabled)
+
+	read.Instruction = "changed"
+	assert.ErrorIs(t, store.Update(t.Context(), &read, read.Version, nil, due), errChanged)
 }

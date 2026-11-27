@@ -193,6 +193,14 @@ func (t *toolset) create(ctx context.Context, in createInput, tc *extension.Tool
 	if err := t.confirm(ctx, tc, "Create schedule?", describeSchedule(schedule, runs), "Create"); err != nil {
 		return failure(err), nil
 	}
+	// Approval can take a while; count from when it was given, so the first
+	// run is never already in the past.
+	now = t.now()
+	if schedule.Enabled {
+		next := spec.Next(now)
+		schedule.NextRunAt = &next
+	}
+	runs = upcomingRunsOf(schedule)
 	if err := store.Create(ctx, &schedule, now); err != nil {
 		return failure(err), nil
 	}
@@ -290,28 +298,33 @@ func (t *toolset) update(ctx context.Context, in updateInput, tc *extension.Tool
 		return failure(errors.Errorf("no changes to schedule %q", current.Name)), nil
 	}
 
-	// A new schedule or a resumed one starts from now. Otherwise next_run_at is
-	// kept, so an edit cannot undo a run the daemon claims meanwhile.
-	resetNext := updated.Schedule != current.Schedule || updated.Enabled != current.Enabled
-	if resetNext {
-		updated.NextRunAt = nil
-		if updated.Enabled {
-			spec, err := parseSpec(updated.Schedule)
-			if err != nil {
-				return failure(err), nil
-			}
-			next := spec.Next(now)
-			updated.NextRunAt = &next
+	// A new schedule or a resumed one gets a new next run. Otherwise the next
+	// run is kept, so an edit cannot undo a run the daemon claims meanwhile.
+	var reschedule Reschedule
+	if updated.Schedule != current.Schedule || updated.Enabled != current.Enabled {
+		spec, err := parseSpec(updated.Schedule)
+		if err != nil {
+			return failure(err), nil
 		}
+		enabled := updated.Enabled
+		reschedule = func(after time.Time) *time.Time {
+			if !enabled {
+				return nil
+			}
+			next := spec.Next(after)
+			return &next
+		}
+		// Preview the runs for approval; the store sets the real next run.
+		updated.NextRunAt = reschedule(now)
 	}
 	message := strings.Join(changes, "\n")
-	if runs := upcomingRunsOf(updated); resetNext && len(runs) > 0 {
+	if runs := upcomingRunsOf(updated); reschedule != nil && len(runs) > 0 {
 		message += "\nUpcoming runs: " + formatTimes(runs)
 	}
 	if err := t.confirm(ctx, tc, fmt.Sprintf("Update schedule %q?", current.Name), message, "Update"); err != nil {
 		return failure(err), nil
 	}
-	if err := store.Update(ctx, &updated, resetNext, now); err != nil {
+	if err := store.Update(ctx, &updated, current.Version, reschedule, t.now()); err != nil {
 		return failure(err), nil
 	}
 	if saved, err := store.Get(ctx, workspace, updated.ID); err == nil {

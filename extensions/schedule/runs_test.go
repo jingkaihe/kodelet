@@ -68,7 +68,7 @@ func TestStoreListsAndGetsRunsInAWorkspace(t *testing.T) {
 
 	// Editing the schedule does not rewrite what earlier runs used.
 	daily.Instruction = "changed later"
-	require.NoError(t, store.Update(t.Context(), &daily, false, due))
+	require.NoError(t, store.Update(t.Context(), &daily, daily.Version, nil, due))
 	run, err := store.GetRun(t.Context(), "runner-a", first)
 	require.NoError(t, err)
 	assert.Equal(t, "first response", run.Output)

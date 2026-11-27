@@ -22,6 +22,7 @@ const runHistoryLimit = 20
 
 var (
 	errNotFound    = errors.New("schedule not found")
+	errChanged     = errors.New("the schedule changed while this change awaited approval; check it with schedule_list and try again")
 	errRunNotFound = errors.New("run not found")
 	errNameTaken   = errors.New("a schedule with this name already exists")
 )
@@ -52,6 +53,9 @@ type Schedule struct {
 	CreatedAt   time.Time  `json:"createdAt"`
 	UpdatedAt   time.Time  `json:"updatedAt"`
 	LastRun     *Run       `json:"lastRun,omitempty"`
+	// Version increases with every edit, so an edit saves only if the
+	// schedule is unchanged since it was read.
+	Version int64 `json:"-"`
 }
 
 // Run records one claimed occurrence of a schedule, with a snapshot of the
@@ -148,7 +152,7 @@ func (s *Store) Close() error {
 const selectSchedules = `
 SELECT
 	s.id, s.workspace, s.name, s.schedule, s.instruction, s.cwd, s.profile, s.enabled,
-	s.next_run_at, s.created_at, s.updated_at,
+	s.next_run_at, s.created_at, s.updated_at, s.version,
 	r.id, r.scheduled_for, r.started_at, r.finished_at, r.status, r.conversation_id, r.error
 FROM schedules s
 LEFT JOIN runs r ON r.id = (SELECT MAX(id) FROM runs WHERE schedule_id = s.id)
@@ -170,7 +174,7 @@ func scanSchedule(row rowScanner) (Schedule, error) {
 	err := row.Scan(
 		&schedule.ID, &schedule.Workspace, &schedule.Name, &schedule.Schedule, &schedule.Instruction,
 		&schedule.CWD, &schedule.Profile, &enabled,
-		&nextRunAt, &createdAt, &updatedAt,
+		&nextRunAt, &createdAt, &updatedAt, &schedule.Version,
 		&runID, &scheduledFor, &runStartedAt, &runFinished, &runStatus, &conversationID, &runError,
 	)
 	if err != nil {
@@ -248,28 +252,68 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	return constraintError(err, "failed to create schedule")
 }
 
-// Update saves the editable fields of schedule, matched by ID and workspace.
-// next_run_at changes only with resetNext, so an edit cannot undo a run the
-// daemon claimed while the edit was being confirmed.
-func (s *Store) Update(ctx context.Context, schedule *Schedule, resetNext bool, now time.Time) error {
-	result, err := s.db.ExecContext(ctx, `
+// Reschedule returns a schedule's next run strictly after the given time, or
+// nil for none.
+type Reschedule func(after time.Time) *time.Time
+
+// Update saves the editable fields of schedule, matched by ID and workspace,
+// if the schedule is still at version, the version it was read at; otherwise
+// it returns errChanged. With reschedule, the next run is set after both now
+// and the latest occurrence the daemon has handled, so an edit approved after
+// a run was claimed cannot queue that occurrence again. Without it, the next
+// run is kept.
+func (s *Store) Update(ctx context.Context, schedule *Schedule, version int64, reschedule Reschedule, now time.Time) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to update schedule")
+	}
+	defer tx.Rollback()
+	nextRunAt := schedule.NextRunAt
+	if reschedule != nil {
+		var latest sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT MAX(scheduled_for) FROM runs WHERE schedule_id = ?`, schedule.ID).Scan(&latest); err != nil {
+			return errors.Wrap(err, "failed to read the latest run")
+		}
+		after := now
+		if latest.Valid && time.UnixMilli(latest.Int64).After(after) {
+			after = time.UnixMilli(latest.Int64)
+		}
+		nextRunAt = reschedule(after)
+	}
+	result, err := tx.ExecContext(ctx, `
 UPDATE schedules SET
 	name = ?, schedule = ?, instruction = ?, cwd = ?, profile = ?, enabled = ?,
 	next_run_at = CASE WHEN ? THEN ? ELSE next_run_at END,
-	updated_at = ?
-WHERE id = ? AND workspace = ?`,
+	updated_at = ?, version = version + 1
+WHERE id = ? AND workspace = ? AND version = ?`,
 		schedule.Name, schedule.Schedule, schedule.Instruction, schedule.CWD, schedule.Profile, schedule.Enabled,
-		resetNext, millisPtr(schedule.NextRunAt),
+		reschedule != nil, millisPtr(nextRunAt),
 		now.UnixMilli(),
-		schedule.ID, schedule.Workspace,
+		schedule.ID, schedule.Workspace, version,
 	)
 	if err != nil {
 		return constraintError(err, "failed to update schedule")
 	}
-	if affected, err := result.RowsAffected(); err == nil && affected == 0 {
-		return errNotFound
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return errors.Wrap(err, "failed to update schedule")
 	}
+	if affected == 0 {
+		var exists bool
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) > 0 FROM schedules WHERE id = ? AND workspace = ?`, schedule.ID, schedule.Workspace).Scan(&exists); err != nil {
+			return errors.Wrap(err, "failed to update schedule")
+		}
+		if !exists {
+			return errNotFound
+		}
+		return errChanged
+	}
+	if err := tx.Commit(); err != nil {
+		return errors.Wrap(err, "failed to update schedule")
+	}
+	schedule.NextRunAt = nextRunAt
 	schedule.UpdatedAt = now
+	schedule.Version = version + 1
 	return nil
 }
 
@@ -344,9 +388,11 @@ func (s *Store) claim(ctx context.Context, scheduleID string, due time.Time, nex
 		return claimed, false, errors.Wrap(err, "failed to claim schedule")
 	}
 	defer tx.Rollback()
+	// Disabling counts as an edit, so a pending update cannot re-enable the
+	// schedule; claims leave the version alone.
 	result, err := tx.ExecContext(ctx,
-		`UPDATE schedules SET next_run_at = ?, enabled = ? WHERE id = ? AND enabled = 1 AND next_run_at = ?`,
-		millisPtr(next), enabled, scheduleID, due.UnixMilli(),
+		`UPDATE schedules SET next_run_at = ?, enabled = ?, version = version + ? WHERE id = ? AND enabled = 1 AND next_run_at = ?`,
+		millisPtr(next), enabled, !enabled, scheduleID, due.UnixMilli(),
 	)
 	if err != nil {
 		return claimed, false, errors.Wrap(err, "failed to claim schedule")

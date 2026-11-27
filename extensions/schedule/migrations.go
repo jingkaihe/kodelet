@@ -43,6 +43,7 @@ CREATE TABLE schedules (
 	next_run_at INTEGER,
 	created_at INTEGER NOT NULL,
 	updated_at INTEGER NOT NULL,
+	version INTEGER NOT NULL DEFAULT 0,
 	UNIQUE (workspace, name)
 );
 CREATE INDEX schedules_due ON schedules (enabled, next_run_at);

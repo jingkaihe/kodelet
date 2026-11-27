@@ -406,7 +406,7 @@ func TestDaemonRunsTheInstructionItRecords(t *testing.T) {
 	// The schedule is edited after the daemon polls it but before it claims.
 	schedule.Instruction = "Edited instruction"
 	schedule.CWD = "/work/edited"
-	require.NoError(t, store.Update(t.Context(), &schedule, false, due))
+	require.NoError(t, store.Update(t.Context(), &schedule, schedule.Version, nil, due))
 	exec := &fakeExecutor{}
 	d, clock := newTestDaemon(store, exec, nil)
 	clock.Set(due)

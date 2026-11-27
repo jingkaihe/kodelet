@@ -115,7 +115,7 @@ func TestRunDetailsTool(t *testing.T) {
 	daily, _, runs := seedRuns(t, th)
 	// The run keeps the instruction it ran, not later edits.
 	daily.Instruction = "Changed afterwards"
-	require.NoError(t, th.store.Update(t.Context(), &daily, false, toolNow))
+	require.NoError(t, th.store.Update(t.Context(), &daily, daily.Version, nil, toolNow))
 
 	result := th.call(t, "schedule_run_details", map[string]any{"id": runs[0]})
 
