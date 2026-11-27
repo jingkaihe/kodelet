@@ -79,6 +79,19 @@ const response = await run;
 
 `steer()` uses the ACP `_session/steering` extension and returns an outcome such as `{ outcome: "injected" }`. It rejects when the session has no active run or the ACP server does not advertise `_meta.steering.supported`. The SDK requests `idleBehavior: "promptRequired"`, so an end-of-turn race returns `{ outcome: "promptRequired", reason: "noRunningTurn" }` rather than silently starting another turn. `injected` means Kodelet queued the message, not that the model consumed it before the prompt ended; guidance left unconsumed remains on the conversation for a later run. Blank messages are rejected locally.
 
+### Checking and stopping conversations
+
+`client.getConversationStatus(conversationId)` reads a conversation's state without a session or its messages, and `client.stopConversation(conversationId, { turnId })` stops its running turn, for example one a crashed process left behind:
+
+```typescript
+const status = await client.getConversationStatus(conversationId); // ConversationNotFoundError if unknown
+if (status.latestTurn && ["accepted", "running"].includes(status.latestTurn.status)) {
+  await client.stopConversation(conversationId, { turnId: status.latestTurn.id });
+}
+```
+
+Each call runs a short-lived `kodelet acp` that never selects a runner. `latestTurn.status` is `accepted`, `running`, `succeeded`, `failed`, `cancelled`, or `interrupted`, and `latestTurn.result` holds a succeeded turn's reply. `stopConversation()` resolves once the stop is accepted, and a `turnId` also prevents an accepted turn from starting. Both reject when `kodelet acp` does not advertise `_meta.conversations.version` 1.
+
 ## Extension definitions
 
 ```typescript

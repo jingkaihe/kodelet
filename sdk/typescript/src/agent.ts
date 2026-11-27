@@ -14,6 +14,8 @@ import type {
 } from "./types.js";
 
 const ACP_PROTOCOL_VERSION = 1;
+/** ACP's error code for a missing resource, such as an unknown conversation. */
+const RESOURCE_NOT_FOUND = -32002;
 const ACP_MESSAGE_LIMIT = 64 * 1024 * 1024;
 const EXTENSION_FRAME_METHOD = "kodelet/extensionFrame";
 const CONTEXT_COMPACTED_METADATA_KEY = "kodelet/contextCompacted";
@@ -98,6 +100,62 @@ export type SessionSteeringOutcome = "injected" | "startedNewTurn" | "promptRequ
 export interface SessionSteerResult {
   outcome: SessionSteeringOutcome;
   reason?: string;
+}
+
+/** A turn's status; `accepted` and `running` turns have not finished. */
+export type ConversationTurnStatus = "accepted" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+
+/** The daemon's record of one submitted turn. */
+export interface ConversationTurn {
+  id: string;
+  status: ConversationTurnStatus;
+  /** Final reply of a succeeded turn. */
+  result?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A conversation's token usage and estimated cost. */
+export interface ConversationUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  inputCost: number;
+  outputCost: number;
+  cacheReadCost: number;
+  cacheWriteCost: number;
+  totalCost: number;
+  currentContextWindow: number;
+  maxContextWindow: number;
+}
+
+/**
+ * A conversation's state without its messages, cheap enough to poll. A
+ * conversation whose first turn was accepted but not yet saved has only
+ * `id`, `running`, and `latestTurn`.
+ */
+export interface ConversationStatus {
+  id: string;
+  cwd?: string;
+  profile?: string;
+  model?: string;
+  runnerId?: string;
+  summary?: string;
+  /** True while the daemon is running or about to run a turn. */
+  running: boolean;
+  messageCount: number;
+  createdAt?: string;
+  updatedAt?: string;
+  usage: ConversationUsage;
+  /** Most recently submitted turn, if any is on record. */
+  latestTurn?: ConversationTurn;
+}
+
+export interface StopConversationOptions {
+  /** Stop only this turn, including one the daemon accepted but has not started. */
+  turnId?: string;
 }
 
 export interface AgentStreamEvent<T = unknown> {
@@ -277,6 +335,17 @@ export class AgentRunError extends Error {
   }
 }
 
+/** The daemon has neither the conversation nor any turn submitted to it. */
+export class ConversationNotFoundError extends Error {
+  readonly conversationId: string;
+
+  constructor(conversationId: string) {
+    super(`Conversation not found: ${conversationId}`);
+    this.name = "ConversationNotFoundError";
+    this.conversationId = conversationId;
+  }
+}
+
 class RPCError extends Error {
   readonly code: number;
   readonly data?: unknown;
@@ -295,12 +364,14 @@ export class Client {
   private readonly env: NodeJS.ProcessEnv;
   private readonly spawn: SpawnFunction;
   private readonly sessions = new Set<Session>();
+  private readonly serverArgs: string[];
   private readonly endpointArgs: string[];
 
   constructor(options: ClientOptions = {}) {
     this.command = options.command ?? "kodelet";
     this.cwd = options.cwd ?? process.cwd();
-    this.endpointArgs = [...(options.server ? ["--server", options.server] : []), ...(options.runner ? ["--runner", options.runner] : [])];
+    this.serverArgs = options.server ? ["--server", options.server] : [];
+    this.endpointArgs = [...this.serverArgs, ...(options.runner ? ["--runner", options.runner] : [])];
     this.env = options.env ?? {};
     this.spawn = options.spawn ?? ((command, args, spawnOptions) => spawnProcess(command, args, spawnOptions) as SpawnedProcess);
   }
@@ -351,6 +422,40 @@ export class Client {
   async close(): Promise<void> {
     await Promise.all([...this.sessions].map((session) => session.close()));
     this.sessions.clear();
+  }
+
+  /**
+   * Reads a conversation's status from the daemon without loading its
+   * messages, through a kodelet acp process that lives only for the call.
+   * Rejects with ConversationNotFoundError for an unknown conversation.
+   */
+  async getConversationStatus(conversationId: string): Promise<ConversationStatus> {
+    const id = requireConversationId(conversationId);
+    const result = await this.conversationRequest("_conversation/status", { conversationId: id });
+    if (!isRecord(result) || result.id !== id || typeof result.running !== "boolean") {
+      throw new Error("Invalid _conversation/status response from kodelet acp");
+    }
+    return result as unknown as ConversationStatus;
+  }
+
+  /**
+   * Asks the daemon to stop a conversation's running turn. Resolves once the
+   * stop is accepted; poll getConversationStatus for the turn's final status.
+   */
+  async stopConversation(conversationId: string, options: StopConversationOptions = {}): Promise<void> {
+    const id = requireConversationId(conversationId);
+    const turnId = options.turnId?.trim();
+    await this.conversationRequest("_conversation/stop", { conversationId: id, ...(turnId ? { turnId } : {}) });
+  }
+
+  private async conversationRequest(method: string, params: { conversationId: string }): Promise<unknown> {
+    const rpc = new ACPRPCClient(this._spawn(["acp", ...this.serverArgs], { cwd: process.cwd(), env: cleanEnv(this._baseEnv()), stdio: ["pipe", "pipe", "pipe"] }));
+    try {
+      await rpc.initialize();
+      return await rpc.conversationRequest(method, params);
+    } finally {
+      await rpc.close();
+    }
   }
 
   _spawn(args: string[], options: SpawnOptions): SpawnedProcess {
@@ -677,6 +782,7 @@ class ACPRPCClient {
   private sessionId?: string;
   private sessionExtensionsSupported = false;
   private conversationHierarchySupported = false;
+  private conversationsSupported = false;
   private extensionsClosePromise?: Promise<void>;
 
   constructor(private readonly child: SpawnedProcess, extensions: ExtensionEntrypoint[] = [], private readonly ui?: AgentUIHandlers) {
@@ -746,6 +852,10 @@ class ACPRPCClient {
       && isRecord(result._meta)
       && isRecord(result._meta.conversationHierarchy)
       && result._meta.conversationHierarchy.version === 1;
+    this.conversationsSupported = isRecord(result)
+      && isRecord(result._meta)
+      && isRecord(result._meta.conversations)
+      && result._meta.conversations.version === 1;
     if (this.extensions.size && !this.sessionExtensionsSupported) {
       throw new Error("kodelet acp does not support inline session extensions (sessionExtensions version 1); update Kodelet and the selected runner");
     }
@@ -800,6 +910,20 @@ class ACPRPCClient {
       throw new Error("Invalid _session/steering response from kodelet acp");
     }
     return reason === undefined ? { outcome: result.outcome } : { outcome: result.outcome, reason };
+  }
+
+  async conversationRequest(method: string, params: { conversationId: string }): Promise<unknown> {
+    if (!this.conversationsSupported) {
+      throw new Error("kodelet acp does not support conversation status and stop (conversations version 1); update Kodelet and the daemon");
+    }
+    try {
+      return await this.request(method, params);
+    } catch (error) {
+      if (error instanceof RPCError && error.code === RESOURCE_NOT_FOUND) {
+        throw new ConversationNotFoundError(params.conversationId);
+      }
+      throw error;
+    }
   }
 
   cancelSession(sessionId: string): void {
@@ -1206,6 +1330,14 @@ function toolContentToText(content: unknown): string {
     }
   }
   return parts.join("\n");
+}
+
+function requireConversationId(conversationId: string): string {
+  const id = typeof conversationId === "string" ? conversationId.trim() : "";
+  if (!id) {
+    throw new Error("conversationId must be a non-empty conversation ID");
+  }
+  return id;
 }
 
 function cleanEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {

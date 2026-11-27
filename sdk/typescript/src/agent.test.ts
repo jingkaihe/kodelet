@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { Readable, Writable } from "node:stream";
 import test from "node:test";
 
-import { Client, Profile, createTestHarness, defineExtension, type ToolContext } from "./index.js";
+import { Client, ConversationNotFoundError, Profile, createTestHarness, defineExtension, type ToolContext } from "./index.js";
 import type { ContextCompactedData, SpawnFunction, SpawnedProcess, ToolUpdateData } from "./agent.js";
 
 interface JsonRPCRequest {
@@ -25,6 +25,7 @@ interface FakeACPProcessOptions {
   steeringSupported?: boolean;
   sessionExtensionsVersion?: number;
   conversationHierarchyVersion?: number;
+  conversationsVersion?: number;
 }
 
 class FakeACPProcess extends EventEmitter implements SpawnedProcess {
@@ -121,6 +122,7 @@ class FakeACPProcess extends EventEmitter implements SpawnedProcess {
           authMethods: [],
           _meta: { ...(this.options.steeringSupported === false ? {} : { steering: { supported: true } }),
             ...(this.options.conversationHierarchyVersion === undefined ? {} : { conversationHierarchy: { version: this.options.conversationHierarchyVersion } }),
+            ...(this.options.conversationsVersion === undefined ? {} : { conversations: { version: this.options.conversationsVersion } }),
             ...(this.options.sessionExtensionsVersion === undefined ? {} : { sessionExtensions: { version: this.options.sessionExtensionsVersion } }) },
         });
         return;
@@ -144,12 +146,12 @@ class FakeACPProcess extends EventEmitter implements SpawnedProcess {
     }
   }
 
-  private respond(id: JsonRPCRequest["id"], result: unknown): void {
+  respond(id: JsonRPCRequest["id"], result: unknown): void {
     this.write({ jsonrpc: "2.0", id, result });
   }
 
-  private respondError(id: JsonRPCRequest["id"], message: string): void {
-    this.write({ jsonrpc: "2.0", id, error: { code: -32601, message } });
+  respondError(id: JsonRPCRequest["id"], message: string, code = -32601): void {
+    this.write({ jsonrpc: "2.0", id, error: { code, message } });
   }
 
   private write(message: Record<string, unknown>): void {
@@ -1285,4 +1287,50 @@ test("Inline cleanup runs session.end once and is bounded when the callback does
   await session.close();
   assert.equal(ended, 1);
   assert.equal(cleanupSignal?.aborted, true);
+});
+
+test("Conversation status and stop use a short-lived ACP process without a runner", async () => {
+  const processes: FakeACPProcess[] = [];
+  const args: string[][] = [];
+  const client = new Client({ server: "http://daemon", runner: "runner-one", spawn: (_command, flags) => {
+    args.push(flags);
+    const process = new FakeACPProcess({
+      conversationsVersion: 1,
+      onRequest(request, fake) {
+        const params = request.params as { conversationId?: string };
+        if (request.method === "_conversation/status") {
+          if (params.conversationId === "gone") fake.respondError(request.id, "conversation not found", -32002);
+          else fake.respond(request.id, { id: params.conversationId, running: true, messageCount: 0, usage: { totalCost: 0.5 }, latestTurn: { id: "turn-1", status: "running" } });
+          return true;
+        }
+        if (request.method === "_conversation/stop") {
+          fake.respond(request.id, {});
+          return true;
+        }
+        return false;
+      },
+    });
+    processes.push(process);
+    return process;
+  } });
+
+  const status = await client.getConversationStatus(" conv-9 ");
+  assert.deepEqual(args[0], ["acp", "--server", "http://daemon"]);
+  assert.deepEqual(processes[0].requests[1], { jsonrpc: "2.0", id: 2, method: "_conversation/status", params: { conversationId: "conv-9" } });
+  assert.equal(status.running, true);
+  assert.equal(status.latestTurn?.status, "running");
+  assert.equal(status.usage.totalCost, 0.5);
+
+  await assert.rejects(() => client.getConversationStatus("gone"), (error: unknown) => error instanceof ConversationNotFoundError && error.conversationId === "gone");
+  await client.stopConversation("conv-9", { turnId: "turn-1" });
+  await client.stopConversation("conv-9");
+  assert.deepEqual(processes[2].requests[1].params, { conversationId: "conv-9", turnId: "turn-1" });
+  assert.deepEqual(processes[3].requests[1].params, { conversationId: "conv-9" });
+  await assert.rejects(() => client.getConversationStatus(" "), /non-empty conversation ID/);
+  assert.equal(processes.length, 4);
+});
+
+test("Conversation methods require the conversations capability", async () => {
+  const client = new Client({ spawn: () => new FakeACPProcess() });
+  await assert.rejects(() => client.stopConversation("conv-1"), /conversations version 1/);
 });

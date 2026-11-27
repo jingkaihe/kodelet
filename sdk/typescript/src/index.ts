@@ -1,6 +1,6 @@
 export { z } from "zod";
 export type { ExecutionOptions, ExtensionProfileOptions } from "./execution.js";
-export { AgentRunError, Client, Profile, Session } from "./agent.js";
+export { AgentRunError, Client, ConversationNotFoundError, Profile, Session } from "./agent.js";
 export { defineExtension, ExtensionHost } from "./api.js";
 export { runExtension } from "./runtime.js";
 export { createTestHarness } from "./test-harness.js";
@@ -17,6 +17,10 @@ export type {
   ClientOptions,
   CompactionMarker,
   ContextCompactedData,
+  ConversationStatus,
+  ConversationTurn,
+  ConversationTurnStatus,
+  ConversationUsage,
   CreateSessionOptions,
   ProfileInput,
   RunOptions,
@@ -25,6 +29,7 @@ export type {
   SessionEventMap,
   SpawnFunction,
   SpawnedProcess,
+  StopConversationOptions,
   ToolCallData,
   ToolUpdateData,
   ToolResultData,
