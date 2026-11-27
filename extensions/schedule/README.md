@@ -91,7 +91,7 @@ Each occurrence runs at most once:
 - A run missed while the daemon was stopped or the host slept still starts if it is within `--misfire-grace`. Older runs are recorded as skipped, and the schedule continues from the current time without catching up.
 - If a schedule's previous run is still going, the new occurrence is skipped.
 - At the concurrency limit, due runs wait for a free slot.
-- A run belongs to its conversation on the server, so it keeps going if the daemon stops or its `kodelet acp` process exits; on `SIGINT` or `SIGTERM`, the daemon exits without stopping runs. On every poll, the daemon checks the conversations of unfinished runs, including runs a previous daemon started, records each outcome once the conversation finishes, and stops conversations that exceed `--run-timeout`. Until then, a run counts toward the concurrency limit and its schedule's next occurrence is skipped.
+- A run belongs to its conversation on the server, so it keeps going if the daemon stops or its `kodelet acp` process exits; on `SIGINT` or `SIGTERM`, the daemon exits without stopping runs. On every poll, the daemon checks the conversations of unfinished runs, including runs a previous daemon started, and records each outcome once the conversation finishes. It stops conversations that exceed `--run-timeout` and records them as timed out only after the server confirms they stopped. Until a run's conversation finishes, the run counts toward the concurrency limit and its schedule's next occurrence is skipped.
 
 Only one daemon can use a database at a time. The daemon records a heartbeat, and `schedule_list` warns when it is not running.
 

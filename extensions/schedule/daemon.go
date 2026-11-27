@@ -24,9 +24,6 @@ const (
 	// startGrace is how long a run left behind by a previous daemon may
 	// have a conversation without a turn before it counts as never started.
 	startGrace = time.Minute
-	// stopGrace is how long a timed-out run may take to stop before it is
-	// recorded as timed out without the server confirming that it stopped.
-	stopGrace = 10 * time.Minute
 )
 
 const (
@@ -94,7 +91,9 @@ type daemon struct {
 
 	mu     sync.Mutex
 	active map[int64]bool
-	wg     sync.WaitGroup
+	// stopping holds timed-out runs whose stop is awaiting confirmation.
+	stopping map[int64]bool
+	wg       sync.WaitGroup
 	// detached ends when the daemon stops, abandoning the runs in active.
 	detached   context.Context
 	detachRuns context.CancelFunc
@@ -110,6 +109,7 @@ func newDaemon(store *Store, exec executor, convs conversations, config daemonCo
 		now:        time.Now,
 		log:        log,
 		active:     map[int64]bool{},
+		stopping:   map[int64]bool{},
 		detached:   detached,
 		detachRuns: detachRuns,
 	}
@@ -260,6 +260,18 @@ func (d *daemon) isActive(runID int64) bool {
 	return d.active[runID]
 }
 
+// markStopping records that a timed-out run is being stopped and reports
+// whether it was not already.
+func (d *daemon) markStopping(runID int64) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.stopping[runID] {
+		return false
+	}
+	d.stopping[runID] = true
+	return true
+}
+
 func (d *daemon) activeCount() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -406,10 +418,11 @@ func (d *daemon) reconcile(ctx context.Context, run runningRun, ended *runEnd) b
 		if !timedOut {
 			return false
 		}
-		if d.config.RunTimeout > 0 && age >= d.config.RunTimeout+stopGrace {
-			return d.settle(ctx, log, run, RunFailed, d.config.timeoutMessage()+"; the server did not confirm that it stopped", "")
+		// The run keeps its slot until the server confirms the turn ended;
+		// recording it as timed out sooner could overlap the next run.
+		if d.markStopping(run.ID) {
+			log.Warn("stopping a run that exceeded the run timeout", "timeout", d.config.RunTimeout)
 		}
-		log.Warn("stopping a run that exceeded the run timeout", "timeout", d.config.RunTimeout)
 		stopCtx, cancel := context.WithTimeout(ctx, conversationTimeout)
 		defer cancel()
 		if err := d.convs.Stop(stopCtx, run.ConversationID, turn.ID); err != nil {
@@ -444,6 +457,9 @@ func (d *daemon) settle(ctx context.Context, log *slog.Logger, run runningRun, s
 		log.Error("failed to record run outcome", "error", err)
 		return false
 	}
+	d.mu.Lock()
+	delete(d.stopping, run.ID)
+	d.mu.Unlock()
 	if settled {
 		logOutcome(log, status, message)
 	}

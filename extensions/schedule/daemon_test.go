@@ -482,7 +482,7 @@ func TestDaemonReconcilesRunsLeftByAPreviousDaemon(t *testing.T) {
 		{name: "never started", age: 2 * time.Minute, want: "failed:" + neverStartedMessage},
 		{name: "still running", age: 10 * time.Minute, turn: []string{agent.TurnRunning}, want: "running:"},
 		{name: "accepted past the timeout", age: 61 * time.Minute, turn: []string{agent.TurnAccepted}, want: "running:", wantStop: true},
-		{name: "never stops", age: 71 * time.Minute, turn: []string{agent.TurnRunning}, want: "failed:timed out after 1h0m0s; the server did not confirm that it stopped"},
+		{name: "long past the timeout", age: 75 * time.Minute, turn: []string{agent.TurnRunning}, want: "running:", wantStop: true},
 		{name: "succeeded", age: 10 * time.Minute, turn: []string{agent.TurnSucceeded}, want: "succeeded:"},
 		{name: "failed", age: 10 * time.Minute, turn: []string{agent.TurnFailed, "model overloaded"}, want: "failed:model overloaded"},
 		{name: "cancelled", age: 10 * time.Minute, turn: []string{agent.TurnCancelled}, want: "canceled:the run was cancelled"},
@@ -524,6 +524,38 @@ func TestDaemonReconcilesRunsLeftByAPreviousDaemon(t *testing.T) {
 			assert.Zero(t, exec.callCount())
 		})
 	}
+}
+
+func TestDaemonHoldsTheSlotUntilATimedOutRunStops(t *testing.T) {
+	store, _ := newTestStore(t)
+	start := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
+	schedule := Schedule{Workspace: "runner-a", Name: "hourly", Schedule: "CRON_TZ=UTC 0 * * * *", Instruction: "p", CWD: "/w", Enabled: true, NextRunAt: &start}
+	require.NoError(t, store.Create(t.Context(), &schedule, start))
+	runID, _, err := store.Claim(t.Context(), schedule.ID, start, start.Add(time.Hour), Run{Status: RunRunning, StartedAt: start})
+	require.NoError(t, err)
+	require.NoError(t, store.SetRunConversation(t.Context(), runID, "conv-old"))
+	exec := &fakeExecutor{}
+	// The daemon was offline from just after 09:00 until 10:15, and the 09:00
+	// run is still going on the server.
+	d, clock, convs := newTestDaemon(store, exec, nil)
+	convs.setTurn("conv-old", agent.TurnRunning, "", "")
+
+	clock.Set(start.Add(75 * time.Minute))
+	tickAndWait(t, d)
+	clock.Set(start.Add(76 * time.Minute))
+	tickAndWait(t, d)
+	assert.Equal(t, []string{"running:", "skipped:the previous run was still in progress"}, runStatuses(t, store, schedule.ID))
+	assert.Equal(t, []string{"conv-old/turn-1", "conv-old/turn-1"}, convs.stopped(), "the stop is requested until the server confirms it")
+	assert.Zero(t, exec.callCount())
+
+	convs.setTurn("conv-old", agent.TurnCancelled, "", "")
+	clock.Set(start.Add(77 * time.Minute))
+	tickAndWait(t, d)
+	assert.Equal(t, []string{"failed:timed out after 1h0m0s", "skipped:the previous run was still in progress"}, runStatuses(t, store, schedule.ID))
+
+	clock.Set(start.Add(2 * time.Hour))
+	tickAndWait(t, d)
+	assert.Equal(t, 1, exec.callCount(), "the next occurrence starts once the slot is free")
 }
 
 func TestDaemonCountsRunsLeftByAPreviousDaemonTowardConcurrency(t *testing.T) {
