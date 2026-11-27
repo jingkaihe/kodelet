@@ -44,6 +44,7 @@ type acpConn struct {
 	steering          bool
 	sessionExtensions bool
 	hierarchy         bool
+	conversations     bool
 	sessionID         string
 
 	closeOnce   sync.Once
@@ -310,6 +311,9 @@ func (c *acpConn) initialize(ctx context.Context) error {
 			ConversationHierarchy struct {
 				Version int `json:"version"`
 			} `json:"conversationHierarchy"`
+			Conversations struct {
+				Version int `json:"version"`
+			} `json:"conversations"`
 		} `json:"_meta"`
 	}
 	_ = json.Unmarshal(raw, &result)
@@ -317,6 +321,7 @@ func (c *acpConn) initialize(ctx context.Context) error {
 	c.steering = result.Meta.Steering.Supported
 	c.sessionExtensions = result.Meta.SessionExtensions.Version == 1
 	c.hierarchy = result.Meta.ConversationHierarchy.Version == 1
+	c.conversations = result.Meta.Conversations.Version == 1
 	sessionExtensions := c.sessionExtensions
 	c.mu.Unlock()
 	if c.relay != nil && !sessionExtensions {

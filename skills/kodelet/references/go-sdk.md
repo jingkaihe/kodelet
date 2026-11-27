@@ -101,6 +101,17 @@ session, err := client.CreateSession(ctx, agent.SessionOptions{
 
 They are identified as `inline-1`, `inline-2`, and so on, stay subject to tool and extension policy, are never replayed after a disconnect, and must be passed again in the same order when resuming. Nil UI handlers report the interaction as unavailable. Inline extensions cannot acquire the runner-local browser.
 
+Check or stop a conversation without a session, for example one a crashed process left running:
+
+```go
+status, err := client.GetConversationStatus(ctx, conversationID) // errors.Is(err, agent.ErrConversationNotFound)
+if status.LatestTurn != nil && !status.LatestTurn.Terminal() {
+	err = client.StopConversation(ctx, conversationID, agent.StopConversationOptions{TurnID: status.LatestTurn.ID})
+}
+```
+
+Each call runs a short-lived `kodelet acp` that never selects a runner. `LatestTurn.Status` is `accepted`, `running`, `succeeded`, `failed`, `cancelled`, or `interrupted`; `Result` holds a succeeded turn's reply. `StopConversation` returns once the stop is accepted, and a `TurnID` also prevents an accepted turn from starting. Older Kodelet versions return `agent.ErrConversationsUnsupported`.
+
 ## Task progress
 
 ```go

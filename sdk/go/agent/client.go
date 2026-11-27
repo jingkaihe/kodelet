@@ -56,11 +56,7 @@ func (c *Client) CreateSession(ctx context.Context, opts SessionOptions) (*Sessi
 	if opts.EnvironmentProfile != "" {
 		args = append(args, "--runner-profile="+opts.EnvironmentProfile)
 	}
-	env := os.Environ()
-	for key, value := range c.opts.Env {
-		env = append(env, key+"="+value)
-	}
-	proc, err := c.start(c.opts.Command, args, env)
+	proc, err := c.start(c.opts.Command, args, c.env())
 	if err != nil {
 		return nil, err
 	}
@@ -77,6 +73,14 @@ func (c *Client) CreateSession(ctx context.Context, opts SessionOptions) (*Sessi
 	c.sessions[session] = struct{}{}
 	c.mu.Unlock()
 	return session, nil
+}
+
+func (c *Client) env() []string {
+	env := os.Environ()
+	for key, value := range c.opts.Env {
+		env = append(env, key+"="+value)
+	}
+	return env
 }
 
 func (c *Client) openSession(ctx context.Context, conn *acpConn, opts SessionOptions, cwd string) (string, error) {
