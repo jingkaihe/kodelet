@@ -50,6 +50,9 @@ const (
 	ErrCodeMethodNotFound = -32601
 	ErrCodeInvalidParams  = -32602
 	ErrCodeInternalError  = -32603
+	// ErrCodeResourceNotFound is ACP's error for a missing resource, such as
+	// an unknown conversation.
+	ErrCodeResourceNotFound = -32002
 )
 
 // SessionID uniquely identifies an ACP session
@@ -218,6 +221,25 @@ type PromptRequest struct {
 type PromptResponse struct {
 	StopReason StopReason     `json:"stopReason"`
 	Meta       map[string]any `json:"_meta,omitempty"`
+}
+
+// Conversation extension methods read and stop server conversations without
+// opening a session. Agents advertise them with _meta.conversations.version.
+const (
+	ConversationStatusMethod = "_conversation/status"
+	ConversationStopMethod   = "_conversation/stop"
+)
+
+// ConversationStatusRequest asks for one conversation's status.
+type ConversationStatusRequest struct {
+	ConversationID string `json:"conversationId"`
+}
+
+// ConversationStopRequest stops a conversation's running turn. With TurnID,
+// only that turn is stopped, including one that has not started yet.
+type ConversationStopRequest struct {
+	ConversationID string `json:"conversationId"`
+	TurnID         string `json:"turnId,omitempty"`
 }
 
 // SessionSteeringMethod is the established ACP extension method for steering a session.

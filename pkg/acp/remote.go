@@ -22,6 +22,7 @@ type RemoteChatClient interface {
 	ChatSettings(context.Context, string) (chat.ControlPlaneChatSettings, error)
 	ChatSettingsBootstrap(context.Context) (chat.ControlPlaneChatSettings, error)
 	DiscoverWorkspace(context.Context, chat.WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error)
+	GetConversationStatus(ctx context.Context, conversationID string) (chat.ConversationStatus, error)
 	SteerConversation(ctx context.Context, conversationID, message string, images []string) (bool, error)
 	StopConversation(ctx context.Context, conversationID string) error
 	StopConversationTurn(ctx context.Context, conversationID, turnID string) error

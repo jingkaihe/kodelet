@@ -75,6 +75,7 @@ type fakeRemoteChatClient struct {
 	stop     func(string)
 	stopTurn func(string, string)
 	stopErr  error
+	status   func(string) (chat.ConversationStatus, error)
 	requests []chat.ChatRequest
 	stopped  []string
 	steered  []string
@@ -125,6 +126,13 @@ func (c *fakeRemoteChatClient) Run(ctx context.Context, request chat.ChatRequest
 		return c.run(ctx, request, sink)
 	}
 	return request.ConversationID, nil
+}
+
+func (c *fakeRemoteChatClient) GetConversationStatus(_ context.Context, conversationID string) (chat.ConversationStatus, error) {
+	if c.status == nil {
+		return chat.ConversationStatus{}, convtypes.ErrConversationNotFound
+	}
+	return c.status(conversationID)
 }
 
 func (c *fakeRemoteChatClient) ListConversations(context.Context, int) ([]convtypes.ConversationSummary, error) {

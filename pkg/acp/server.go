@@ -355,6 +355,10 @@ func (s *Server) handleRequest(data []byte) error {
 		return s.handleSetMode(&req)
 	case sessionExtensionFrameMethod:
 		return s.handleSessionExtensionFrame(&req)
+	case acptypes.ConversationStatusMethod:
+		return s.handleConversationStatus(&req)
+	case acptypes.ConversationStopMethod:
+		return s.handleConversationStop(&req)
 	default:
 		return s.sendError(req.ID, acptypes.ErrCodeMethodNotFound, "Method not found", nil)
 	}
@@ -574,6 +578,7 @@ func (s *Server) handleInitialize(req *acptypes.Request) error {
 	}
 	if s.remoteSessions != nil {
 		result.Meta["sessionExtensions"] = map[string]any{"version": 1}
+		result.Meta["conversations"] = map[string]any{"version": 1}
 	}
 
 	s.initialized.Store(true)
