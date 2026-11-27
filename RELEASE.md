@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-Added the [schedule extension](extensions/schedule/README.md), `kodelet-extension-schedule`, which runs agent instructions on recurring cron schedules as new conversations. Agents manage a workspace's schedules with its tools, with user approval, and a separately supervised `kodelet-extension-schedule daemon` starts due runs. The standalone installer and Linux RPM and deb packages include it, and runners discover it on `PATH`; add its absolute path to `extensions.deny` to turn it off.
+Added the [schedule extension](extensions/schedule/README.md), `kodelet-extension-schedule`, which runs agent instructions on recurring cron schedules as new conversations. Agents manage a workspace's schedules with its tools, with user approval, and a separately supervised `kodelet-extension-schedule daemon` starts due runs. The standalone installer and Linux RPM and deb packages include it, and runners discover it on `PATH`; add its absolute path to `extensions.deny` to turn it off. Runs keep going on the server when the daemon stops, and the daemon records their outcomes when it starts again.
+
+Added `GetConversationStatus` and `StopConversation` to the Go SDK and `getConversationStatus()` and `stopConversation()` to the TypeScript SDK, which read a conversation's latest turn, usage, and running state, and stop its turn, without opening a session.
 
 ## 0.8.36-beta
 

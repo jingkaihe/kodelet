@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -90,8 +89,8 @@ func TestDaemonTruncatesLongOutputs(t *testing.T) {
 	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
 	schedule := createTestSchedule(t, store, "runner-a", "daily", due)
 	long := strings.Repeat("é", maxOutputLength)
-	exec := &fakeExecutor{output: long, run: func(context.Context, Schedule) error { return nil }}
-	d, clock := newTestDaemon(store, exec, nil)
+	exec := &fakeExecutor{output: long}
+	d, clock, _ := newTestDaemon(store, exec, nil)
 
 	clock.Set(due)
 	tickAndWait(t, d)

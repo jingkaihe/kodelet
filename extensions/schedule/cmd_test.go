@@ -25,7 +25,7 @@ type testCLI struct {
 func newTestCLI(t *testing.T) *testCLI {
 	t.Helper()
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
-	for _, key := range []string{"CONFIG", "DB", "AUTO_APPROVE", "SERVER", "KODELET", "POLL_INTERVAL", "CONCURRENCY", "RUN_TIMEOUT", "MISFIRE_GRACE", "SHUTDOWN_GRACE"} {
+	for _, key := range []string{"CONFIG", "DB", "AUTO_APPROVE", "SERVER", "KODELET", "POLL_INTERVAL", "CONCURRENCY", "RUN_TIMEOUT", "MISFIRE_GRACE"} {
 		t.Setenv("KODELET_SCHEDULE_"+key, "")
 		os.Unsetenv("KODELET_SCHEDULE_" + key)
 	}

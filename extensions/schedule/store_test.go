@@ -160,21 +160,42 @@ func TestStoreDisableAndPruneRuns(t *testing.T) {
 	assert.Equal(t, "bad", saved.LastRun.Error)
 }
 
-func TestStoreAbandonsRunningRuns(t *testing.T) {
+func TestStoreSettlesRunningRuns(t *testing.T) {
 	store, _ := newTestStore(t)
 	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
 	schedule := createTestSchedule(t, store, "runner-a", "daily", due)
-	_, _, err := store.Claim(t.Context(), schedule.ID, due, due.Add(time.Hour), Run{Status: RunRunning, StartedAt: due})
+	runID, _, err := store.Claim(t.Context(), schedule.ID, due, due.Add(time.Hour), Run{Status: RunRunning, StartedAt: due})
 	require.NoError(t, err)
+	require.NoError(t, store.SetRunConversation(t.Context(), runID, "conv-1"))
+	require.NoError(t, store.SaveRunProgress(t.Context(), runID, runResult{Output: "partial", Stats: RunStats{ToolCalls: 3}}))
 
-	abandoned, err := store.AbandonRunningRuns(t.Context(), interruptedMessage, due.Add(time.Minute))
+	running, err := store.RunningRuns(t.Context())
 	require.NoError(t, err)
-	assert.EqualValues(t, 1, abandoned)
-	saved, err := store.Get(t.Context(), "runner-a", schedule.ID)
+	require.Len(t, running, 1)
+	assert.Equal(t, runID, running[0].ID)
+	assert.Equal(t, schedule.ID, running[0].ScheduleID)
+	assert.Equal(t, "conv-1", running[0].ConversationID)
+	assert.True(t, due.Equal(running[0].StartedAt))
+
+	settled, err := store.SettleRun(t.Context(), runID, RunFailed, "model overloaded", "", due.Add(time.Minute))
 	require.NoError(t, err)
-	assert.Equal(t, RunFailed, saved.LastRun.Status)
-	assert.Equal(t, interruptedMessage, saved.LastRun.Error)
-	require.NotNil(t, saved.LastRun.FinishedAt)
+	assert.True(t, settled)
+	settled, err = store.SettleRun(t.Context(), runID, RunSucceeded, "", "late", due.Add(2*time.Minute))
+	require.NoError(t, err)
+	assert.False(t, settled, "a finished run is never settled again")
+	require.NoError(t, store.FinishRun(t.Context(), runID, RunSucceeded, "", runResult{Output: "late"}, due.Add(2*time.Minute)))
+
+	run, err := store.GetRun(t.Context(), "runner-a", runID)
+	require.NoError(t, err)
+	assert.Equal(t, RunFailed, run.Status)
+	assert.Equal(t, "model overloaded", run.Error)
+	assert.Equal(t, "partial", run.Output, "an empty settled output keeps the saved progress")
+	require.NotNil(t, run.Stats)
+	assert.Equal(t, 3, run.Stats.ToolCalls)
+	require.NotNil(t, run.FinishedAt)
+	running, err = store.RunningRuns(t.Context())
+	require.NoError(t, err)
+	assert.Empty(t, running)
 }
 
 func TestStoreDaemonHeartbeat(t *testing.T) {

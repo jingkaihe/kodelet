@@ -24,16 +24,15 @@ import (
 // Settings keys. Each can be set by a flag, a KODELET_SCHEDULE_<KEY>
 // environment variable, or the config file, in that order of precedence.
 const (
-	keyConfig        = "config"
-	keyDB            = "db"
-	keyAutoApprove   = "auto_approve"
-	keyServer        = "server"
-	keyKodelet       = "kodelet"
-	keyPollInterval  = "poll_interval"
-	keyConcurrency   = "concurrency"
-	keyRunTimeout    = "run_timeout"
-	keyMisfireGrace  = "misfire_grace"
-	keyShutdownGrace = "shutdown_grace"
+	keyConfig       = "config"
+	keyDB           = "db"
+	keyAutoApprove  = "auto_approve"
+	keyServer       = "server"
+	keyKodelet      = "kodelet"
+	keyPollInterval = "poll_interval"
+	keyConcurrency  = "concurrency"
+	keyRunTimeout   = "run_timeout"
+	keyMisfireGrace = "misfire_grace"
 )
 
 const rootLong = `Run agent instructions on recurring schedules.
@@ -105,8 +104,10 @@ func (c *cli) daemonCommand() *cobra.Command {
 		Long: `Start due scheduled runs until interrupted.
 
 Each run starts a new conversation through "kodelet acp" on the schedule's
-runner, directory, and model profile. Supervise the daemon with launchd or
-systemd; only one daemon can use a database at a time.`,
+runner, directory, and model profile. Runs keep going on the server when the
+daemon stops, and the daemon records their outcomes when it starts again.
+Supervise the daemon with launchd or systemd; only one daemon can use a
+database at a time.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			settings, err := daemonSettingsFrom(v)
@@ -123,16 +124,14 @@ systemd; only one daemon can use a database at a time.`,
 	flags.String("kodelet", "kodelet", "kodelet executable that runs scheduled instructions")
 	flags.Duration("poll-interval", defaults.PollInterval, "how often to check for due schedules")
 	flags.Int("concurrency", defaults.Concurrency, "maximum number of runs at once")
-	flags.Duration("run-timeout", defaults.RunTimeout, "cancel runs that take longer than this (0 disables)")
+	flags.Duration("run-timeout", defaults.RunTimeout, "stop runs that take longer than this (0 disables)")
 	flags.Duration("misfire-grace", defaults.MisfireGrace, "skip runs missed by more than this, for example while the host slept")
-	flags.Duration("shutdown-grace", defaults.ShutdownGrace, "on shutdown, wait this long for runs to finish before cancelling them")
 	mustBind(v, keyServer, flags.Lookup("server"))
 	mustBind(v, keyKodelet, flags.Lookup("kodelet"))
 	mustBind(v, keyPollInterval, flags.Lookup("poll-interval"))
 	mustBind(v, keyConcurrency, flags.Lookup("concurrency"))
 	mustBind(v, keyRunTimeout, flags.Lookup("run-timeout"))
 	mustBind(v, keyMisfireGrace, flags.Lookup("misfire-grace"))
-	mustBind(v, keyShutdownGrace, flags.Lookup("shutdown-grace"))
 	return cmd
 }
 
@@ -284,7 +283,6 @@ func daemonSettingsFrom(v *viper.Viper) (daemonSettings, error) {
 		{keyPollInterval, &settings.Config.PollInterval},
 		{keyRunTimeout, &settings.Config.RunTimeout},
 		{keyMisfireGrace, &settings.Config.MisfireGrace},
-		{keyShutdownGrace, &settings.Config.ShutdownGrace},
 	}
 	for _, d := range durations {
 		if *d.target, err = cast.ToDurationE(v.Get(d.key)); err != nil {
@@ -331,7 +329,8 @@ func runDaemon(ctx context.Context, settings daemonSettings, logger *slog.Logger
 	}
 	defer lock.Close()
 	logger.Info("using schedule database", "path", settings.DBPath, "kodelet", command)
-	d := newDaemon(store, agentExecutor{server: settings.Server, command: command}, settings.Config, logger)
+	runs := agentExecutor{server: settings.Server, command: command}
+	d := newDaemon(store, runs, runs, settings.Config, logger)
 	return d.run(ctx)
 }
 

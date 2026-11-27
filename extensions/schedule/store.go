@@ -435,18 +435,6 @@ func (s *Store) SetRunConversation(ctx context.Context, runID int64, conversatio
 	return errors.Wrap(err, "failed to record run conversation")
 }
 
-// AbandonRunningRuns marks runs left running by a previous daemon as failed.
-func (s *Store) AbandonRunningRuns(ctx context.Context, message string, now time.Time) (int64, error) {
-	result, err := s.db.ExecContext(ctx,
-		`UPDATE runs SET status = ?, error = ?, finished_at = ? WHERE status = ?`,
-		string(RunFailed), message, now.UnixMilli(), string(RunRunning),
-	)
-	if err != nil {
-		return 0, errors.Wrap(err, "failed to update interrupted runs")
-	}
-	return result.RowsAffected()
-}
-
 // SaveHeartbeat records that the daemon is alive.
 func (s *Store) SaveHeartbeat(ctx context.Context, status DaemonStatus) error {
 	_, err := s.db.ExecContext(ctx, `

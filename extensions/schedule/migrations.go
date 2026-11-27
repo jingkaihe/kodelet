@@ -63,6 +63,7 @@ CREATE TABLE runs (
 	stats TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX runs_schedule ON runs (schedule_id, id);
+CREATE INDEX runs_running ON runs (status) WHERE status = 'running';
 CREATE TABLE daemon (
 	id INTEGER PRIMARY KEY CHECK (id = 1),
 	pid INTEGER NOT NULL,

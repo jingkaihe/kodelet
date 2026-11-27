@@ -73,9 +73,8 @@ The daemon checks for due schedules, starts each run with `kodelet acp --runner 
 | `--kodelet` | `kodelet` | `kodelet` | `kodelet` executable used for runs |
 | `--poll-interval` | `poll_interval` | `30s` | How often to check for due schedules |
 | `--concurrency` | `concurrency` | `2` | Maximum number of runs at once |
-| `--run-timeout` | `run_timeout` | `1h` | Cancel runs that take longer; `0` disables |
+| `--run-timeout` | `run_timeout` | `1h` | Stop runs that take longer; `0` disables |
 | `--misfire-grace` | `misfire_grace` | `1h` | Skip runs missed by more than this |
-| `--shutdown-grace` | `shutdown_grace` | `30s` | Time for runs to finish on shutdown before they are cancelled |
 
 Each setting can also come from a `KODELET_SCHEDULE_<SETTING>` environment variable, such as `KODELET_SCHEDULE_POLL_INTERVAL=1m`, or from a YAML config file. Flags take precedence over environment variables, which take precedence over the config file. The config file is `schedule/config.yaml` under `$KODELET_BASE_PATH` (default `~/.kodelet`) when it exists, or the file named by `--config` or `KODELET_SCHEDULE_CONFIG`. Write durations as strings such as `90s` or `2h`:
 
@@ -92,7 +91,7 @@ Each occurrence runs at most once:
 - A run missed while the daemon was stopped or the host slept still starts if it is within `--misfire-grace`. Older runs are recorded as skipped, and the schedule continues from the current time without catching up.
 - If a schedule's previous run is still going, the new occurrence is skipped.
 - At the concurrency limit, due runs wait for a free slot.
-- On `SIGINT` or `SIGTERM`, the daemon stops starting runs, waits up to `--shutdown-grace`, then cancels the rest.
+- A run belongs to its conversation on the server, so it keeps going if the daemon stops or its `kodelet acp` process exits; on `SIGINT` or `SIGTERM`, the daemon exits without stopping runs. On every poll, the daemon checks the conversations of unfinished runs, including runs a previous daemon started, records each outcome once the conversation finishes, and stops conversations that exceed `--run-timeout`. Until then, a run counts toward the concurrency limit and its schedule's next occurrence is skipped.
 
 Only one daemon can use a database at a time. The daemon records a heartbeat, and `schedule_list` warns when it is not running.
 
@@ -118,8 +117,6 @@ Kodelet does not supervise the daemon. The examples below use `~/.local/bin`; us
   <true/>
   <key>KeepAlive</key>
   <true/>
-  <key>ExitTimeOut</key>
-  <integer>60</integer>
   <key>StandardErrorPath</key>
   <string>/Users/you/.kodelet/logs/schedule-daemon.log</string>
 </dict>
@@ -129,8 +126,6 @@ Kodelet does not supervise the daemon. The examples below use `~/.local/bin`; us
 ```bash
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.kodelet.schedule.plist
 ```
-
-`ExitTimeOut` gives the daemon time to stop cleanly: on `SIGTERM` it waits `--shutdown-grace` (30 seconds by default) for runs to finish, then cancels the rest, which takes a few more seconds. Without it, launchd may kill the daemon first, leaving those runs' conversations running. Keep it above the shutdown grace plus about 10 seconds.
 
 On Linux, use a systemd user unit such as `~/.config/systemd/user/kodelet-schedule.service`:
 
