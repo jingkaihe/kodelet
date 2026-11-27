@@ -328,3 +328,19 @@ func TestStorePruningKeepsRunningRuns(t *testing.T) {
 	require.NoError(t, store.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runs WHERE schedule_id = ?`, schedule.ID).Scan(&count))
 	assert.Equal(t, runHistoryLimit+1, count, "the latest runs plus the long one")
 }
+
+func TestStoreSetRunConversationRequiresARunningRun(t *testing.T) {
+	store, _ := newTestStore(t)
+	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
+	schedule := createTestSchedule(t, store, "runner-a", "daily", due)
+	finished, _, err := store.Claim(t.Context(), schedule.ID, due, due.Add(time.Hour), Run{Status: RunRunning, StartedAt: due})
+	require.NoError(t, err)
+	require.NoError(t, store.FinishRun(t.Context(), finished, RunFailed, "boom", runResult{}, due))
+	assert.ErrorIs(t, store.SetRunConversation(t.Context(), finished, "conv-1"), errRunGone)
+
+	deleted, _, err := store.Claim(t.Context(), schedule.ID, due.Add(time.Hour), due.Add(2*time.Hour), Run{Status: RunRunning, StartedAt: due})
+	require.NoError(t, err)
+	require.NoError(t, store.Delete(t.Context(), "runner-a", schedule.ID))
+	assert.ErrorIs(t, store.SetRunConversation(t.Context(), deleted, "conv-2"), errRunGone)
+	assert.ErrorIs(t, store.SetRunConversation(t.Context(), 9999, "conv-3"), errRunGone)
+}

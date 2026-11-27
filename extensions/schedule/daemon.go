@@ -323,6 +323,9 @@ func (d *daemon) execute(jobs context.Context, schedule Schedule, run runningRun
 		finish(RunSucceeded, "")
 	case panicked:
 		finish(RunFailed, err.Error())
+	case errors.Is(err, errRunGone):
+		// There is no run left to record the outcome on.
+		log.Warn("run not started", "error", err)
 	case run.ConversationID == "" && d.detached.Err() != nil:
 		finish(RunCanceled, notStartedMessage)
 	case run.ConversationID == "":

@@ -707,3 +707,32 @@ func TestDaemonRunsTheInstructionItRecords(t *testing.T) {
 	assert.Equal(t, exec.calls[0].Instruction, run.Instruction)
 	assert.Equal(t, exec.calls[0].CWD, run.CWD)
 }
+
+func TestDaemonSendsNoInstructionWhenTheScheduleIsDeletedFirst(t *testing.T) {
+	store, _ := newTestStore(t)
+	due := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
+	createTestSchedule(t, store, "runner-a", "daily", due)
+	var deleteErr, startErr error
+	sent := false
+	// The user deletes the schedule after the daemon claims the run but
+	// before the instruction is sent.
+	exec := executorFunc(func(ctx context.Context, schedule Schedule, started func(string) error, _ <-chan struct{}) (runResult, error) {
+		deleteErr = store.Delete(ctx, schedule.Workspace, schedule.ID)
+		if startErr = started("conv-deleted"); startErr != nil {
+			return runResult{}, startErr
+		}
+		sent = true
+		return runResult{}, nil
+	})
+	d, clock, _ := newTestDaemon(store, exec, nil)
+
+	clock.Set(due)
+	tickAndWait(t, d)
+
+	require.NoError(t, deleteErr)
+	assert.ErrorIs(t, startErr, errRunGone)
+	assert.False(t, sent, "nothing could track the conversation, so the instruction is not sent")
+	var runs int
+	require.NoError(t, store.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runs`).Scan(&runs))
+	assert.Zero(t, runs)
+}

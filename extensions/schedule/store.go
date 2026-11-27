@@ -24,7 +24,10 @@ var (
 	errNotFound    = errors.New("schedule not found")
 	errChanged     = errors.New("the schedule changed while this change awaited approval; check it with schedule_list and try again")
 	errRunNotFound = errors.New("run not found")
-	errNameTaken   = errors.New("a schedule with this name already exists")
+	// errRunGone reports a claimed run that is no longer running, such as
+	// one whose schedule was deleted before its instruction was sent.
+	errRunGone   = errors.New("the run is no longer on record; its schedule may have been deleted")
+	errNameTaken = errors.New("a schedule with this name already exists")
 )
 
 // RunStatus is the outcome of one scheduled run.
@@ -429,10 +432,24 @@ DELETE FROM runs WHERE schedule_id = ? AND status != ? AND id NOT IN (
 	return claimed, true, nil
 }
 
-// SetRunConversation records the conversation a run created.
+// SetRunConversation records the conversation a running run created. It
+// returns errRunGone when the run is no longer running, such as when its
+// schedule was deleted after the daemon claimed it, because nothing would
+// then track the conversation.
 func (s *Store) SetRunConversation(ctx context.Context, runID int64, conversationID string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE runs SET conversation_id = ? WHERE id = ?`, conversationID, runID)
-	return errors.Wrap(err, "failed to record run conversation")
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE runs SET conversation_id = ? WHERE id = ? AND status = ?`, conversationID, runID, string(RunRunning))
+	if err != nil {
+		return errors.Wrap(err, "failed to record run conversation")
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return errors.Wrap(err, "failed to record run conversation")
+	}
+	if affected != 1 {
+		return errRunGone
+	}
+	return nil
 }
 
 // SaveHeartbeat records that the daemon is alive.
