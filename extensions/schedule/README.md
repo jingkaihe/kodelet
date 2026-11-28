@@ -72,7 +72,7 @@ The daemon checks for due schedules, starts each run with `kodelet acp --runner 
 | `--server` | `server` | CLI configuration | Kodelet server URL |
 | `--kodelet` | `kodelet` | `kodelet` | `kodelet` executable used for runs |
 | `--poll-interval` | `poll_interval` | `30s` | How often to check for due schedules |
-| `--concurrency` | `concurrency` | `2` | Maximum number of runs at once |
+| `--concurrency` | `concurrency` | `10` | Maximum number of runs at once |
 | `--run-timeout` | `run_timeout` | `1h` | Stop runs that take longer; `0` disables |
 | `--misfire-grace` | `misfire_grace` | `1h` | Skip runs missed by more than this |
 

@@ -78,6 +78,10 @@ auto_approve: true
 
 func TestDaemonSettingsPrecedence(t *testing.T) {
 	tc := newTestCLI(t)
+	require.NoError(t, tc.execute(t, "daemon"))
+	require.NotNil(t, tc.daemon)
+	assert.Equal(t, 10, tc.daemon.Config.Concurrency, "default")
+
 	config := filepath.Join(t.TempDir(), "config.yaml")
 	require.NoError(t, os.WriteFile(config, []byte(`
 db: from-config.db

@@ -43,7 +43,7 @@ type daemonConfig struct {
 func defaultDaemonConfig() daemonConfig {
 	return daemonConfig{
 		PollInterval: 30 * time.Second,
-		Concurrency:  2,
+		Concurrency:  10,
 		RunTimeout:   time.Hour,
 		MisfireGrace: time.Hour,
 	}
