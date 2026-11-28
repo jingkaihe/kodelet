@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,6 +41,18 @@ type updateInput struct {
 	Instruction *string `json:"instruction,omitempty" jsonschema:"New instruction"`
 	CWD         *string `json:"cwd,omitempty" jsonschema:"New directory, inside the current directory"`
 	Enabled     *bool   `json:"enabled,omitempty" jsonschema:"Enable or pause the schedule"`
+}
+
+// createProfileInput is createInput with a profile, when profiles are configured.
+type createProfileInput struct {
+	createInput
+	Profile string `json:"profile,omitempty" jsonschema:"Model profile for the runs, from the list in this tool's description; omit to use this conversation's profile"`
+}
+
+// updateProfileInput is updateInput with a profile, when profiles are configured.
+type updateProfileInput struct {
+	updateInput
+	Profile *string `json:"profile,omitempty" jsonschema:"New model profile, from the list in this tool's description"`
 }
 
 type deleteInput struct {
@@ -85,10 +98,40 @@ type toolset struct {
 	now    func() time.Time
 	// autoApprove saves changes without asking the user.
 	autoApprove bool
+	// profiles schedules may choose; empty means the conversation's profile.
+	profiles profileCatalog
 }
 
-func registerTools(ext *extension.Extension, stores *storeOpener, now func() time.Time, autoApprove bool) {
-	t := &toolset{stores: stores, now: now, autoApprove: autoApprove}
+// configureExtension registers tools and defined profiles from the config.
+func configureExtension(ext *extension.Extension, stores *storeOpener, now func() time.Time, autoApprove bool) {
+	ext.OnInitialize(func(_ context.Context, params extension.InitializeParams) error {
+		profiles, err := parseProfiles(params.Extension.Config)
+		if err != nil {
+			return errors.Wrap(err, "invalid schedule extension config")
+		}
+		if defined := profiles.defined(); len(defined) > 0 {
+			if remoteProfilesSupported(params.Capabilities) {
+				for _, registration := range defined {
+					ext.RegisterProfile(registration)
+				}
+			} else {
+				slog.Warn("this Kodelet cannot register extension profiles, so schedules cannot use the profiles the config defines", "profiles", len(defined))
+				profiles = profiles.withoutDefinitions()
+			}
+		}
+		registerTools(ext, stores, now, autoApprove, profiles)
+		return nil
+	})
+}
+
+func remoteProfilesSupported(capabilities map[string]any) bool {
+	profiles, _ := capabilities["profiles"].(map[string]any)
+	supported, _ := profiles["remote"].(bool)
+	return supported
+}
+
+func registerTools(ext *extension.Extension, stores *storeOpener, now func() time.Time, autoApprove bool, profiles profileCatalog) {
+	t := &toolset{stores: stores, now: now, autoApprove: autoApprove, profiles: profiles}
 	extension.RegisterTool(ext, extension.Tool[listInput]{
 		Name:         "schedule_list",
 		Description:  "List scheduled instructions with their next and most recent runs. Each run is a new agent conversation started by the kodelet-extension-schedule daemon, which must be running for schedules to fire.",
@@ -96,20 +139,7 @@ func registerTools(ext *extension.Extension, stores *storeOpener, now func() tim
 		OutputSchema: outputSchema[listOutput](),
 		Execute:      t.list,
 	})
-	extension.RegisterTool(ext, extension.Tool[createInput]{
-		Name:         "schedule_create",
-		Description:  "Schedule an instruction to run as a new agent conversation on a recurring cron schedule. Runs use this conversation's model profile." + t.approvalNote("schedule before it is saved"),
-		Short:        "Schedule an instruction to run as a new conversation on a cron schedule" + t.approvalShort(),
-		OutputSchema: outputSchema[scheduleOutput](),
-		Execute:      t.create,
-	})
-	extension.RegisterTool(ext, extension.Tool[updateInput]{
-		Name:         "schedule_update",
-		Description:  "Change a schedule by ID; omitted fields keep their values, and the model profile never changes. Set enabled to pause or resume it." + t.approvalNote("change"),
-		Short:        "Change, pause, or resume a schedule by ID" + t.approvalShort(),
-		OutputSchema: outputSchema[scheduleOutput](),
-		Execute:      t.update,
-	})
+	t.registerCreateAndUpdate(ext)
 	extension.RegisterTool(ext, extension.Tool[deleteInput]{
 		Name:         "schedule_delete",
 		Description:  "Delete a schedule by ID, with its run history." + t.approvalNote("deletion"),
@@ -118,6 +148,58 @@ func registerTools(ext *extension.Extension, stores *storeOpener, now func() tim
 		Execute:      t.delete,
 	})
 	registerRunTools(ext, t)
+}
+
+// registerCreateAndUpdate adds a profile field and list when profiles are configured.
+func (t *toolset) registerCreateAndUpdate(ext *extension.Extension) {
+	const (
+		createName  = "schedule_create"
+		createShort = "Schedule an instruction to run as a new conversation on a cron schedule"
+		updateName  = "schedule_update"
+		updateShort = "Change, pause, or resume a schedule by ID"
+	)
+	createDescription := "Schedule an instruction to run as a new agent conversation on a recurring cron schedule."
+	updateDescription := "Change a schedule by ID; omitted fields keep their values. Set enabled to pause or resume it."
+	if len(t.profiles) == 0 {
+		extension.RegisterTool(ext, extension.Tool[createInput]{
+			Name:         createName,
+			Description:  createDescription + " Runs use this conversation's model profile." + t.approvalNote("schedule before it is saved"),
+			Short:        createShort + t.approvalShort(),
+			OutputSchema: outputSchema[scheduleOutput](),
+			Execute: func(ctx context.Context, in createInput, tc *extension.ToolContext) (extension.ToolResult, error) {
+				return t.create(ctx, in, "", tc)
+			},
+		})
+		extension.RegisterTool(ext, extension.Tool[updateInput]{
+			Name:         updateName,
+			Description:  updateDescription + " The model profile never changes." + t.approvalNote("change"),
+			Short:        updateShort + t.approvalShort(),
+			OutputSchema: outputSchema[scheduleOutput](),
+			Execute: func(ctx context.Context, in updateInput, tc *extension.ToolContext) (extension.ToolResult, error) {
+				return t.update(ctx, in, nil, tc)
+			},
+		})
+		return
+	}
+	profiles := "\n\nModel profiles:" + t.profiles.list()
+	extension.RegisterTool(ext, extension.Tool[createProfileInput]{
+		Name:         createName,
+		Description:  createDescription + " Runs use the chosen model profile, or this conversation's when profile is omitted." + t.approvalNote("schedule before it is saved") + profiles,
+		Short:        createShort + ", with a chosen model profile" + t.approvalShort(),
+		OutputSchema: outputSchema[scheduleOutput](),
+		Execute: func(ctx context.Context, in createProfileInput, tc *extension.ToolContext) (extension.ToolResult, error) {
+			return t.create(ctx, in.createInput, in.Profile, tc)
+		},
+	})
+	extension.RegisterTool(ext, extension.Tool[updateProfileInput]{
+		Name:         updateName,
+		Description:  updateDescription + " Set profile to change the model profile." + t.approvalNote("change") + profiles,
+		Short:        updateShort + t.approvalShort(),
+		OutputSchema: outputSchema[scheduleOutput](),
+		Execute: func(ctx context.Context, in updateProfileInput, tc *extension.ToolContext) (extension.ToolResult, error) {
+			return t.update(ctx, in.updateInput, in.Profile, tc)
+		},
+	})
 }
 
 func (t *toolset) list(ctx context.Context, _ listInput, tc *extension.ToolContext) (extension.ToolResult, error) {
@@ -154,7 +236,8 @@ func (t *toolset) list(ctx context.Context, _ listInput, tc *extension.ToolConte
 	}, nil
 }
 
-func (t *toolset) create(ctx context.Context, in createInput, tc *extension.ToolContext) (extension.ToolResult, error) {
+// create creates a schedule; an empty profile uses the conversation's.
+func (t *toolset) create(ctx context.Context, in createInput, profile string, tc *extension.ToolContext) (extension.ToolResult, error) {
 	workspace, err := currentWorkspace(tc)
 	if err != nil {
 		return failure(err), nil
@@ -169,6 +252,11 @@ func (t *toolset) create(ctx context.Context, in createInput, tc *extension.Tool
 	spec, err := validateSpec(schedule.Schedule, now)
 	if err != nil {
 		return failure(err), nil
+	}
+	if strings.TrimSpace(profile) != "" {
+		if schedule.Profile, err = t.profiles.resolve(profile); err != nil {
+			return failure(err), nil
+		}
 	}
 	if schedule.Name, err = normalizeName(in.Name); err != nil {
 		return failure(err), nil
@@ -222,7 +310,8 @@ func (t *toolset) create(ctx context.Context, in createInput, tc *extension.Tool
 	}, nil
 }
 
-func (t *toolset) update(ctx context.Context, in updateInput, tc *extension.ToolContext) (extension.ToolResult, error) {
+// update changes a schedule; a nil profile keeps it.
+func (t *toolset) update(ctx context.Context, in updateInput, profile *string, tc *extension.ToolContext) (extension.ToolResult, error) {
 	workspace, err := currentWorkspace(tc)
 	if err != nil {
 		return failure(err), nil
@@ -285,6 +374,17 @@ func (t *toolset) update(ctx context.Context, in updateInput, tc *extension.Tool
 			updated.CWD = cwd
 			changes = append(changes, describeChange("Directory", current.CWD, cwd))
 			changed = append(changed, "directory")
+		}
+	}
+	if profile != nil {
+		resolved, err := t.profiles.resolve(*profile)
+		if err != nil {
+			return failure(err), nil
+		}
+		if resolved != current.Profile {
+			updated.Profile = resolved
+			changes = append(changes, describeChange("Profile", profileLabel(current.Profile), resolved))
+			changed = append(changed, "profile")
 		}
 	}
 	if in.Enabled != nil && *in.Enabled != current.Enabled {
@@ -404,11 +504,8 @@ func currentWorkspace(tc *extension.ToolContext) (string, error) {
 	return "", errors.New("schedules can only be managed from a conversation running on a Kodelet runner")
 }
 
-// currentProfile returns the model profile of this conversation, which is
-// often provided by an extension. Extensions cannot list the available
-// profiles, so schedules inherit the current one rather than letting the model
-// name one. The server resolves it again for the schedule's runner and
-// directory when each run starts.
+// currentProfile returns this conversation's profile, the default for new
+// schedules. The server resolves it again when each run starts.
 func currentProfile(tc *extension.ToolContext) string {
 	return strings.TrimSpace(tc.Profile)
 }

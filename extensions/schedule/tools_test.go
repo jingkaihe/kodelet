@@ -29,6 +29,8 @@ type toolHarness struct {
 
 	approve         bool
 	whileConfirming func() error
+	// profiles are the registered profiles.
+	profiles []extension.ProfileDeclaration
 }
 
 func newToolHarness(t *testing.T, runnerID string, interactive bool) *toolHarness {
@@ -38,11 +40,17 @@ func newToolHarness(t *testing.T, runnerID string, interactive bool) *toolHarnes
 
 func newToolHarnessWith(t *testing.T, runnerID string, interactive, autoApprove bool) *toolHarness {
 	t.Helper()
+	return newConfiguredToolHarness(t, runnerID, interactive, autoApprove, nil)
+}
+
+// newConfiguredToolHarness initializes the extension with config.
+func newConfiguredToolHarness(t *testing.T, runnerID string, interactive, autoApprove bool, config map[string]any) *toolHarness {
+	t.Helper()
 	stores := &storeOpener{path: filepath.Join(t.TempDir(), "schedule.db")}
 	t.Cleanup(func() { stores.Close() })
 	ext := extension.New(extension.Metadata{Name: "schedule", Version: "test"})
 	clock := &testClock{now: toolNow}
-	registerTools(ext, stores, clock.Now, autoApprove)
+	configureExtension(ext, stores, clock.Now, autoApprove)
 	cwd, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
 	th := &toolHarness{cwd: cwd, profile: "anthropic", approve: true, clock: clock}
@@ -64,9 +72,14 @@ func newToolHarnessWith(t *testing.T, runnerID string, interactive, autoApprove 
 	t.Cleanup(th.harness.Close)
 	params := extensiontest.DefaultInitializeParams()
 	params.Extension.RunnerID = runnerID
+	if config != nil {
+		params.Extension.Config = config
+	}
+	params.Capabilities["profiles"] = map[string]any{"remote": true}
 	init, err := th.harness.Initialize(t.Context(), &params)
 	require.NoError(t, err)
 	th.tools = init.Tools
+	th.profiles = init.Profiles
 	th.schemas = make(map[string]*jsonschema.Resolved)
 	for _, tool := range init.Tools {
 		require.NotNil(t, tool.OutputSchema, tool.Name)
@@ -316,4 +329,83 @@ func TestUpdateFailsIfTheScheduleChangesDuringApproval(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "daily", saved.Name)
 	assert.Equal(t, "edited elsewhere", saved.Instruction)
+}
+
+func TestToolsOfferConfiguredProfiles(t *testing.T) {
+	th := newConfiguredToolHarness(t, "runner-a", false, true, profilesConfig())
+	require.Len(t, th.profiles, 2, "the defined profiles are registered")
+	assert.Equal(t, extension.ProfileDeclaration{
+		Name: "schedule-deep", Hidden: true,
+		Options: map[string]any{"provider": "anthropic", "model": "claude-opus", "reasoning_effort": "high"},
+	}, th.profiles[0])
+	assert.False(t, th.profiles[1].Hidden)
+	for _, tool := range th.tools {
+		if tool.Name != "schedule_create" && tool.Name != "schedule_update" {
+			continue
+		}
+		assert.Contains(t, tool.Description, "- schedule-deep: Suitable for deep engineering work\n- schedule-visible\n- smart: Everyday checks and summaries", tool.Name)
+		properties := tool.InputSchema["properties"].(map[string]any)
+		assert.Contains(t, properties, "profile", tool.Name)
+		assert.Contains(t, properties, "instruction", tool.Name)
+	}
+
+	inherited := th.success(t, "schedule_create", dailyInput())
+	assert.Equal(t, "anthropic", decodeValue[scheduleOutput](t, inherited.StructuredContent).Schedule.Profile, "omitted profiles use this conversation's")
+	input := dailyInput()
+	input["name"], input["profile"] = "deep", "deep"
+	deep := decodeValue[scheduleOutput](t, th.success(t, "schedule_create", input).StructuredContent).Schedule
+	assert.Equal(t, "schedule-deep", deep.Profile, "a defined profile is chosen by its configured name")
+	input["name"], input["profile"] = "unknown", "opus"
+	assert.Contains(t, th.call(t, "schedule_create", input).Error, `unknown profile "opus"`)
+
+	updated := th.success(t, "schedule_update", map[string]any{"id": deep.ID, "profile": "smart"})
+	assert.Equal(t, "smart", decodeValue[scheduleOutput](t, updated.StructuredContent).Schedule.Profile)
+	assert.Contains(t, presentationOf(t, updated).Body, "**Changed:** profile")
+	assert.Contains(t, th.call(t, "schedule_update", map[string]any{"id": deep.ID, "profile": "smart"}).Error, "no changes")
+	assert.Contains(t, th.call(t, "schedule_update", map[string]any{"id": deep.ID, "profile": "opus"}).Error, "unknown profile")
+}
+
+func TestToolsWithoutProfilesKeepTheConversationProfile(t *testing.T) {
+	th := newToolHarness(t, "runner-a", true)
+	assert.Empty(t, th.profiles)
+	for _, tool := range th.tools {
+		if tool.Name == "schedule_create" || tool.Name == "schedule_update" {
+			assert.NotContains(t, tool.InputSchema["properties"], "profile", tool.Name)
+		}
+	}
+	input := dailyInput()
+	input["profile"] = "deep"
+	_, err := th.harness.ExecuteTool(t.Context(), "schedule_create", input)
+	assert.ErrorContains(t, err, "unexpected additional properties")
+}
+
+func TestDefinedProfilesNeedHostSupport(t *testing.T) {
+	stores := &storeOpener{path: filepath.Join(t.TempDir(), "schedule.db")}
+	t.Cleanup(func() { stores.Close() })
+	ext := extension.New(extension.Metadata{Name: "schedule"})
+	configureExtension(ext, stores, time.Now, true)
+	harness := extensiontest.New(ext, nil)
+	t.Cleanup(harness.Close)
+	params := extensiontest.DefaultInitializeParams()
+	params.Extension.Config = profilesConfig()
+	init, err := harness.Initialize(t.Context(), &params)
+	require.NoError(t, err, "an older host still gets the tools")
+	assert.Empty(t, init.Profiles)
+	for _, tool := range init.Tools {
+		if tool.Name == "schedule_create" {
+			assert.Contains(t, tool.Description, "- smart: Everyday checks")
+			assert.NotContains(t, tool.Description, "schedule-deep")
+		}
+	}
+}
+
+func TestInvalidProfilesFailInitialization(t *testing.T) {
+	ext := extension.New(extension.Metadata{Name: "schedule"})
+	configureExtension(ext, &storeOpener{path: filepath.Join(t.TempDir(), "schedule.db")}, time.Now, true)
+	harness := extensiontest.New(ext, nil)
+	t.Cleanup(harness.Close)
+	params := extensiontest.DefaultInitializeParams()
+	params.Extension.Config = map[string]any{"profiles": map[string]any{"deep": map[string]any{"provider": "openai", "model": "m", "base_url": "https://evil.example"}}}
+	_, err := harness.Initialize(t.Context(), &params)
+	assert.ErrorContains(t, err, `invalid schedule extension config: invalid profile "deep": base_url cannot be set`)
 }

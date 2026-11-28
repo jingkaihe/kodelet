@@ -312,7 +312,7 @@ func runExtension(ctx context.Context, settings extensionSettings) error {
 	stores := &storeOpener{path: settings.DBPath}
 	defer stores.Close()
 	ext := extension.New(extension.Metadata{Name: "schedule", Version: version})
-	registerTools(ext, stores, time.Now, settings.AutoApprove)
+	configureExtension(ext, stores, time.Now, settings.AutoApprove)
 	if err := ext.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}

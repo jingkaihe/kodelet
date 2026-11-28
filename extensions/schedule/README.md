@@ -54,6 +54,28 @@ By default, the tools create, update, and delete schedules without asking, inclu
 
 To require approval, set `auto_approve: false` in the schedule config file (see [settings](#run-the-daemon)) and `/reload`, or set `KODELET_SCHEDULE_AUTO_APPROVE=false` in the environment where the Kodelet server starts and restart the server. Changes then need the user's approval in an interactive client; without one, for example in `kodelet run` or a scheduled run, the tools refuse. The extension reads this only from its own settings, not from Kodelet's `extensions.config`, so a repository's `kodelet-config.yaml` cannot turn approval off.
 
+### Model profiles
+
+A schedule's runs use the model profile of the conversation that created it. To let agents choose a profile instead, list profiles under the extension's entry in Kodelet's `extensions.config`:
+
+```yaml
+# ~/.kodelet/config.yaml
+extensions:
+  config:
+    schedule:
+      profiles:
+        smart: Everyday checks and summaries
+        deep:
+          description: Suitable for deep engineering work
+          provider: anthropic
+          model: claude-opus-4-8
+          reasoning_effort: high
+```
+
+A name with only a description, like `smart`, refers to a profile Kodelet already has, such as one under `profiles` in its config. An entry with `provider` and `model` defines a new profile, which accepts the same settings as Kodelet's profiles. The extension registers it as `schedule-<name>`, such as `schedule-deep`, so it never clashes with Kodelet's own profiles; agents can use either name. Defined profiles are hidden from the model pickers unless they set `hidden: false`. They cannot set `base_url` or `api_key_env_var`, because a repository's `kodelet-config.yaml` can also set `extensions.config`; define profiles with custom endpoints or credentials in Kodelet's own `profiles` instead.
+
+`schedule_create` and `schedule_update` then take an optional `profile`, and their descriptions list each profile with its description. Without one, a new schedule uses the conversation's profile and an update keeps the schedule's. Run `/reload` after changing the list. A run whose profile no longer exists fails with the server's error.
+
 ### Schedule syntax
 
 Schedules use five-field cron expressions (`minute hour day-of-month month day-of-week`) or descriptors such as `@hourly`, `@daily`, `@weekly`, and `@every 6h`. Prefix `CRON_TZ=<IANA zone>` to pick a timezone, for example `CRON_TZ=Europe/London 0 9 * * 1-5`; otherwise the host's local time applies. Schedules may fire at most once a minute.
