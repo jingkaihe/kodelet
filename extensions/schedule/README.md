@@ -50,7 +50,7 @@ Results show users Markdown, such as a table of runs or a run's final output, wh
 | `schedule_history` | `{runs}`, each with its outcome, `durationSeconds`, and `stats` |
 | `schedule_run_details` | `{run}`, adding `instruction`, `cwd`, `profile`, and `output` |
 
-By default, the tools create, update, and delete schedules without asking, including in `kodelet run` and in scheduled runs, and results note that a change was approved automatically. An agent with a shell could already schedule work with cron or systemd; these tools keep that work visible in `schedule_list`, recorded in its run history, and bounded by the daemon's run timeout and concurrency limit.
+By default, the tools create, update, and delete schedules without asking, including in `kodelet run` and in scheduled runs. An agent with a shell could already schedule work with cron or systemd; these tools keep that work visible in `schedule_list`, recorded in its run history, and bounded by the daemon's run timeout and concurrency limit.
 
 To require approval, set `auto_approve: false` in the schedule config file (see [settings](#run-the-daemon)) and `/reload`, or set `KODELET_SCHEDULE_AUTO_APPROVE=false` in the environment where the Kodelet server starts and restart the server. Changes then need the user's approval in an interactive client; without one, for example in `kodelet run` or a scheduled run, the tools refuse. The extension reads this only from its own settings, not from Kodelet's `extensions.config`, so a repository's `kodelet-config.yaml` cannot turn approval off.
 

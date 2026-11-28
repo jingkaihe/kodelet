@@ -236,40 +236,27 @@ func TestMutationsRequireApproval(t *testing.T) {
 	})
 }
 
-func TestAutoApproveSkipsUIAndLabelsMutations(t *testing.T) {
+func TestAutoApproveSkipsUI(t *testing.T) {
 	th := newToolHarnessWith(t, "runner-a", false, true)
 	th.profile = "" // unattended runs may use the server default
 	created := th.success(t, "schedule_create", dailyInput())
 	schedule := decodeValue[scheduleOutput](t, created.StructuredContent).Schedule
 	assert.Empty(t, schedule.Profile)
 	assert.Contains(t, presentationOf(t, created).Body, "Profile:** server default")
-	for _, result := range []extension.ToolResult{
-		created,
-		th.success(t, "schedule_update", map[string]any{"id": schedule.ID, "enabled": false}),
-		th.success(t, "schedule_delete", map[string]any{"id": schedule.ID}),
-	} {
-		assert.Contains(t, presentationOf(t, result).Body, "Approved automatically")
-	}
+	th.success(t, "schedule_update", map[string]any{"id": schedule.ID, "enabled": false})
+	th.success(t, "schedule_delete", map[string]any{"id": schedule.ID})
 	assert.Empty(t, th.harness.HostCalls())
 	_, err := th.store.Get(t.Context(), "runner-a", schedule.ID)
 	assert.ErrorIs(t, err, errNotFound)
 }
 
-func TestToolDescriptionsReflectApproval(t *testing.T) {
-	for _, auto := range []bool{false, true} {
-		th := newToolHarnessWith(t, "runner-a", false, auto)
-		for _, tool := range th.tools {
-			assert.NotEmpty(t, tool.Short, tool.Name)
-			switch tool.Name {
-			case "schedule_create", "schedule_update", "schedule_delete":
-				if auto {
-					assert.NotContains(t, tool.Description+tool.Short, "approv", tool.Name)
-				} else {
-					assert.Contains(t, tool.Description, "must approve", tool.Name)
-					assert.Contains(t, tool.Short, "needs user approval", tool.Name)
-				}
-			}
-		}
+func TestToolDescriptionsDoNotDependOnApproval(t *testing.T) {
+	asking := newToolHarnessWith(t, "runner-a", false, false)
+	auto := newToolHarnessWith(t, "runner-a", false, true)
+	assert.Equal(t, asking.tools, auto.tools)
+	for _, tool := range auto.tools {
+		assert.NotEmpty(t, tool.Short, tool.Name)
+		assert.NotContains(t, tool.Description+tool.Short, "approv", tool.Name)
 	}
 }
 

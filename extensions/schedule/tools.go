@@ -142,8 +142,8 @@ func registerTools(ext *extension.Extension, stores *storeOpener, now func() tim
 	t.registerCreateAndUpdate(ext)
 	extension.RegisterTool(ext, extension.Tool[deleteInput]{
 		Name:         "schedule_delete",
-		Description:  "Delete a schedule by ID, with its run history." + t.approvalNote("deletion"),
-		Short:        "Delete a schedule and its run history by ID" + t.approvalShort(),
+		Description:  "Delete a schedule by ID, with its run history.",
+		Short:        "Delete a schedule and its run history by ID.",
 		OutputSchema: outputSchema[deleteOutput](),
 		Execute:      t.delete,
 	})
@@ -163,8 +163,8 @@ func (t *toolset) registerCreateAndUpdate(ext *extension.Extension) {
 	if len(t.profiles) == 0 {
 		extension.RegisterTool(ext, extension.Tool[createInput]{
 			Name:         createName,
-			Description:  createDescription + " Runs use this conversation's model profile." + t.approvalNote("schedule before it is saved"),
-			Short:        createShort + t.approvalShort(),
+			Description:  createDescription + " Runs use this conversation's model profile.",
+			Short:        createShort + ".",
 			OutputSchema: outputSchema[scheduleOutput](),
 			Execute: func(ctx context.Context, in createInput, tc *extension.ToolContext) (extension.ToolResult, error) {
 				return t.create(ctx, in, "", tc)
@@ -172,8 +172,8 @@ func (t *toolset) registerCreateAndUpdate(ext *extension.Extension) {
 		})
 		extension.RegisterTool(ext, extension.Tool[updateInput]{
 			Name:         updateName,
-			Description:  updateDescription + " The model profile never changes." + t.approvalNote("change"),
-			Short:        updateShort + t.approvalShort(),
+			Description:  updateDescription + " The model profile never changes.",
+			Short:        updateShort + ".",
 			OutputSchema: outputSchema[scheduleOutput](),
 			Execute: func(ctx context.Context, in updateInput, tc *extension.ToolContext) (extension.ToolResult, error) {
 				return t.update(ctx, in, nil, tc)
@@ -184,8 +184,8 @@ func (t *toolset) registerCreateAndUpdate(ext *extension.Extension) {
 	profiles := "\n\nModel profiles:" + t.profiles.list()
 	extension.RegisterTool(ext, extension.Tool[createProfileInput]{
 		Name:         createName,
-		Description:  createDescription + " Runs use the chosen model profile, or this conversation's when profile is omitted." + t.approvalNote("schedule before it is saved") + profiles,
-		Short:        createShort + ", with a chosen model profile" + t.approvalShort(),
+		Description:  createDescription + " Runs use the chosen model profile, or this conversation's when profile is omitted." + profiles,
+		Short:        createShort + ", with a chosen model profile.",
 		OutputSchema: outputSchema[scheduleOutput](),
 		Execute: func(ctx context.Context, in createProfileInput, tc *extension.ToolContext) (extension.ToolResult, error) {
 			return t.create(ctx, in.createInput, in.Profile, tc)
@@ -193,8 +193,8 @@ func (t *toolset) registerCreateAndUpdate(ext *extension.Extension) {
 	})
 	extension.RegisterTool(ext, extension.Tool[updateProfileInput]{
 		Name:         updateName,
-		Description:  updateDescription + " Set profile to change the model profile." + t.approvalNote("change") + profiles,
-		Short:        updateShort + t.approvalShort(),
+		Description:  updateDescription + " Set profile to change the model profile." + profiles,
+		Short:        updateShort + ".",
 		OutputSchema: outputSchema[scheduleOutput](),
 		Execute: func(ctx context.Context, in updateProfileInput, tc *extension.ToolContext) (extension.ToolResult, error) {
 			return t.update(ctx, in.updateInput, in.Profile, tc)
@@ -306,7 +306,7 @@ func (t *toolset) create(ctx context.Context, in createInput, profile string, tc
 	return extension.ToolResult{
 		Content:           b.String(),
 		StructuredContent: scheduleOutput{Schedule: newScheduleView(schedule), UpcomingRuns: runs, Daemon: health},
-		Data:              t.noteApproval(createPresentation(schedule, runs, health)),
+		Data:              createPresentation(schedule, runs, health),
 	}, nil
 }
 
@@ -442,7 +442,7 @@ func (t *toolset) update(ctx context.Context, in updateInput, profile *string, t
 	return extension.ToolResult{
 		Content:           b.String(),
 		StructuredContent: scheduleOutput{Schedule: newScheduleView(updated), UpcomingRuns: runs, Daemon: health},
-		Data:              t.noteApproval(updatePresentation(updated, changed, runs, health)),
+		Data:              updatePresentation(updated, changed, runs, health),
 	}, nil
 }
 
@@ -468,7 +468,7 @@ func (t *toolset) delete(ctx context.Context, in deleteInput, tc *extension.Tool
 	return extension.ToolResult{
 		Content:           fmt.Sprintf("Deleted schedule %q (%s).", current.Name, current.ID),
 		StructuredContent: deleteOutput{ID: current.ID, Name: current.Name},
-		Data:              t.noteApproval(deletePresentation(current)),
+		Data:              deletePresentation(current),
 	}, nil
 }
 
@@ -607,36 +607,6 @@ func (t *toolset) confirm(ctx context.Context, tc *extension.ToolContext, title,
 	}
 	return nil
 }
-
-// approvalNote tells the model how a change is approved; what names it.
-func (t *toolset) approvalNote(what string) string {
-	if t.autoApprove {
-		return ""
-	}
-	return " The user must approve the " + what + "; the call fails if they decline or cannot be asked."
-}
-
-// approvalShort ends a one-line tool summary.
-func (t *toolset) approvalShort() string {
-	if t.autoApprove {
-		return "."
-	}
-	return "; needs user approval."
-}
-
-// noteApproval tells users when a change was saved without asking them.
-func (t *toolset) noteApproval(data map[string]any) map[string]any {
-	if !t.autoApprove {
-		return data
-	}
-	if presentation, ok := data["presentation"].(extension.Presentation); ok {
-		presentation.Body = strings.TrimSpace(presentation.Body + "\n\n" + autoApprovedNote)
-		data["presentation"] = presentation
-	}
-	return data
-}
-
-const autoApprovedNote = "_Approved automatically; set `auto_approve: false` to require approval._"
 
 func describeSchedule(schedule Schedule, runs []time.Time) string {
 	var b strings.Builder
