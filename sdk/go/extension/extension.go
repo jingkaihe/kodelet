@@ -36,6 +36,10 @@ type Extension struct {
 	shortcuts []*registeredShortcut
 	handlers  []*registeredHandler
 	names     map[string]struct{}
+
+	initHooks []func(context.Context, InitializeParams) error
+	initOnce  sync.Once
+	initErr   error
 }
 
 type registeredTool struct {
@@ -335,7 +339,42 @@ func profileOptions(profile ProfileRegistration) (map[string]any, error) {
 	return options, nil
 }
 
-func (e *Extension) initialize(params InitializeParams) (InitializeResult, error) {
+// OnInitialize runs fn once, at the first initialization and before
+// registrations are declared, so fn can register from params.Extension.Config.
+// An error or panic fails every initialization.
+func (e *Extension) OnInitialize(fn func(ctx context.Context, params InitializeParams) error) {
+	if fn == nil {
+		panic("extension: OnInitialize requires a function")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.initHooks = append(e.initHooks, fn)
+}
+
+func (e *Extension) runInitHooks(ctx context.Context, params InitializeParams) error {
+	e.initOnce.Do(func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				e.initErr = fmt.Errorf("extension: initialize hook panicked: %v", recovered)
+			}
+		}()
+		e.mu.RLock()
+		hooks := slices.Clone(e.initHooks)
+		e.mu.RUnlock()
+		for _, hook := range hooks {
+			if err := hook(ctx, params); err != nil {
+				e.initErr = err
+				return
+			}
+		}
+	})
+	return e.initErr
+}
+
+func (e *Extension) initialize(ctx context.Context, params InitializeParams) (InitializeResult, error) {
+	if err := e.runInitHooks(ctx, params); err != nil {
+		return InitializeResult{}, err
+	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	if len(e.profiles) > 0 && !capabilityTrue(params.Capabilities, "profiles", "remote") {

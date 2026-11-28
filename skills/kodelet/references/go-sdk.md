@@ -60,6 +60,17 @@ extension.On(ext, extension.EventAgentInit, func(ctx context.Context, ev extensi
 }, extension.WithPriority(10))
 ```
 
+To register from the extension's `extensions.config` entry, use `OnInitialize`. Its hooks run once, at the first initialization, before the extension declares its registrations; an error fails initialization:
+
+```go
+ext.OnInitialize(func(ctx context.Context, params extension.InitializeParams) error {
+	if model, ok := params.Extension.Config["model"].(string); ok {
+		ext.RegisterProfile(extension.ProfileRegistration{Name: "weather-fast", Provider: "openai", Model: model, Hidden: true})
+	}
+	return nil
+})
+```
+
 Command results are `Respond`, `RunAgent`, or the zero value to pass; struct inputs that fail validation also pass. Event keys (`EventToolCall`, `EventToolResult`, `EventUserMessage`, `EventAgentFinished`, ...) decode typed payloads; `CustomEvent(name)` covers others. A zero `EventResult` means no change; `Block` stops the chain; `Input`/`Output` replace values for later handlers. `SystemPromptPatch` fields are pointers (`extension.Ptr`), so an empty `Replace` clears the prompt.
 
 Call contexts carry `CWD`, `ConversationID`, `RunnerID`, and other metadata, plus `Log` (`*slog.Logger` writing JSON to stderr), `Storage`, `ResolveWorkspacePath`, `UI` (`Input`, `Confirm`, `Select`, `Notify`, `AppendTranscript`, `SetWidget`, `RemoveWidget`, `OpenSurface`), `AcquireBackgroundTask`, and on tools `Update`, `ForkConversation`, and `AcquireBrowser`. The handler `ctx` is cancelled with the request. Use the standard library for files and processes.

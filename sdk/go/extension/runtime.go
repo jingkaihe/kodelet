@@ -332,7 +332,7 @@ func (r *Runtime) dispatch(ctx context.Context, request *activeRequest, init *In
 		if err := decodeParams(msg.Params, &params); err != nil {
 			return nil, err
 		}
-		initialized, err := r.ext.initialize(params)
+		initialized, err := r.ext.initialize(ctx, params)
 		if err != nil {
 			return nil, err
 		}

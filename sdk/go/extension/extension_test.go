@@ -525,3 +525,73 @@ func TestTimeoutsPreserveExplicitZeroAndMergeEventOptions(t *testing.T) {
 	assert.InDelta(t, 0, *initialized.Subscriptions[1].TimeoutInSec, 0)
 	assert.Nil(t, initialized.Subscriptions[2].TimeoutInSec)
 }
+
+type greetInput struct {
+	Name string `json:"name"`
+}
+
+func TestInitializeHooksRegisterFromConfigOnce(t *testing.T) {
+	ext := extension.New(extension.Metadata{Name: "configured"})
+	var runs []string
+	ext.OnInitialize(func(_ context.Context, params extension.InitializeParams) error {
+		runs = append(runs, "first")
+		greeting, _ := params.Extension.Config["greeting"].(string)
+		extension.RegisterTool(ext, extension.Tool[greetInput]{
+			Name:        "greet",
+			Description: "Say " + greeting,
+			Execute: func(_ context.Context, in greetInput, _ *extension.ToolContext) (extension.ToolResult, error) {
+				return extension.ToolResult{Content: greeting + " " + in.Name}, nil
+			},
+		})
+		ext.RegisterProfile(extension.ProfileRegistration{Name: "configured-fast", Provider: "openai", Model: "gpt-5", Hidden: true})
+		return nil
+	})
+	ext.OnInitialize(func(context.Context, extension.InitializeParams) error {
+		runs = append(runs, "second")
+		return nil
+	})
+	h := newHarness(t, ext, nil)
+	params := extensiontest.DefaultInitializeParams()
+	params.Extension.Config = map[string]any{"greeting": "hello"}
+	params.Capabilities["profiles"] = map[string]any{"remote": true}
+
+	initialized, err := h.Initialize(t.Context(), &params)
+	require.NoError(t, err)
+	require.Len(t, initialized.Tools, 1)
+	assert.Equal(t, "Say hello", initialized.Tools[0].Description)
+	assert.Equal(t, "object", initialized.Tools[0].InputSchema["type"])
+	require.Len(t, initialized.Profiles, 1)
+	assert.Equal(t, "configured-fast", initialized.Profiles[0].Name)
+	result, err := h.ExecuteTool(t.Context(), "greet", map[string]any{"name": "Ada"})
+	require.NoError(t, err)
+	assert.Equal(t, "hello Ada", result.Content)
+	_, err = h.ExecuteTool(t.Context(), "greet", map[string]any{"name": 1})
+	require.ErrorContains(t, err, "invalid input", "tools registered by hooks keep schema validation")
+
+	_, err = h.Initialize(t.Context(), &params)
+	require.NoError(t, err, "a second initialization does not register again")
+	assert.Equal(t, []string{"first", "second"}, runs)
+}
+
+func TestInitializeHookFailuresFailEveryInitialization(t *testing.T) {
+	for name, hook := range map[string]func(context.Context, extension.InitializeParams) error{
+		"error": func(context.Context, extension.InitializeParams) error { return fmt.Errorf("bad profiles config") },
+		"panic": func(context.Context, extension.InitializeParams) error { panic("bad profiles config") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			ext := extension.New(extension.Metadata{})
+			calls := 0
+			ext.OnInitialize(func(ctx context.Context, params extension.InitializeParams) error {
+				calls++
+				return hook(ctx, params)
+			})
+			h := newHarness(t, ext, nil)
+			_, err := h.Initialize(t.Context(), nil)
+			require.ErrorContains(t, err, "bad profiles config")
+			_, err = h.Initialize(t.Context(), nil)
+			require.ErrorContains(t, err, "bad profiles config")
+			assert.Equal(t, 1, calls)
+		})
+	}
+	assert.Panics(t, func() { extension.New(extension.Metadata{}).OnInitialize(nil) })
+}
