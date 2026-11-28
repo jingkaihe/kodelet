@@ -539,7 +539,7 @@ func (t *toolset) noteApproval(data map[string]any) map[string]any {
 	return data
 }
 
-const autoApprovedNote = "_Approved automatically by the `auto_approve` setting._"
+const autoApprovedNote = "_Approved automatically; set `auto_approve: false` to require approval._"
 
 func describeSchedule(schedule Schedule, runs []time.Time) string {
 	var b strings.Builder

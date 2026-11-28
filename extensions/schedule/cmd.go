@@ -43,8 +43,9 @@ schedules of their workspace. Run "daemon" separately to start due runs.
 
 Settings come from flags, KODELET_SCHEDULE_* environment variables (for
 example KODELET_SCHEDULE_DB or KODELET_SCHEDULE_POLL_INTERVAL), and the config
-file, in that order of precedence. Set auto_approve to true to let the
-extension create, change, and delete schedules without asking the user.`
+file, in that order of precedence. The extension creates, changes, and
+deletes schedules without asking the user; set auto_approve to false to
+require approval.`
 
 // cli holds the settings shared by commands and the entry points they run,
 // which tests replace.
@@ -58,6 +59,10 @@ func newCLI() *cli {
 	v := viper.New()
 	v.SetEnvPrefix("KODELET_SCHEDULE")
 	v.AutomaticEnv()
+	// An agent with a shell can already schedule work with cron or systemd;
+	// these tools keep that work visible and bounded, so they do not ask by
+	// default.
+	v.SetDefault(keyAutoApprove, true)
 	return &cli{v: v, runExtension: runExtension, runDaemon: runDaemon}
 }
 
@@ -242,9 +247,10 @@ func expandHome(path string) (string, error) {
 // extensionSettings are the resolved options of the extension mode.
 type extensionSettings struct {
 	DBPath string
-	// AutoApprove saves schedule changes without asking the user. It is read
-	// only from this executable's settings, never from Kodelet's
-	// extensions.config, which a repository's kodelet-config.yaml can set.
+	// AutoApprove saves schedule changes without asking the user; it is on by
+	// default. It is read only from this executable's settings, never from
+	// Kodelet's extensions.config, so a repository's kodelet-config.yaml
+	// cannot turn approval off.
 	AutoApprove bool
 }
 

@@ -56,7 +56,7 @@ func TestExtensionDefaultsAndLocalConfig(t *testing.T) {
 	require.NoError(t, tc.execute(t))
 	require.NotNil(t, tc.extension)
 	assert.Equal(t, filepath.Join(dir, "schedule.db"), tc.extension.DBPath)
-	assert.False(t, tc.extension.AutoApprove)
+	assert.True(t, tc.extension.AutoApprove, "changes are approved automatically by default")
 	assert.Empty(t, tc.out.String(), "stdout is reserved for the protocol")
 
 	home := t.TempDir()
@@ -64,12 +64,17 @@ func TestExtensionDefaultsAndLocalConfig(t *testing.T) {
 	require.NoError(t, os.MkdirAll(dir, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(`
 db: ~/shared.db
-auto_approve: true
+auto_approve: false
 `), 0o600))
 	require.NoError(t, tc.execute(t))
 	require.NotNil(t, tc.extension)
 	assert.Equal(t, filepath.Join(home, "shared.db"), tc.extension.DBPath)
-	assert.True(t, tc.extension.AutoApprove)
+	assert.False(t, tc.extension.AutoApprove)
+
+	t.Setenv("KODELET_SCHEDULE_AUTO_APPROVE", "true")
+	require.NoError(t, tc.execute(t))
+	require.NotNil(t, tc.extension)
+	assert.True(t, tc.extension.AutoApprove, "environment overrides config")
 
 	t.Setenv("KODELET_SCHEDULE_AUTO_APPROVE", "sometimes")
 	assert.ErrorContains(t, tc.execute(t), "invalid auto_approve")
